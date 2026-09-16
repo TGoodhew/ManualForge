@@ -111,7 +111,9 @@ internal static class StatusCommand
         Console.WriteLine($"  Outstanding: {outstanding.Length:N0} files, {pages:N0} pages");
 
         if (pages > 0)
-            Console.WriteLine($"  At the measured 55.9 pages/min on CUDA: {pages / 55.9 / 60:F1} hours");
+            Console.WriteLine(
+                $"  At the measured {MeasuredThroughput.PagesPerMinuteOnGpu:F0} pages/min on CUDA: " +
+                $"{MeasuredThroughput.HoursFor(pages):F1} hours");
 
         // Smallest first, which is the order they will be processed in.
         foreach (var record in outstanding.Take(limit))

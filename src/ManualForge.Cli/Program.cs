@@ -48,6 +48,8 @@ try
         "run" => await RunCommand.RunAsync(arguments, loggerFactory, logPath, cancellation.Token),
         "index" => await IndexCommand.RunAsync(arguments, loggerFactory, cancellation.Token),
         "search" => SearchCommand.Run(arguments),
+        "truth" => await TruthCommand.RunAsync(arguments, loggerFactory, cancellation.Token),
+        "benchmark" => await BenchmarkCommand.RunAsync(arguments, loggerFactory, cancellation.Token),
         _ => Unknown(arguments.Command),
     };
 }

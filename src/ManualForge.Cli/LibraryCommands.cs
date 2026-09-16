@@ -124,7 +124,8 @@ internal static class SurveyCommand
             var spared = duplicates.Sum(r => (long)r.PageCount);
             Console.WriteLine(
                 $"  {duplicates.Length:N0} file(s) are byte-identical copies of another and will be copied " +
-                $"rather than recognised, sparing {spared:N0} pages (~{spared / 55.9 / 60:F1} hours).");
+                $"rather than recognised, sparing {spared:N0} pages " +
+                $"(~{MeasuredThroughput.HoursFor(spared):F1} hours).");
             Console.WriteLine();
         }
 
@@ -139,9 +140,9 @@ internal static class SurveyCommand
                           (done > 0 ? $"  ({done:N0} already done)" : ""));
         if (workPages > 0)
         {
-            // 55.9 pages/min is what the 3060 Ti measured on this corpus at 300 dpi.
-            var hours = workPages / 55.9 / 60;
-            Console.WriteLine($"  Estimated at 55.9 pages/min on CUDA: {hours:F1} hours");
+            var hours = MeasuredThroughput.HoursFor(workPages);
+            Console.WriteLine(
+                $"  Estimated at {MeasuredThroughput.PagesPerMinuteOnGpu:F0} pages/min on CUDA: {hours:F1} hours");
         }
     }
 

@@ -72,6 +72,26 @@ public sealed record PipelineReport(
 /// The document's stable path in the library. Not <paramref name="SourcePath"/>, which for a
 /// flattened or stripped document is a temporary file with a different name on every attempt.
 /// </param>
+/// <summary>
+/// Throughput figures used to estimate how long work will take.
+///
+/// These are measurements, not constants, and they go stale: the first was 55.9 pages/min when
+/// recognition was serial, which the estimates went on quoting after the pipeline had made it 104.
+/// Named here so that when it changes again there is one place to change it.
+/// </summary>
+public static class MeasuredThroughput
+{
+    /// <summary>Pages a minute on an RTX 3060 Ti at 300 dpi, two pages in flight, measured end to end.</summary>
+    public const double PagesPerMinuteOnGpu = 104.1;
+
+    /// <summary>The same corpus on 24 CPU threads, for a machine with no usable GPU.</summary>
+    public const double PagesPerMinuteOnCpu = 15.2;
+
+    /// <summary>Hours for a number of pages, at whichever rate applies.</summary>
+    public static double HoursFor(long pages, bool usingGpu = true) =>
+        pages / (usingGpu ? PagesPerMinuteOnGpu : PagesPerMinuteOnCpu) / 60.0;
+}
+
 public sealed record RecognitionJob(string SourcePath, string CacheKey, int PageCount);
 
 /// <summary>

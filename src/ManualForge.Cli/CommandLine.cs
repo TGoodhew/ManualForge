@@ -109,6 +109,8 @@ internal sealed class CommandLine
               manualforge run <folder>                   Classify, flatten, OCR and replace, resumably
               manualforge index <folder>                 Build the full-text index over a library
               manualforge search <query> --library <f>    Query it: manual, page and snippet
+              manualforge truth <input.pdf> --pages …     Seed hand-correctable ground-truth pages
+              manualforge benchmark --truth <folder>      Measure character and word error rates
               manualforge gpu                            Report which execution provider is active
 
             ocr options:
@@ -154,6 +156,19 @@ internal sealed class CommandLine
               --sidecars <folder>     Also write one plain-text file per document.
               --limit <n>             Results to show. Default 10.
               --show-duplicates       List identical copies separately instead of folding them.
+
+            truth / benchmark options:
+              --truth <folder>        The ground-truth set: one corrected text file per page.
+              --out <folder>          Where `truth` writes the set to seed.
+              --pages <spec>          Pages to take as ground truth, e.g. 6,29,31.
+              --kind <name>           prose | table | schematic | mixed. Reported separately,
+                                      because one average hides the case that is actually bad.
+              --library <folder>      Root the manifest's relative paths resolve against.
+              --from-text-layer       Seed from the text already in the PDF rather than by OCR.
+              --sweep                 Measure deskew, denoise and resolution against each other.
+              --score-existing        Also score the text already in the files - point the truth
+                                      set at another engine's output to compare against it.
+              --csv <path>            Write per-page detail.
 
             general options:
               --models <path>         Model cache directory.
