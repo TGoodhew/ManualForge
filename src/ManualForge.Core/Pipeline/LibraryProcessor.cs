@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using ManualForge.Core.Classification;
+using ManualForge.Core.Ocr;
 using ManualForge.Core.Pdf;
 using ManualForge.Core.State;
 using ManualForge.Core.Verification;
@@ -85,8 +86,11 @@ public sealed record FileOutcome(
 public sealed class LibraryProcessor(
     SearchablePdfBuilder? builder,
     DocumentClassifier classifier,
-    ILogger<LibraryProcessor>? logger = null)
+    ILogger<LibraryProcessor>? logger = null,
+    IPageOcrCache? pageCache = null)
 {
+    private readonly IPageOcrCache _pageCache = pageCache ?? NullPageOcrCache.Instance;
+
     // Null is legitimate: Survey classifies without ever running OCR, and constructing an engine
     // just to look at text layers would download models and occupy the GPU for nothing.
     private readonly SearchablePdfBuilder? _builder = builder;
@@ -297,15 +301,21 @@ public sealed class LibraryProcessor(
             var report = _builder!.BuildAsync(
                 source,
                 outputPath,
-                new BuildOptions { Overwrite = true },
+                // Keyed on the library path, not on `source`, which for a flattened or stripped
+                // document is a temporary file with a new name on every attempt.
+                new BuildOptions { Overwrite = true, CacheKey = path },
                 progress: null,
                 cancellationToken).GetAwaiter().GetResult();
 
-            // Recorded in one go once the document is finished. Until the writer can append to a
-            // partly-built document these rows are a record of what happened rather than something
-            // a resumed run can act on, so an interrupted document restarts from its first page.
             foreach (var page in report.Pages)
                 store.RecordPage(path, page.PageNumber, PageStatus.Completed, page.WordsWritten, 0, (long)page.OcrTime.TotalMilliseconds);
+
+            if (report.ResumedPages > 0)
+            {
+                _logger.LogInformation(
+                    "Resumed {Resumed} of {Total} pages of {Path} from an earlier attempt",
+                    report.ResumedPages, report.Pages.Count, path);
+            }
 
             // Step 4: verify before anything is replaced. Opens cleanly, same page count, and a
             // text layer that is actually there.
@@ -376,6 +386,11 @@ public sealed class LibraryProcessor(
             store.UpdateFingerprint(path);
             store.SetStatus(path, FileStatus.Completed);
 
+            // The document is finished, so its cached recognition has done its job. Releasing it
+            // here keeps the cache to the documents actually in flight rather than the whole
+            // library.
+            _pageCache.Clear(path);
+
             _logger.LogInformation(
                 "Completed {Path}: {Words} words, worst deviation {Deviation:F3} pt, original kept at {Original}",
                 path, report.TotalWordsWritten, worstDeviation, originalDestination);
@@ -384,8 +399,9 @@ public sealed class LibraryProcessor(
         }
         catch (OperationCanceledException)
         {
-            // Leave the document InProgress. The next run restarts it from the beginning; pages
-            // finished before the interruption are lost, which is the gap noted above.
+            // Leave the document InProgress with its recognised pages cached. The next run rebuilds
+            // the document but reuses that recognition, so an interruption costs the page in flight
+            // rather than the document.
             throw;
         }
         catch (Exception ex)

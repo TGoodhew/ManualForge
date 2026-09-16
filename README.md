@@ -226,17 +226,6 @@ Verified on a sandbox copy before the first real run: originals byte-identical t
 files marked GoodText untouched, replaced files carrying full text layers, and a second run
 changing nothing at all.
 
-## Resume
-
-Per-file and per-page state lives in SQLite at `<root>/_Originals/manualforge.db`.
-
-* **Resumable** — an interrupted file keeps its finished pages, and the next run redoes only what is
-  missing.
-* **Idempotent** — re-running over a finished folder does nothing:
-  `Nothing outstanding. Every file is already finished or deliberately skipped.`
-* **Change-aware** — a source file that changes is detected by size, timestamp and a hash of its
-  first and last 256 KB, and its recorded state is discarded.
-
 ## How the text layer is built
 
 This is the part that separates a usable text layer from a useless one, so it is worth stating
@@ -299,7 +288,7 @@ tests/ManualForge.Core.Tests/     50 tests, no GPU or network needed
 dotnet test
 ```
 
-92 tests, about 0.7 s, no models and no network required:
+122 tests, about 0.9 s, no models and no network required:
 
 - **`PageGeometryTests`** — the corner mapping for all four rotations, non-zero crop origins,
   text-matrix direction, points-per-pixel, rotation normalisation.
@@ -317,47 +306,56 @@ dotnet test
   removes text and leaves images alone.
 - **`JobStoreTests`** - resume, idempotency, and a changed source resetting its own progress.
 
+## Resume
+
+Per-file and per-page state lives in SQLite at `<root>/_Originals/manualforge.db`.
+
+* **Resumable, page by page.** An interrupted document costs the page in flight, not the document.
+* **Idempotent.** Re-running over a finished folder does nothing:
+  `Nothing outstanding. Every file is already finished or deliberately skipped.`
+* **Change-aware.** A source file that changes is detected by size, timestamp and a hash of its
+  first and last 256 KB, and its recorded state is discarded.
+
+### It caches recognition, not a half-built PDF
+
+The obvious way to resume mid-document is to teach the writer to append a text layer to a
+partly-finished file, working out which pages already have one. That is the hard way, and it is not
+what happens here.
+
+The two halves of the work cost wildly different amounts. Recognising a 639-page manual takes about
+thirteen minutes on the GPU; assembling the PDF from results already in hand takes seconds. So
+recognition is what gets persisted, page by page as it completes, and the document is rebuilt from
+scratch on every attempt. The writer needs to know nothing about resuming.
+
+Measured on a 78-page manual, interrupted at 75 seconds:
+
+```
+Page  1/78: ocr    0ms (reused from an earlier attempt)
+...
+Page 58/78: ocr    0ms (reused from an earlier attempt)
+Page 59/78: ocr 2705ms
+...
+Resumed 58 of 78 pages from an earlier attempt
+```
+
+A full run of that manual takes about 100 seconds; the resumed run took **30**, and produced the
+same 25,853 words at the same 0.001 pt worst deviation.
+
+### Cached results are scoped to the settings that produced them
+
+Word boxes are in image pixels at a particular resolution. Reusing boxes recognised at 300 dpi for a
+run at 600 would put every word in the wrong place, and nothing downstream could detect it — the
+text would extract cleanly and land in the wrong spot on every page. Entries are therefore keyed by
+a fingerprint of resolution, colour mode, execution provider and confidence floor, and a run under
+different settings simply finds nothing cached.
+
+They are keyed on the document's path in the library, not on the file being read. A flattened or
+stripped document is processed from a temporary copy whose name changes on every attempt; keying on
+that silently disabled resume entirely, which is how the first version of this shipped and how the
+end-to-end test caught it. The cache for a document is released once it completes, so it holds the
+documents in flight rather than the library.
+
 ## Known gaps
-
-### Resume is per-file, not per-page
-
-The spec asks for per-file **and** per-page state so that a crash or reboot resumes without redoing
-work. What exists is per-file only.
-
-Page rows are written after `BuildAsync` returns, so they all appear at once when a document
-finishes:
-
-```csharp
-var report = _builder.BuildAsync(...);
-foreach (var page in report.Pages)
-    store.RecordPage(path, page.PageNumber, PageStatus.Completed, ...);
-```
-
-While a document is being processed its progress reads as zero, which is visible in `status`:
-
-```
-  In progress: 1
-    08340-90245-serv-2.pdf  (0 of 639 pages done)      <- seven minutes in
-```
-
-The consequence is bounded but real. Interrupting one of the 639-page HP 8340B service manuals
-throws away about twelve minutes of GPU work rather than seconds, and the next run starts that
-document again from page one. Across a whole library run the exposure is one document, never more,
-because completed documents are recorded as they finish.
-
-Two things are needed, and they belong together:
-
-1. `SearchablePdfBuilder` should report each page as it completes rather than returning a report at
-   the end, so progress can be recorded as it happens.
-2. The writer needs to be able to resume mid-document — appending a text layer to the pages that
-   are still missing one, rather than rebuilding the whole document.
-
-The second is the substantial half, and it lands naturally with the phase 3 pipeline, where pages
-already flow through bounded channels one at a time instead of being processed a document at a
-time. Fixing it before then would mean building that streaming twice.
-
-Until it is done, `status` reporting `0 of N pages` for an in-progress document is accurate rather
-than a display bug, and worth reading as "this document will restart from the beginning".
 
 ### Throughput estimates use a library-wide average
 

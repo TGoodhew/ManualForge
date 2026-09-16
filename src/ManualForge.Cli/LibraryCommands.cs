@@ -194,13 +194,19 @@ internal static class RunCommand
         await using var engine = new PaddleOcrEngine(engineOptions, loggerFactory.CreateLogger<PaddleOcrEngine>());
         Console.WriteLine($"ready on {engine.Runtime.ExecutionProvider}.");
 
+        // Recognition results live in the same database as the rest of the job state, so an
+        // interrupted document resumes from the page it reached rather than from page one.
+        using var pageCache = new SqlitePageOcrCache(LibraryProcessor.StatePathFor(options));
+
         var builder = new SearchablePdfBuilder(
             engine,
             new PageRasteriser(new RasterOptions { Dpi = arguments.GetInt("dpi") ?? 300 }),
             new TextLayerWriter(),
-            loggerFactory.CreateLogger<SearchablePdfBuilder>());
+            loggerFactory.CreateLogger<SearchablePdfBuilder>(),
+            pageCache);
 
-        var processor = new LibraryProcessor(builder, new DocumentClassifier(), loggerFactory.CreateLogger<LibraryProcessor>());
+        var processor = new LibraryProcessor(
+            builder, new DocumentClassifier(), loggerFactory.CreateLogger<LibraryProcessor>(), pageCache);
 
         // Always survey first. It is cheap on an already-surveyed library because unchanged files
         // are left alone, and it is what makes a re-run over a finished folder a no-op.

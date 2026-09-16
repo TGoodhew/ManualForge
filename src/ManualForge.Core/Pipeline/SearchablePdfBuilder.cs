@@ -24,6 +24,15 @@ public sealed class BuildOptions
 
     /// <summary>Write a plain-text dump alongside the PDF, for eyeballing what was recognised.</summary>
     public string? TextDumpPath { get; init; }
+
+    /// <summary>
+    /// Identity under which recognition is cached. Defaults to the source path, which is wrong
+    /// whenever the source is a temporary file: a flattened or stripped document lives under a
+    /// fresh directory on every attempt, so keying on it means the cache is never hit and resume
+    /// silently does nothing. Callers that pre-process a document must pass the stable path of the
+    /// document in the library.
+    /// </summary>
+    public string? CacheKey { get; init; }
 }
 
 public sealed record PageReport(
@@ -47,7 +56,8 @@ public sealed record BuildReport(
     IReadOnlyList<PageReport> Pages,
     OcrRuntimeSummary Runtime,
     TimeSpan TotalTime,
-    IReadOnlyList<string> Warnings)
+    IReadOnlyList<string> Warnings,
+    int ResumedPages = 0)
 {
     public int TotalWordsWritten => Pages.Sum(p => p.WordsWritten);
     public double PagesPerMinute => TotalTime.TotalMinutes <= 0 ? 0 : Pages.Count / TotalTime.TotalMinutes;
@@ -64,12 +74,23 @@ public sealed class SearchablePdfBuilder(
     IOcrEngine ocrEngine,
     PageRasteriser rasteriser,
     TextLayerWriter textLayerWriter,
-    ILogger<SearchablePdfBuilder>? logger = null)
+    ILogger<SearchablePdfBuilder>? logger = null,
+    IPageOcrCache? pageCache = null)
 {
     private readonly IOcrEngine _ocrEngine = ocrEngine ?? throw new ArgumentNullException(nameof(ocrEngine));
     private readonly PageRasteriser _rasteriser = rasteriser ?? throw new ArgumentNullException(nameof(rasteriser));
     private readonly TextLayerWriter _textLayerWriter = textLayerWriter ?? throw new ArgumentNullException(nameof(textLayerWriter));
     private readonly ILogger _logger = (ILogger?)logger ?? NullLogger.Instance;
+    private readonly IPageOcrCache _pageCache = pageCache ?? NullPageOcrCache.Instance;
+
+    /// <summary>
+    /// Identifies the settings a cached page was recognised under. Reusing results produced at a
+    /// different resolution would put every word box in the wrong coordinate space, and nothing
+    /// downstream could tell.
+    /// </summary>
+    public string SettingsFingerprint =>
+        $"dpi={_rasteriser.Options.Dpi};grey={_rasteriser.Options.Grayscale};" +
+        $"provider={_ocrEngine.Runtime.ExecutionProvider};conf={_textLayerWriter.Options.MinimumConfidence}";
 
     /// <summary>OCR results kept from the last build, so verification can compare against them.</summary>
     public IReadOnlyDictionary<int, PageInput> LastPageInputs => _lastPageInputs;
@@ -101,6 +122,10 @@ public sealed class SearchablePdfBuilder(
         var warnings = new List<string>();
         var stopwatch = Stopwatch.StartNew();
 
+        // Recognition is cached against the document's stable identity, not against whatever
+        // temporary file this attempt happens to be reading from.
+        var cacheKey = Path.GetFullPath(options.CacheKey ?? full);
+
         var sourceBytes = await File.ReadAllBytesAsync(full, cancellationToken).ConfigureAwait(false);
 
         using var document = OpenForModification(sourceBytes, full);
@@ -124,6 +149,7 @@ public sealed class SearchablePdfBuilder(
             warnings.Add($"Some requested pages are outside the document's 1-{pageCount} range and were ignored.");
 
         var reports = new List<PageReport>(pageNumbers.Length);
+        var resumedPages = 0;
         var textDump = options.TextDumpPath is null ? null : new List<string>();
 
         foreach (var pageNumber in pageNumbers)
@@ -147,21 +173,47 @@ public sealed class SearchablePdfBuilder(
             }
 
             var ocrWatch = Stopwatch.StartNew();
-            var recognised = await _ocrEngine
-                .RecognisePageAsync(raster.EncodePng(), pageNumber, cancellationToken)
-                .ConfigureAwait(false);
-            ocrWatch.Stop();
 
-            if (recognised.PixelWidth != 0 && recognised.PixelWidth != raster.Width)
+            // A page recognised on an earlier attempt is reused rather than recognised again. This
+            // is what makes an interrupted document cost the page in flight rather than the whole
+            // document: recognition is the expensive half, assembling the PDF is not.
+            var cached = _pageCache.TryGet(cacheKey, pageNumber, SettingsFingerprint);
+            RecognisedWord[] words;
+            var recognisedWordCount = 0;
+            var meanConfidence = 0.0;
+            var fromCache = cached is not null;
+
+            if (cached is not null)
             {
-                warnings.Add(
-                    $"Page {pageNumber}: the OCR engine reports a {recognised.PixelWidth}x{recognised.PixelHeight} " +
-                    $"source but the raster is {raster.Width}x{raster.Height}. Word boxes would be misplaced, " +
-                    "so the page was left without a text layer.");
-                continue;
+                words = cached.Where(w => w.IsUsable).ToArray();
+                recognisedWordCount = cached.Count;
+                meanConfidence = cached.Count == 0 ? 0 : cached.Average(w => w.Confidence);
+                resumedPages++;
+            }
+            else
+            {
+                var recognised = await _ocrEngine
+                    .RecognisePageAsync(raster.EncodePng(), pageNumber, cancellationToken)
+                    .ConfigureAwait(false);
+
+                if (recognised.PixelWidth != 0 && recognised.PixelWidth != raster.Width)
+                {
+                    warnings.Add(
+                        $"Page {pageNumber}: the OCR engine reports a {recognised.PixelWidth}x{recognised.PixelHeight} " +
+                        $"source but the raster is {raster.Width}x{raster.Height}. Word boxes would be misplaced, " +
+                        "so the page was left without a text layer.");
+                    continue;
+                }
+
+                words = recognised.Words.Where(w => w.IsUsable).ToArray();
+                recognisedWordCount = recognised.WordCount;
+                meanConfidence = recognised.MeanConfidence;
+
+                // Persisted before the page is written, so a crash between the two loses nothing.
+                _pageCache.Save(cacheKey, pageNumber, SettingsFingerprint, words);
             }
 
-            var words = recognised.Words.Where(w => w.IsUsable).ToArray();
+            ocrWatch.Stop();
 
             var writeWatch = Stopwatch.StartNew();
             var layerResult = _textLayerWriter.WritePage(page, geometry, words, font);
@@ -173,7 +225,7 @@ public sealed class SearchablePdfBuilder(
 
             textDump?.Add($"--- page {pageNumber} ---");
             if (textDump is not null)
-                textDump.AddRange(recognised.Lines.Select(l => l.Text));
+                textDump.AddRange(words.Select(w => w.Text));
 
             var report = new PageReport(
                 pageNumber,
@@ -181,10 +233,10 @@ public sealed class SearchablePdfBuilder(
                 raster.Height,
                 geometry.EffectiveDpiX,
                 geometry.Rotation,
-                recognised.WordCount,
+                recognisedWordCount,
                 layerResult.WordsWritten,
                 layerResult.WordsSkipped,
-                recognised.MeanConfidence,
+                meanConfidence,
                 rasterWatch.Elapsed,
                 ocrWatch.Elapsed,
                 writeWatch.Elapsed);
@@ -194,9 +246,10 @@ public sealed class SearchablePdfBuilder(
 
             _logger.LogInformation(
                 "Page {Page}/{Total}: {Written} words written, {Skipped} skipped, {Dpi:F0} dpi, " +
-                "raster {Raster}ms, ocr {Ocr}ms",
+                "raster {Raster}ms, ocr {Ocr}ms{Resumed}",
                 pageNumber, pageNumbers.Length, layerResult.WordsWritten, layerResult.WordsSkipped,
-                geometry.EffectiveDpiX, rasterWatch.ElapsedMilliseconds, ocrWatch.ElapsedMilliseconds);
+                geometry.EffectiveDpiX, rasterWatch.ElapsedMilliseconds, ocrWatch.ElapsedMilliseconds,
+                fromCache ? " (reused from an earlier attempt)" : "");
         }
 
         font.Finalise();
@@ -229,7 +282,8 @@ public sealed class SearchablePdfBuilder(
             reports,
             _ocrEngine.Runtime,
             stopwatch.Elapsed,
-            warnings);
+            warnings,
+            resumedPages);
     }
 
     private static PdfDocument OpenForModification(byte[] bytes, string path)
