@@ -144,24 +144,29 @@ which asked for a selectable DirectML fallback; it is reversible at any point.
 Measured over the real corpus with `manualforge survey`:
 
 ```
-725 files, 119,803 pages
+576 files, 101,733 pages
 
   Class            Files     Pages  Action
   ------------------------------------------------
-  ImageOnly          238    27,859  Ocr
-  SuspectText          3       220  Skip
-  GoodText           483    91,724  Skip
+  ImageOnly           95     9,325  Ocr
+  SuspectText          5       924  Skip
+  GoodText           475    91,484  Skip
   Unreadable           1         0  Skip
 
-  152 file(s) cannot be written to directly:
-    OwnerPassword      147   cleared by flattening
+  147 file(s) cannot be written to directly:
+    OwnerPassword      142   cleared by flattening
     Signature            2   flattening would drop the signature
     Unknown              2   unknown cause
     Corrupt              1   needs manual attention
 ```
 
-A fifth of the library refuses modification, so the flatten path is load-bearing rather than an
+A quarter of the library refuses modification, so the flatten path is load-bearing rather than an
 edge case.
+
+The ImageOnly count is what is *left*: 94 of the original 238 image-only files have been processed
+and now carry a text layer, which is why they are counted as GoodText above. Two files resist and
+need a look by hand — `LeCroy-5674 service.pdf`, whose single page will not parse, and
+`HP8340B/HP 8340A Operating & Service Vol. 3.pdf`, which reports zero pages.
 
 ## Deciding what to re-OCR
 
@@ -219,8 +224,16 @@ The order of operations is the guarantee:
 Both are moves on the same volume, so each is atomic and the original exists in exactly one place
 at every instant. If step 4 fails, the log names both paths.
 
-A digitally signed file is refused rather than silently invalidated (`--allow-signed` overrides).
-`--dry-run` does everything up to step 2 and stops.
+A digitally signed file is processed like any other, but never silently: every signature invalidated
+is logged as a warning and listed in the run summary, and the untouched original is kept as always,
+so it stays reversible. `--refuse-signed` skips them instead. The signatures on these manuals come
+from whoever scanned or redistributed them decades ago, which is why the default is the way round it
+is. `--dry-run` does everything up to step 2 and stops.
+
+A record whose file is no longer on disk is marked rather than deleted, so a file that comes back is
+recognised as the one that went away. Those records are reported on every survey and every run, and
+left out of every total. `--trim-missing` forgets them, along with any recognition cached against
+their paths — it is the deliberate way to clean up after a library has been reorganised.
 
 Verified on a sandbox copy before the first real run: originals byte-identical to the library,
 files marked GoodText untouched, replaced files carrying full text layers, and a second run
@@ -279,7 +292,7 @@ src/ManualForge.Core/
   Pipeline/SearchablePdfBuilder.cs end-to-end for one file
   Diagnostics/JsonFileLogger.cs   JSON-lines log provider
 src/ManualForge.Cli/              the prototype's command line
-tests/ManualForge.Core.Tests/     156 tests, no GPU or network needed
+tests/ManualForge.Core.Tests/     158 tests, no GPU or network needed
 ```
 
 ## Tests
@@ -288,7 +301,7 @@ tests/ManualForge.Core.Tests/     156 tests, no GPU or network needed
 dotnet test
 ```
 
-156 tests, a few seconds, no models and no network required:
+158 tests, a few seconds, no models and no network required:
 
 - **`PageGeometryTests`** — the corner mapping for all four rotations, non-zero crop origins,
   text-matrix direction, points-per-pixel, rotation normalisation.

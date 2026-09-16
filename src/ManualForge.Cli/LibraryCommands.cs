@@ -48,7 +48,15 @@ internal static class SurveyCommand
         var records = processor.Survey(options, progress, cancellationToken);
         Console.Write("\r".PadRight(30) + "\r");
 
-        PrintSummary(records, options);
+        var trimMissing = arguments.Has("trim-missing");
+        PrintSummary(records, options, trimMissing);
+
+        if (trimMissing)
+        {
+            var trimmed = processor.TrimMissing(options);
+            Console.WriteLine($"Forgot {trimmed.Count:N0} record(s) for files that are no longer on disk.");
+            Console.WriteLine();
+        }
 
         var csv = arguments.Get("csv");
         if (csv is not null)
@@ -61,7 +69,8 @@ internal static class SurveyCommand
         return 0;
     }
 
-    public static void PrintSummary(IReadOnlyList<FileRecord> allRecords, LibraryOptions options)
+    public static void PrintSummary(
+        IReadOnlyList<FileRecord> allRecords, LibraryOptions options, bool trimmingMissing = false)
     {
         // Records for files that have gone from disk are excluded, so the table describes the
         // library as it stands rather than as it once did.
@@ -69,6 +78,8 @@ internal static class SurveyCommand
         var totalPages = records.Sum(r => (long)r.PageCount);
         Console.WriteLine($"{records.Length:N0} files, {totalPages:N0} pages");
         Console.WriteLine();
+
+        PrintMissing(allRecords, trimmingMissing);
         Console.WriteLine($"  {"Class",-14}{"Files",8}{"Pages",10}  {"Action",-14}");
         Console.WriteLine("  " + new string('-', 48));
 
@@ -132,6 +143,29 @@ internal static class SurveyCommand
             var hours = workPages / 55.9 / 60;
             Console.WriteLine($"  Estimated at 55.9 pages/min on CUDA: {hours:F1} hours");
         }
+    }
+
+    /// <summary>
+    /// Reports records whose files have gone from disk. Printed on every survey and every run,
+    /// whatever else was asked for: a file that vanished is either a move somebody meant or a loss
+    /// somebody did not, and silently dropping it from the totals decides which without asking.
+    /// </summary>
+    private static void PrintMissing(IReadOnlyList<FileRecord> allRecords, bool trimming)
+    {
+        var missing = allRecords.Where(r => r.Status == FileStatus.Missing).ToArray();
+        if (missing.Length == 0)
+            return;
+
+        Console.WriteLine($"  {missing.Length:N0} recorded file(s) are no longer on disk and are left out of the totals:");
+        foreach (var record in missing.Take(10))
+            Console.WriteLine($"    {record.Path}");
+        if (missing.Length > 10)
+            Console.WriteLine($"    ...and {missing.Length - 10:N0} more.");
+
+        Console.WriteLine(trimming
+            ? "  --trim-missing was given, so their records are being forgotten."
+            : "  Pass --trim-missing to forget them.");
+        Console.WriteLine();
     }
 
     private static void WriteCsv(IReadOnlyList<FileRecord> records, string path)
@@ -212,7 +246,14 @@ internal static class RunCommand
         // are left alone, and it is what makes a re-run over a finished folder a no-op.
         Console.WriteLine("Classifying...");
         var records = processor.Survey(options, null, cancellationToken);
-        SurveyCommand.PrintSummary(records, options);
+        var trimMissing = arguments.Has("trim-missing");
+        SurveyCommand.PrintSummary(records, options, trimMissing);
+        if (trimMissing)
+        {
+            var trimmed = processor.TrimMissing(options);
+            Console.WriteLine($"Forgot {trimmed.Count:N0} record(s) for files that are no longer on disk.");
+        }
+
         Console.WriteLine();
 
         if (arguments.Has("survey-only"))

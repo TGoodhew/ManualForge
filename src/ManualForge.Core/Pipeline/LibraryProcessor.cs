@@ -160,6 +160,22 @@ public sealed class LibraryProcessor(
     }
 
     /// <summary>
+    /// Deletes the records of files that are no longer on disk, and returns what was removed.
+    /// Survey marks them on every run; this is the separate, explicit step that forgets them.
+    /// </summary>
+    public IReadOnlyList<string> TrimMissing(LibraryOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        using var store = OpenStore(options);
+
+        var trimmed = store.TrimMissing();
+        if (trimmed.Count > 0)
+            _logger.LogInformation("Forgot {Count} record(s) for files that are no longer on disk", trimmed.Count);
+
+        return trimmed;
+    }
+
+    /// <summary>
     /// Hashes the files that are about to be worked on and points duplicates at a single primary.
     /// Only files marked for work are hashed: sparing effort on files nobody is touching would
     /// cost more to discover than it saves.

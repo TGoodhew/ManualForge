@@ -119,6 +119,9 @@ public class LibraryProcessorTests : IDisposable
     // word boxes are sized for it.
     private const int Dpi = 150;
 
+    /// <summary>The settings cached recognition is scoped by, for these tests' rasteriser and engine.</summary>
+    private const string CacheSettings = "dpi=150;grey=True;provider=Fake;conf=0.3";
+
     private LibraryOptions NewOptions(ClassificationPolicy? policy = null) => new()
     {
         Root = _root,
@@ -141,7 +144,7 @@ public class LibraryProcessorTests : IDisposable
 
     private SqlitePageOcrCache NewCache()
     {
-        var cache = new SqlitePageOcrCache(Path.Combine(_root, "_Originals", "cache.db"));
+        var cache = new SqlitePageOcrCache(LibraryProcessor.StatePathFor(NewOptions()));
         _disposables.Add(cache);
         return cache;
     }
@@ -569,7 +572,7 @@ public class LibraryProcessorTests : IDisposable
         processor.Run(options);
 
         // The cache holds the documents in flight, not the library.
-        Assert.Null(cache.TryGet(path, 1, "dpi=150;grey=True;provider=Fake;conf=0.3"));
+        Assert.Null(cache.TryGet(path, 1, CacheSettings));
     }
 
     // ---------------------------------------------------------------- surveying and discovery
@@ -702,6 +705,64 @@ public class LibraryProcessorTests : IDisposable
         // Progress<T> posts asynchronously, so give it a moment to drain before comparing.
         SpinWait.SpinUntil(() => reported.Count == outcomes.Count, TimeSpan.FromSeconds(5));
         Assert.Equal(outcomes.Count, reported.Count);
+    }
+
+
+    // ---------------------------------------------------------------- records for files that have gone
+
+    [Fact]
+    public void TrimMissingForgetsThoseRecordsAndLeavesTheRestAlone()
+    {
+        var going = TestPdf.Scanned(InRoot("going.pdf"), pages: 1);
+        var staying = TestPdf.Scanned(InRoot("staying.pdf"), pages: 1);
+
+        var options = NewOptions();
+        var (processor, _) = NewProcessor();
+        processor.Survey(options);
+
+        // Nothing is missing yet, so there is nothing to forget.
+        Assert.Empty(processor.TrimMissing(options));
+
+        File.Delete(going);
+        processor.Survey(options);
+
+        Assert.Equal([going], processor.TrimMissing(options));
+
+        using var store = LibraryProcessor.OpenStore(options);
+        Assert.Null(store.Find(going));
+        Assert.NotNull(store.Find(staying));
+    }
+
+    [Fact]
+    public void TrimMissingAlsoDropsTheCachedRecognitionForThoseFiles()
+    {
+        var path = TestPdf.Scanned(InRoot("going.pdf"), pages: 4);
+
+        var options = NewOptions();
+        var cache = NewCache();
+
+        using var cancellation = new CancellationTokenSource();
+        var engine = new FakeOcrEngine
+        {
+            BeforePage = page =>
+            {
+                if (page == 3)
+                    cancellation.Cancel();
+            },
+        };
+
+        var (processor, _) = NewProcessor(engine, cache);
+        processor.Survey(options);
+        Assert.ThrowsAny<OperationCanceledException>(
+            () => processor.Run(options, cancellationToken: cancellation.Token));
+        Assert.NotNull(cache.TryGet(path, 1, CacheSettings));
+
+        File.Delete(path);
+        processor.Survey(options);
+        Assert.Equal([path], processor.TrimMissing(options));
+
+        // Keyed on the path, so it could never be hit again.
+        Assert.Null(cache.TryGet(path, 1, CacheSettings));
     }
 
     // ---------------------------------------------------------------- paths

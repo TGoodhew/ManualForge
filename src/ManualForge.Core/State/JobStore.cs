@@ -412,6 +412,59 @@ public sealed class JobStore : IDisposable
         return marked;
     }
 
+    /// <summary>
+    /// Deletes the records of files that are no longer on disk, and returns what was removed.
+    ///
+    /// Marking is the default because a record is history: it says what was done to a file, and a
+    /// file that comes back should be recognised as the one that went away. But a library that has
+    /// been reorganised accumulates rows for paths that will never exist again, and they inflate
+    /// every total printed — 149 of them once made a 576-file library report 725 files and 105,081
+    /// pages. This is the deliberate, asked-for way to drop them.
+    ///
+    /// Cached recognition for those documents goes too. It is keyed on the path, so it could never
+    /// be hit again.
+    /// </summary>
+    public IReadOnlyList<string> TrimMissing()
+    {
+        var missing = All().Where(r => r.Status == FileStatus.Missing).Select(r => r.Path).ToArray();
+        if (missing.Length == 0)
+            return missing;
+
+        using var transaction = _connection.BeginTransaction();
+
+        foreach (var path in missing)
+        {
+            Execute("DELETE FROM pages WHERE path = $p", path, transaction);
+            Execute("DELETE FROM files WHERE path = $p", path, transaction);
+
+            // The page cache shares this database but is owned by SqlitePageOcrCache, so it may not
+            // have created its table yet.
+            if (TableExists("page_ocr", transaction))
+                Execute("DELETE FROM page_ocr WHERE path = $p", path, transaction);
+        }
+
+        transaction.Commit();
+        return missing;
+    }
+
+    private void Execute(string sql, string path, SqliteTransaction transaction)
+    {
+        using var command = _connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = sql;
+        command.Parameters.AddWithValue("$p", path);
+        command.ExecuteNonQuery();
+    }
+
+    private bool TableExists(string name, SqliteTransaction transaction)
+    {
+        using var command = _connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = $n";
+        command.Parameters.AddWithValue("$n", name);
+        return command.ExecuteScalar() is not null;
+    }
+
     /// <summary>Forgets a file's content hash and any duplicate relationship it had.</summary>
     public void ClearContentIdentity(string path)
     {

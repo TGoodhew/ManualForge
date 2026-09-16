@@ -135,6 +135,8 @@ internal sealed class CommandLine
               --no-dedup              Recognise every copy separately instead of once per document.
               --refuse-signed         Skip digitally signed files. By default they are processed,
                                       which invalidates their signatures; every one is reported.
+              --trim-missing          Forget the records of files that are no longer on disk. They
+                                      are reported either way, and left out of every total.
 
             general options:
               --models <path>         Model cache directory.
