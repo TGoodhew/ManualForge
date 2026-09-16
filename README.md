@@ -317,6 +317,55 @@ dotnet test
   removes text and leaves images alone.
 - **`JobStoreTests`** - resume, idempotency, and a changed source resetting its own progress.
 
+## Known gaps
+
+### Resume is per-file, not per-page
+
+The spec asks for per-file **and** per-page state so that a crash or reboot resumes without redoing
+work. What exists is per-file only.
+
+Page rows are written after `BuildAsync` returns, so they all appear at once when a document
+finishes:
+
+```csharp
+var report = _builder.BuildAsync(...);
+foreach (var page in report.Pages)
+    store.RecordPage(path, page.PageNumber, PageStatus.Completed, ...);
+```
+
+While a document is being processed its progress reads as zero, which is visible in `status`:
+
+```
+  In progress: 1
+    08340-90245-serv-2.pdf  (0 of 639 pages done)      <- seven minutes in
+```
+
+The consequence is bounded but real. Interrupting one of the 639-page HP 8340B service manuals
+throws away about twelve minutes of GPU work rather than seconds, and the next run starts that
+document again from page one. Across a whole library run the exposure is one document, never more,
+because completed documents are recorded as they finish.
+
+Two things are needed, and they belong together:
+
+1. `SearchablePdfBuilder` should report each page as it completes rather than returning a report at
+   the end, so progress can be recorded as it happens.
+2. The writer needs to be able to resume mid-document — appending a text layer to the pages that
+   are still missing one, rather than rebuilding the whole document.
+
+The second is the substantial half, and it lands naturally with the phase 3 pipeline, where pages
+already flow through bounded channels one at a time instead of being processed a document at a
+time. Fixing it before then would mean building that streaming twice.
+
+Until it is done, `status` reporting `0 of N pages` for an in-progress document is accurate rather
+than a display bug, and worth reading as "this document will restart from the beginning".
+
+### Throughput estimates use a library-wide average
+
+`status` and `survey` estimate remaining time at the measured 55.9 pages/min. Work is ordered
+smallest-first, so the tail of every run is the densest material — the HP 8340B service manuals
+sustain about 51 pages/min — and the estimate is optimistic by roughly 10% by the end of a run. Good
+enough for planning, wrong enough to mention.
+
 ## Open questions for phase 2
 
 1. ~~**DirectML**~~ — resolved: not added, see "DirectML" above.

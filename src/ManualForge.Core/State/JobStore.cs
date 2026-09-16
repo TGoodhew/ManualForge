@@ -87,15 +87,20 @@ public sealed record FileRecord(
     string? DuplicateOf = null);
 
 /// <summary>
-/// Per-file and per-page progress, kept in SQLite so a crash, a reboot or a cancelled run resumes
-/// where it stopped rather than starting over.
+/// Per-file progress, kept in SQLite so a crash, a reboot or a cancelled run resumes where it
+/// stopped rather than starting over.
 ///
 /// Two properties matter and both are tested:
 ///
-/// * <b>Resumable.</b> A file interrupted mid-way is left as InProgress with its finished pages
-///   recorded, so the next run redoes only what is missing.
+/// * <b>Resumable between documents.</b> Documents that finished stay finished; the next run picks
+///   up from the first that did not.
 /// * <b>Idempotent.</b> Re-running over a finished folder does nothing at all, unless a source file
 ///   has changed — which the fingerprint detects, and which resets that file's state.
+///
+/// The page table exists and is written to, but <b>resume is not yet per-page</b>: rows are
+/// recorded only once a whole document finishes, so interrupting a 639-page manual loses that
+/// manual's work rather than the current page's. Closing that gap needs the writer to append to a
+/// partly-finished document, which lands with the phase 3 pipeline. See "Known gaps" in the README.
 /// </summary>
 public sealed class JobStore : IDisposable
 {

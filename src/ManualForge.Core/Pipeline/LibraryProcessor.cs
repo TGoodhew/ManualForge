@@ -168,7 +168,8 @@ public sealed class LibraryProcessor(
 
     /// <summary>
     /// Processes everything the policy marks for work. Safe to run repeatedly: finished files are
-    /// skipped, interrupted files resume from the page they reached.
+    /// skipped, and an interrupted run continues from the first document that did not finish.
+    /// Resume is between documents, not within one: see "Known gaps" in the README.
     /// </summary>
     public IReadOnlyList<FileOutcome> Run(
         LibraryOptions options,
@@ -284,7 +285,6 @@ public sealed class LibraryProcessor(
             // Step 3: OCR into a new file in the working directory. Nothing in the library has
             // been touched at this point.
             var outputPath = Path.Combine(workingDirectory, "searchable.pdf");
-            var completed = store.CompletedPages(path);
 
             var report = _builder!.BuildAsync(
                 source,
@@ -293,9 +293,11 @@ public sealed class LibraryProcessor(
                 progress: null,
                 cancellationToken).GetAwaiter().GetResult();
 
+            // Recorded in one go once the document is finished. Until the writer can append to a
+            // partly-built document these rows are a record of what happened rather than something
+            // a resumed run can act on, so an interrupted document restarts from its first page.
             foreach (var page in report.Pages)
                 store.RecordPage(path, page.PageNumber, PageStatus.Completed, page.WordsWritten, 0, (long)page.OcrTime.TotalMilliseconds);
-            _ = completed;
 
             // Step 4: verify before anything is replaced. Opens cleanly, same page count, and a
             // text layer that is actually there.
@@ -374,7 +376,8 @@ public sealed class LibraryProcessor(
         }
         catch (OperationCanceledException)
         {
-            // Leave the file InProgress with its finished pages recorded, so the next run resumes.
+            // Leave the document InProgress. The next run restarts it from the beginning; pages
+            // finished before the interruption are lost, which is the gap noted above.
             throw;
         }
         catch (Exception ex)
