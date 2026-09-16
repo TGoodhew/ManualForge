@@ -273,6 +273,10 @@ public sealed class LibraryProcessor(
             }
 
             store.SetPaths(path, path, originalDestination);
+            // The file at this path is now the searchable one, so the recorded fingerprint has to
+            // describe that rather than the source it replaced. Otherwise restoring the original
+            // later matches the stale fingerprint and the file is never reprocessed.
+            store.UpdateFingerprint(path);
             store.SetStatus(path, FileStatus.Completed);
 
             _logger.LogInformation(

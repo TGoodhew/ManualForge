@@ -401,6 +401,67 @@ public class JobStoreTests : IDisposable
     }
 
     [Fact]
+    public void RestoringAnOriginalOverAFinishedFileMakesItOutstandingAgain()
+    {
+        // Regression from the first full library run. Processing replaces the file in place, but
+        // the recorded fingerprint still described the source it replaced. So when originals were
+        // restored to redo a batch, every one of them matched its stale fingerprint exactly, looked
+        // unchanged and already finished, and nothing was reprocessed - while the summary still
+        // claimed 155 files were marked for work.
+        var file = MakeFile("restore.pdf", "the original scan, no text layer");
+        var originalBytes = File.ReadAllBytes(file);
+
+        using var store = NewStore();
+        store.Register(file);
+        store.RecordClassification(file, Classification(file), Capabilities(file), ClassAction.Ocr);
+
+        // Processing replaces the file in place, then records completion.
+        File.WriteAllText(file, "the searchable version, with a text layer added to it");
+        store.UpdateFingerprint(file);
+        store.SetStatus(file, FileStatus.Completed);
+        Assert.Empty(store.Outstanding());
+
+        // Now restore the original over it, exactly as the repair did.
+        Thread.Sleep(10);
+        File.WriteAllBytes(file, originalBytes);
+
+        var record = store.Register(file);
+
+        // Register alone resets it to Discovered and clears the action, because a file whose
+        // contents changed has to be classified again before anything is decided about it. That
+        // reclassification is what every run does before processing.
+        Assert.Equal(FileStatus.Discovered, record.Status);
+        Assert.Empty(store.CompletedPages(file));
+
+        store.RecordClassification(file, Classification(file), Capabilities(file), ClassAction.Ocr);
+
+        Assert.Single(store.Outstanding());
+    }
+
+    [Fact]
+    public void WithoutUpdatingTheFingerprintAFinishedFileLooksChangedOnEveryRun()
+    {
+        // The other half of the same problem: if the fingerprint is never refreshed, the file we
+        // wrote does not match what was recorded, so every subsequent run treats a finished file as
+        // changed. Refreshing it on completion is what makes a re-run genuinely a no-op.
+        var file = MakeFile("stable.pdf", "original");
+        using var store = NewStore("stable.db");
+
+        store.Register(file);
+        store.RecordClassification(file, Classification(file), Capabilities(file), ClassAction.Ocr);
+
+        File.WriteAllText(file, "searchable version");
+        store.UpdateFingerprint(file);
+        store.SetStatus(file, FileStatus.Completed);
+
+        // Re-registering the untouched result must not reset anything.
+        var again = store.Register(file);
+
+        Assert.Equal(FileStatus.Completed, again.Status);
+        Assert.Empty(store.Outstanding());
+    }
+
+    [Fact]
     public void AnUnchangedFileKeepsItsProgress()
     {
         var file = MakeFile("g.pdf");

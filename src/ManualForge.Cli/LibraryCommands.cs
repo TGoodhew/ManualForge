@@ -100,9 +100,18 @@ internal static class SurveyCommand
             Console.WriteLine();
         }
 
-        var work = records.Where(r => r.Action != ClassAction.Skip).ToArray();
-        var workPages = work.Sum(r => (long)r.PageCount);
-        Console.WriteLine($"  Marked for work: {work.Length:N0} files, {workPages:N0} pages");
+        // "Marked for work" must mean work still to do, not merely a non-Skip action. Counting by
+        // action alone reported 155 files outstanding when every one of them was already finished,
+        // which flatly contradicted the run that followed it.
+        var marked = records.Where(r => r.Action != ClassAction.Skip).ToArray();
+        var outstanding = marked
+            .Where(r => r.Status is not (FileStatus.Completed or FileStatus.Skipped))
+            .ToArray();
+        var done = marked.Length - outstanding.Length;
+        var workPages = outstanding.Sum(r => (long)r.PageCount);
+
+        Console.WriteLine($"  Outstanding: {outstanding.Length:N0} files, {workPages:N0} pages" +
+                          (done > 0 ? $"  ({done:N0} already done)" : ""));
         if (workPages > 0)
         {
             // 55.9 pages/min is what the 3060 Ti measured on this corpus at 300 dpi.

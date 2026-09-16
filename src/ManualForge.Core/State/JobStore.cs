@@ -214,6 +214,36 @@ public sealed class JobStore : IDisposable
         command.ExecuteNonQuery();
     }
 
+    /// <summary>
+    /// Re-reads the fingerprint of whatever file is now at <paramref name="path"/> and records it.
+    ///
+    /// This has to happen when a file completes. Until then the stored fingerprint describes the
+    /// *source* as it was before processing, but processing replaces that file with the searchable
+    /// version — so without this the record describes a file that no longer exists there. The
+    /// consequence is not theoretical: restoring an original from the originals tree then matches
+    /// the stale fingerprint exactly, the file looks unchanged and already finished, and it is
+    /// never reprocessed.
+    /// </summary>
+    public void UpdateFingerprint(string path)
+    {
+        var full = Path.GetFullPath(path);
+        if (!File.Exists(full))
+            return;
+
+        var fingerprint = FileFingerprint.Of(full);
+
+        using var command = _connection.CreateCommand();
+        command.CommandText =
+            "UPDATE files SET size_bytes = $sz, modified_ticks = $mt, content_hash = $h, updated_utc = $u " +
+            "WHERE path = $p";
+        command.Parameters.AddWithValue("$sz", fingerprint.SizeBytes);
+        command.Parameters.AddWithValue("$mt", fingerprint.ModifiedTicks);
+        command.Parameters.AddWithValue("$h", fingerprint.ContentHash);
+        command.Parameters.AddWithValue("$u", Now());
+        command.Parameters.AddWithValue("$p", full);
+        command.ExecuteNonQuery();
+    }
+
     public void SetPaths(string path, string? outputPath, string? originalPath)
     {
         using var command = _connection.CreateCommand();
