@@ -31,10 +31,18 @@ public sealed record GpuMemory(int TotalMiB, int UsedMiB, string? Name)
 public static class GpuMemoryProbe
 {
     /// <summary>
-    /// What one page in flight needs, measured on this corpus at 300 dpi: about 4.8 GB of working
-    /// set on top of roughly 2.7 GB of models and CUDA context. The second and subsequent pages
-    /// cost far less than the first because the ONNX Runtime arena is already grown, so this is
-    /// deliberately the *marginal* figure rather than the first-page one.
+    /// Budgeted cost of each extra page in flight. A budget rather than a measurement, and the
+    /// distinction is worth being honest about.
+    ///
+    /// What was actually observed on an 8 GB card is that peak VRAM barely moved with concurrency
+    /// on a single document — 7,613, 7,655 and 7,709 MiB at one, two and three pages — because
+    /// ONNX Runtime's arena is already grown by the time the second page arrives. But across
+    /// twenty-four pages of varied size the same card reached 7,950 MiB and collapsed. So the
+    /// marginal cost is driven by the variety of page sizes the arena has to accommodate, not by
+    /// the number of pages in flight, and no constant describes it properly.
+    ///
+    /// 700 MiB is therefore chosen to be comfortably larger than anything observed, so that the
+    /// arithmetic errs towards fewer pages. The failure it is erring away from is not a slowdown.
     /// </summary>
     public const int MarginalMiBPerConcurrentPage = 700;
 
@@ -64,8 +72,13 @@ public static class GpuMemoryProbe
     /// </summary>
     /// <param name="memory">What the probe found, or null when it could not look.</param>
     /// <param name="ceiling">
-    /// Never go above this however much memory there is. Past three the returns flatten while the
-    /// risk of spilling does not, so there is no reason to chase it.
+    /// Never go above this however much memory there is.
+    ///
+    /// Two by default, not three. Three was the fastest setting measured — 83.3 pages a minute
+    /// against 78.1 — but it was also the setting that tipped an 8 GB card into spilling once the
+    /// pages were varied enough, and the difference between those two figures is 6% while the
+    /// difference between either and spilling is a factor of ten. Three is available by asking for
+    /// it explicitly, which is the right way round for a choice with that shape.
     /// </param>
     /// <remarks>
     /// One is always safe, because it is what a single page needs and that is already accounted
@@ -73,7 +86,7 @@ public static class GpuMemoryProbe
     /// nvidia-smi, or CPU execution — one is also the right answer: on CPU the work is already
     /// spread across every core inside the engine, and adding outer concurrency only contends.
     /// </remarks>
-    public static int ConcurrencyFor(GpuMemory? memory, int ceiling = 3)
+    public static int ConcurrencyFor(GpuMemory? memory, int ceiling = 2)
     {
         if (memory is null || ceiling < 1)
             return 1;

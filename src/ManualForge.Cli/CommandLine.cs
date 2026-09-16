@@ -137,6 +137,10 @@ internal sealed class CommandLine
                                       which invalidates their signatures; every one is reported.
               --trim-missing          Forget the records of files that are no longer on disk. They
                                       are reported either way, and left out of every total.
+              --gpu-concurrency <n>   Pages to recognise at once. The default is chosen from free
+                                      VRAM; going past what the card holds collapses throughput
+                                      rather than slowing it, so raise this deliberately.
+              --raster-workers <n>    CPU threads turning pages into bitmaps. Default 2.
 
             general options:
               --models <path>         Model cache directory.

@@ -232,15 +232,45 @@ internal static class RunCommand
         // interrupted document resumes from the page it reached rather than from page one.
         using var pageCache = new SqlitePageOcrCache(LibraryProcessor.StatePathFor(options));
 
+        var rasteriser = new PageRasteriser(new RasterOptions { Dpi = arguments.GetInt("dpi") ?? 300 });
+
         var builder = new SearchablePdfBuilder(
             engine,
-            new PageRasteriser(new RasterOptions { Dpi = arguments.GetInt("dpi") ?? 300 }),
+            rasteriser,
             new TextLayerWriter(),
             loggerFactory.CreateLogger<SearchablePdfBuilder>(),
             pageCache);
 
+        // How many pages to keep on the GPU at once. The measured reason this is not simply "more"
+        // is that going past what VRAM holds does not slow down, it collapses: the driver spills to
+        // system memory over PCIe and throughput falls from 83 to 7.6 pages a minute with no error
+        // raised. So it is sized from what is actually free, not from the card's nominal capacity.
+        var vram = GpuMemoryProbe.TryRead();
+        var concurrency = arguments.GetInt("gpu-concurrency")
+            ?? (engine.Runtime.UsingGpu ? GpuMemoryProbe.ConcurrencyFor(vram) : 1);
+
+        var pipelineOptions = new PipelineOptions
+        {
+            GpuConcurrency = Math.Max(1, concurrency),
+            RasterWorkers = Math.Max(1, arguments.GetInt("raster-workers") ?? 2),
+        };
+
+        var pipeline = new RecognitionPipeline(
+            engine, rasteriser, pageCache, builder.SettingsFingerprint,
+            loggerFactory.CreateLogger<RecognitionPipeline>());
+
         var processor = new LibraryProcessor(
-            builder, new DocumentClassifier(), loggerFactory.CreateLogger<LibraryProcessor>(), pageCache);
+            builder, new DocumentClassifier(), loggerFactory.CreateLogger<LibraryProcessor>(),
+            pageCache, pipeline);
+
+        Console.WriteLine(vram is null
+            ? "GPU memory : not reported; recognising one page at a time."
+            : $"GPU memory : {vram}");
+        Console.WriteLine(
+            $"Pipeline   : {pipelineOptions.GpuConcurrency} page(s) on the GPU at once, " +
+            $"{pipelineOptions.RasterWorkers} rasteriser(s)" +
+            (arguments.GetInt("gpu-concurrency") is null ? "" : " (set on the command line)"));
+        Console.WriteLine();
 
         // Always survey first. It is cheap on an already-surveyed library because unchanged files
         // are left alone, and it is what makes a re-run over a finished folder a no-op.
@@ -272,6 +302,8 @@ internal static class RunCommand
         Console.WriteLine($"Processing {pending:N0} file(s)...");
         Console.WriteLine();
 
+        var runWatch = System.Diagnostics.Stopwatch.StartNew();
+
         var done = 0;
         var progress = new Progress<FileOutcome>(outcome =>
         {
@@ -291,7 +323,9 @@ internal static class RunCommand
                 : $"  {done,4}  {name,-44} {outcome.Status}: {outcome.Error}");
         });
 
-        var outcomes = processor.Run(options, progress, cancellationToken);
+        var outcomes = await processor
+            .RunAsync(options, progress, cancellationToken, pipelineOptions)
+            .ConfigureAwait(false);
 
         Console.WriteLine();
         Console.WriteLine(options.DryRun
@@ -303,6 +337,14 @@ internal static class RunCommand
 
         var worst = outcomes.Where(o => o.Status == FileStatus.Completed).Select(o => o.WorstDeviationPt).DefaultIfEmpty(0).Max();
         Console.WriteLine($"Worst alignment deviation: {worst:F3} pt");
+
+        var donePages = outcomes.Where(o => o.Status == FileStatus.Completed).Sum(o => (long)o.PageCount);
+        if (donePages > 0 && runWatch.Elapsed.TotalMinutes > 0)
+        {
+            Console.WriteLine(
+                $"Throughput: {donePages:N0} pages in {runWatch.Elapsed.TotalMinutes:F1} min, " +
+                $"{donePages / runWatch.Elapsed.TotalMinutes:F1} pages/min");
+        }
 
         // Signatures are invalidated by default, but never quietly.
         var signed = outcomes.Where(o => o.SignatureInvalidated).ToArray();
