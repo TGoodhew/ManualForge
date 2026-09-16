@@ -19,6 +19,17 @@
     <PackageVersion Include="PDFsharp" Version="6.2.4" />
   </ItemGroup>
 
+  <ItemGroup Label="Index and state">
+    <PackageVersion Include="Microsoft.Data.Sqlite" Version="10.0.11" />
+    <!-- Named explicitly for two reasons: it is the e_sqlite3 build that carries FTS5, and
+         pinning it to 2.1.13 clears GHSA-2m69-gcr7-jv3q, which the versions Microsoft.Data.Sqlite
+         pulls in by default (2.1.11 / 2.1.12) are still flagged for. -->
+    <PackageVersion Include="SQLitePCLRaw.bundle_e_sqlite3" Version="2.1.13" />
+    <PackageVersion Include="SQLitePCLRaw.core" Version="2.1.13" />
+    <PackageVersion Include="SQLitePCLRaw.lib.e_sqlite3" Version="2.1.13" />
+    <PackageVersion Include="SQLitePCLRaw.provider.e_sqlite3" Version="2.1.13" />
+  </ItemGroup>
+
   <ItemGroup Label="Platform">
     <PackageVersion Include="Microsoft.Extensions.Logging" Version="10.0.12" />
     <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.12" />

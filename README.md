@@ -2,14 +2,18 @@
 
 Searchable PDFs from scanned technical manuals, and a searchable index over them.
 
-**Status: phase 1 — console prototype, running on CUDA.** It OCRs a PDF end to end and overlays an invisible text
-layer whose alignment is measured rather than assumed. The classifier, flatten path, parallel
-pipeline, WinUI shell, FTS5 index, VLM sidecar and benchmark mode are phases 2–7 and are not built
-yet.
+**Status: phase 2 - classifier, flatten, safety and resume, running on CUDA.** It OCRs a PDF
+end to end with an invisible text layer whose alignment is measured rather than assumed,
+classifies a whole library to decide what is worth re-OCRing, rebuilds files that refuse
+modification, and processes a library resumably without ever overwriting a source. The parallel
+pipeline, WinUI shell, FTS5 index, VLM sidecar and benchmark mode are phases 3-7 and are not
+built yet.
 
 ## What phase 1 does
 
 ```
+manualforge survey <folder>                classify a library; changes nothing
+manualforge run <folder>                   classify, flatten, OCR and replace, resumably
 manualforge ocr <input.pdf> [options]      rasterise → recognise → overlay → verify
 manualforge inspect <input.pdf>            page count, sizes, landscape pages, existing text
 manualforge gpu                            which execution provider is actually active
@@ -135,6 +139,104 @@ remaining phases. Its value is running on non-NVIDIA GPUs, which this tool does 
 path remains as the fallback and degrades gracefully. This is a deviation from the original spec,
 which asked for a selectable DirectML fallback; it is reversible at any point.
 
+## The library: what is actually in it
+
+Measured over the real corpus with `manualforge survey`:
+
+```
+725 files, 119,803 pages
+
+  Class            Files     Pages  Action
+  ------------------------------------------------
+  ImageOnly          238    27,859  Ocr
+  SuspectText          3       220  Skip
+  GoodText           483    91,724  Skip
+  Unreadable           1         0  Skip
+
+  152 file(s) cannot be written to directly:
+    OwnerPassword      147   cleared by flattening
+    Signature            2   flattening would drop the signature
+    Unknown              2   unknown cause
+    Corrupt              1   needs manual attention
+```
+
+A fifth of the library refuses modification, so the flatten path is load-bearing rather than an
+edge case.
+
+## Deciding what to re-OCR
+
+Two measurements drive the classifier, and keeping them apart is the whole point:
+
+| Metric | Detects | Does **not** detect |
+|---|---|---|
+| Plausible-token ratio | garbled OCR | whether the text is English |
+| Common-word share | English prose | whether the text is any good |
+
+A parts cross-reference, a SCPI command list and a multilingual manual all score near zero on
+common-word share with flawless text. So **a low common-word share never condemns a file** — it can
+only promote a middling token score. Both numbers, and the reasoning behind the verdict, are
+reported per file.
+
+Two bugs found by measuring rather than assuming, each of which would have sent thousands of pages
+of perfectly good text back through OCR:
+
+1. Word statistics were computed from raw extracted text. Many PDFs position words rather than
+   emitting space characters, so their text arrives as one unbroken run — `DPO3034User.pdf` yields
+   *zero* whitespace characters — and every word-frequency measure reads as gibberish. Fixed by
+   segmenting with PdfPig's `GetWords()`. That alone moved 22 files out of SuspectText.
+2. Internal separators counted as noise, so `SENSe:FREQuency:STARt` scored as garbled and every
+   programming manual looked like bad OCR. Colons, hyphens, underscores, dots and slashes are now
+   treated as structure.
+
+## Flattening files that refuse modification
+
+147 files carry owner-password permissions. PDFsharp will not open them for modification, but it
+*will* import their pages, so they are rebuilt into a fresh document:
+
+```
+8350A-OSM.pdf   Modify  FAIL  owner password required
+                Import  OK    pages=384
+                FLATTEN OK    58.0 MB -> 57.9 MB   modifiable=yes
+```
+
+This is a structural rebuild, not a re-render. Page content streams and image XObjects carry across
+untouched, so a forty-year-old CCITT G4 scan arrives as the same compressed bytes — the size barely
+moving is the tell. Rasterising and rebuilding, as Ghostscript-based approaches do, would re-encode
+every page and lose detail that cannot be recovered.
+
+Every flatten is verified before it is used: page count, per-page geometry and rotation, and the
+pixel dimensions and compression filter of every image on every page must match the source.
+
+## Safety
+
+The order of operations is the guarantee:
+
+1. OCR into a temporary file. Nothing in the library has been touched.
+2. Verify: opens cleanly, page count matches, text layer is non-empty, word alignment measured.
+3. Only then move the original into `_Originals`, mirroring the source tree.
+4. Then move the new file into the original's place.
+
+Both are moves on the same volume, so each is atomic and the original exists in exactly one place
+at every instant. If step 4 fails, the log names both paths.
+
+A digitally signed file is refused rather than silently invalidated (`--allow-signed` overrides).
+`--dry-run` does everything up to step 2 and stops.
+
+Verified on a sandbox copy before the first real run: originals byte-identical to the library,
+files marked GoodText untouched, replaced files carrying full text layers, and a second run
+changing nothing at all.
+
+## Resume
+
+Per-file and per-page state lives in SQLite at `<root>/_Originals/manualforge.db`.
+
+* **Resumable** — an interrupted file keeps its finished pages, and the next run redoes only what is
+  missing.
+* **Idempotent** — re-running over a finished folder does nothing:
+  `Nothing outstanding. Every file is already finished or deliberately skipped.`
+* **Change-aware** — a source file that changes is detected by size, timestamp and a hash of its
+  first and last 256 KB, and its recorded state is discarded.
+
 ## How the text layer is built
 
 This is the part that separates a usable text layer from a useless one, so it is worth stating
@@ -172,6 +274,12 @@ Each recognised word becomes one text-showing operation inside a single `BT`/`ET
 
 ```
 src/ManualForge.Core/
+  Classification/                 text-quality metrics, classifier, per-class policy
+  Pdf/PdfCapabilities.cs          what blocks modification, detected up front
+  Pdf/PdfFlattener.cs             lossless rebuild plus before/after verification
+  Pdf/TextLayerStripper.cs        removes an existing text layer for strip-and-redo
+  State/JobStore.cs               SQLite per-file and per-page progress
+  Pipeline/LibraryProcessor.cs    classify, flatten, OCR, verify, replace
   Geometry/PageGeometry.cs        image pixels ↔ PDF user space; rotation, crop origin
   Text/GlyphlessTrueTypeFont.cs   generates the blank font program
   Text/InvisibleFont.cs           Type0/CIDFontType2 objects, subsetting, ToUnicode
@@ -191,7 +299,7 @@ tests/ManualForge.Core.Tests/     50 tests, no GPU or network needed
 dotnet test
 ```
 
-50 tests, about 0.7 s, no models and no network required:
+92 tests, about 0.7 s, no models and no network required:
 
 - **`PageGeometryTests`** — the corner mapping for all four rotations, non-zero crop origins,
   text-matrix direction, points-per-pixel, rotation normalisation.
@@ -202,6 +310,12 @@ dotnet test
   origins, asserting every word lands within 0.02 pt (four-decimal content-stream rounding).
   Also covers non-Latin-1 characters, `Tz` width, confidence filtering, and the writer surviving a
   page that leaves an unbalanced `q` behind.
+- **`ClassifierTests`** - the false-positive cases this corpus is full of: parts
+  cross-references, SCPI mnemonics, multilingual manuals, plus regressions for both bugs above.
+- **`FlattenTests`** - an owner-password document is detected, flattened, and comes out
+  modifiable with page count, geometry, rotation and every image stream unchanged. Stripping
+  removes text and leaves images alone.
+- **`JobStoreTests`** - resume, idempotency, and a changed source resetting its own progress.
 
 ## Open questions for phase 2
 

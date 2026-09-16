@@ -104,6 +104,8 @@ internal sealed class CommandLine
             usage:
               manualforge ocr <input.pdf> [options]      OCR a PDF and overlay an invisible text layer
               manualforge inspect <input.pdf>            Report page count, sizes and existing text
+              manualforge survey <folder>                Classify a library; changes nothing
+              manualforge run <folder>                   Classify, flatten, OCR and replace, resumably
               manualforge gpu                            Report which execution provider is active
 
             ocr options:
@@ -119,6 +121,15 @@ internal sealed class CommandLine
               --verify-ink            Re-render both files and prove the page image is unchanged.
               --dry-run               Do everything except write the output.
               --overwrite             Replace an existing output file.
+
+            survey / run options:
+              --policy <spec>         Per-class actions, e.g. ImageOnly=ocr,SuspectText=redo.
+                                      Default: ImageOnly=ocr and everything else skipped.
+              --originals <name>      Name of the originals folder. Default _Originals.
+              --state <path>          State database. Default <root>/_Originals/manualforge.db.
+              --csv <path>            Write the survey table to CSV (survey only).
+              --limit <n>             Stop after n files (run only).
+              --survey-only           Classify and report, then stop (run only).
 
             general options:
               --models <path>         Model cache directory.

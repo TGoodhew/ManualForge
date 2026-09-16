@@ -39,6 +39,8 @@ try
         "gpu" => await GpuCommand.RunAsync(arguments, loggerFactory),
         "ocr" => await OcrCommand.RunAsync(arguments, loggerFactory, logPath, cancellation.Token),
         "inspect" => InspectCommand.Run(arguments),
+        "survey" => SurveyCommand.Run(arguments, loggerFactory, cancellation.Token),
+        "run" => await RunCommand.RunAsync(arguments, loggerFactory, logPath, cancellation.Token),
         _ => Unknown(arguments.Command),
     };
 }
