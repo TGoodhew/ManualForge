@@ -2,7 +2,7 @@
 
 Searchable PDFs from scanned technical manuals, and a searchable index over them.
 
-**Status: phase 1 — console prototype.** It OCRs a PDF end to end and overlays an invisible text
+**Status: phase 1 — console prototype, running on CUDA.** It OCRs a PDF end to end and overlays an invisible text
 layer whose alignment is measured rather than assumed. The classifier, flatten path, parallel
 pipeline, WinUI shell, FTS5 index, VLM sidecar and benchmark mode are phases 2–7 and are not built
 yet.
@@ -79,50 +79,61 @@ A first run, on three pages, writing nothing over the source:
 manualforge ocr "C:\...\Manuals\11683A.pdf" --out out.pdf --pages 6,29,31 --verify-ink
 ```
 
-## CUDA vs DirectML
+## GPU: CUDA
 
-**On this machine, neither GPU path is active yet, and OCR runs on CPU at roughly 22 pages/min.**
-Both need a decision from you before phase 3, where throughput starts to matter.
+**CUDA is active on this machine.** Measured on 20 pages of `11683A.pdf` at 300 dpi:
 
-### CUDA
+| Provider | 20 pages | Throughput | ~100k pages |
+|---|---|---|---|
+| CPU (24 threads) | 78.8 s | 15.2 pages/min | ~110 hours |
+| CUDA (RTX 3060 Ti) | 21.5 s | **55.9 pages/min** | ~30 hours |
 
-`PaddleOcrNet.Gpu` brings `Microsoft.ML.OnnxRuntime.Gpu` 1.30.0, whose CUDA provider is built
-against **CUDA 13**, not CUDA 12:
+A 3.7x speedup, before phase 3 overlaps rasterisation and PDF assembly with inference.
+
+### What is installed
+
+- **CUDA Toolkit 13.4** at `C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.4`.
+  ONNX Runtime 1.30 hard-imports `cublas64_13.dll` and `cublasLt64_13.dll`, so CUDA **13** is
+  required — a CUDA 12 install will not load.
+- **cuDNN 9.26.0.51 for CUDA 13** at
+  `C:\Tools\cudnn-9.26.0.51\cudnn-windows-x86_64-9.26.0.51_cuda13-archive\bin\x64`.
+
+Note the trap: the cuDNN zip extracts into a nested folder, so the directory holding the DLLs sits
+three levels below where the zip lands. Putting the extract root on `PATH` instead of the inner
+`bin\x64` silently falls back to CPU.
+
+To check the whole chain at once:
 
 ```
-Error loading "onnxruntime_providers_cuda.dll" which depends on "cublasLt64_13.dll" which is missing.
+manualforge gpu     ->   Active provider : Cuda
+                         Using GPU       : True
 ```
 
-The RTX 3060 Ti and its 616.56 driver (CUDA 13.4 UMD) are fine. What is missing is the user-mode
-runtime. To enable it, install the **CUDA 13.x runtime** and **cuDNN 9** and make sure their `bin`
-directories are on `PATH`. Nothing in the project needs to change; `manualforge gpu` will then
-report `Cuda`.
+If it reports `Cpu`, the hint line names the exact DLL that failed to load.
+
+### VRAM is the binding constraint, not compute
+
+Peak VRAM during that run was **7,556 MiB of 8,192**, and the desktop, Copilot and Claude already
+held 2,865 MiB before it started — roughly **640 MiB of headroom** at batch size 8, one page at a
+time. Phase 3 must therefore size batches against *free* VRAM measured at startup rather than
+against the card's nominal 8 GB, and must not assume it can raise the batch size or run pages
+concurrently without checking first.
+
+### Results are not bit-identical across providers
+
+The same 20 pages produced 6,498 words on CUDA and 6,495 on CPU: three words in about 6,500, or
+0.05%. Different kernels reduce in different orders, which moves a handful of borderline detections
+across the confidence threshold. Nothing is wrong, but benchmark mode in phase 7 has to record
+which provider produced a result rather than treating the two as interchangeable.
 
 ### DirectML
 
-`--engine directml` currently falls back to CPU:
-
-```
-Unable to find an entry point named 'OrtSessionOptionsAppendExecutionProvider_DML' in DLL 'onnxruntime'.
-```
-
-DirectML lives in a **separate package, `Microsoft.ML.OnnxRuntime.DirectML`, which is not on the
-agreed dependency list**, so it has not been added. Note that it and `Microsoft.ML.OnnxRuntime.Gpu`
-both ship their own `onnxruntime.dll` and cannot sit in the same output folder, so supporting both
-means a build configuration switch rather than a runtime setting. See "Open questions" below.
-
-### Degrading gracefully
-
-Whatever is missing, the engine reports what it resolved to and carries on:
-
-```
-Active provider       : Cpu
-Using GPU             : False
-Hint                  : CUDA execution provider unavailable; OCR will run on CPU. ...
-```
-
-`manualforge gpu` is the first thing to check when throughput looks wrong — a silent fall back to
-CPU costs roughly an order of magnitude.
+Not added, deliberately. `Microsoft.ML.OnnxRuntime.DirectML` is not on the agreed dependency list,
+and it ships its own `onnxruntime.dll`, so it cannot coexist with `Microsoft.ML.OnnxRuntime.Gpu` in
+one output folder — supporting both would mean two build configurations carried through the
+remaining phases. Its value is running on non-NVIDIA GPUs, which this tool does not need. The CPU
+path remains as the fallback and degrades gracefully. This is a deviation from the original spec,
+which asked for a selectable DirectML fallback; it is reversible at any point.
 
 ## How the text layer is built
 
@@ -194,14 +205,15 @@ dotnet test
 
 ## Open questions for phase 2
 
-1. **DirectML** — add `Microsoft.ML.OnnxRuntime.DirectML`? It is Microsoft's own package, but it is
-   not on the agreed list and it conflicts with the CUDA package in the same output folder.
-2. **CUDA 13 runtime + cuDNN 9** — worth installing on this machine? It is the fastest path and
-   needs no project change.
+1. ~~**DirectML**~~ — resolved: not added, see "DirectML" above.
+2. ~~**CUDA 13 runtime + cuDNN 9**~~ — resolved: installed and active, 3.7x faster.
 3. **Serilog** — file logging is currently a 150-line hand-rolled JSON-lines provider to avoid an
    unapproved dependency. Fine to keep, or would you rather have Serilog?
 4. **xunit** — the test projects use xunit, the `dotnet new` default. Called out for completeness
    since it was not on the list.
-5. **Baseline offset** — `TextLayerOptions.BaselineOffsetFraction` currently defaults to 0, putting
+5. **Locating CUDA without `PATH`** — the app relies on the user's `PATH` to find the CUDA and
+   cuDNN DLLs, which is fragile for something launched by double-clicking. Phase 3 should locate
+   them at startup and add them to the process DLL search path, reporting clearly when it cannot.
+6. **Baseline offset** — `TextLayerOptions.BaselineOffsetFraction` currently defaults to 0, putting
    the baseline on the bottom edge of the detected ink box. Worth tuning against ground truth in
    phase 7 rather than guessing now.
