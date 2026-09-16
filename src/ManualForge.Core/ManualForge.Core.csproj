@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <PackageReference Include="PaddleOcrNet" />
+    <PackageReference Include="PaddleOcrNet.Gpu" />
+    <PackageReference Include="PDFtoImage" />
+    <PackageReference Include="PdfPig" />
+    <PackageReference Include="PDFsharp" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+  </ItemGroup>
+
+</Project>

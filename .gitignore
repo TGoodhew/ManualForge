@@ -1,0 +1,14 @@
+bin/
+obj/
+.vs/
+*.user
+*.suo
+artifacts/
+TestResults/
+
+# Never commit a manual or anything produced from one.
+*.pdf
+*.searchable.pdf
+models/
+logs/
+*.jsonl
