@@ -1,6 +1,7 @@
 using System.Text;
 using ManualForge.Core.Geometry;
 using ManualForge.Core.Ocr;
+using ManualForge.Core.Pipeline;
 using ManualForge.Core.Text;
 using ManualForge.Core.Verification;
 using PdfSharp.Pdf;
@@ -267,6 +268,97 @@ public class TextLayerRoundTripTests : IDisposable
         // ...whereas verifying against everything offered would not, which is the bug this guards.
         var naive = TextLayerVerifier.VerifyPage(outputPath, 1, words, geometry);
         Assert.True(naive.MatchedWords < words.Length);
+    }
+
+    [Fact]
+    public void ReadingAPagesGeometryDoesNotAddACropBoxToIt()
+    {
+        // Regression, and an expensive one. PDFsharp's CropBox getter *materialises* the entry when
+        // it is absent, so simply reading page.CropBox to work out the geometry wrote
+        // /CropBox [0 0 0 0] into every page that had none. PDFium ignores that invalid rectangle,
+        // but PdfPig honours it and reports the page as zero-sized, which threw every extracted
+        // coordinate out by a whole page dimension. Reading a page must not change it.
+        const double w = 612, h = 792;
+        var path = Path.Combine(_directory, "nocrop.pdf");
+
+        using (var document = new PdfDocument())
+        {
+            var page = document.AddPage();
+            page.MediaBox = new PdfRectangle(
+                new PdfSharp.Drawing.XPoint(0, 0), new PdfSharp.Drawing.XPoint(w, h));
+            page.Rotate = 90;   // deliberately no CropBox
+            var content = page.Contents.AppendContent();
+            content.CreateStream("q 0.85 g 10 10 80 40 re f Q\n"u8.ToArray());
+            document.Save(path);
+        }
+
+        var saved = Path.Combine(_directory, "nocrop-after.pdf");
+        using (var document = PdfReader.Open(path, PdfDocumentOpenMode.Modify))
+        {
+            var page = document.Pages[0];
+            Assert.False(page.Elements.ContainsKey("/CropBox"), "The fixture should start without a crop box.");
+
+            // The call under test. It must read the boxes without writing any.
+            var geometry = SearchablePdfBuilder.CreateGeometry(page, 2550, 3300, 1);
+
+            Assert.False(page.Elements.ContainsKey("/CropBox"),
+                "Reading the geometry added a /CropBox to a page that had none.");
+            Assert.Equal(90, geometry.Rotation);
+            Assert.Equal(w, geometry.CropWidth, 0.01);
+            Assert.Equal(h, geometry.CropHeight, 0.01);
+
+            document.Save(saved);
+        }
+
+        // And it must still be absent once written out, where a reader would see it.
+        using (var written = PdfReader.Open(saved, PdfDocumentOpenMode.Modify))
+            Assert.False(written.Pages[0].Elements.ContainsKey("/CropBox"));
+
+        using var read = UglyToad.PdfPig.PdfDocument.Open(saved);
+        var readPage = read.GetPage(1);
+        Assert.True(readPage.Width > 0 && readPage.Height > 0,
+            $"PdfPig reports a {readPage.Width}x{readPage.Height} page, so the crop box is degenerate.");
+    }
+
+    [Fact]
+    public void WordsLandCorrectlyOnAPageThatHasNoCropBox()
+    {
+        const double w = 612, h = 792;
+        var path = Path.Combine(_directory, "nocrop2.pdf");
+
+        using (var document = new PdfDocument())
+        {
+            var page = document.AddPage();
+            page.MediaBox = new PdfRectangle(
+                new PdfSharp.Drawing.XPoint(0, 0), new PdfSharp.Drawing.XPoint(w, h));
+            page.Rotate = 90;
+            var content = page.Contents.AppendContent();
+            content.CreateStream("q 0.85 g 10 10 80 40 re f Q\n"u8.ToArray());
+            document.Save(path);
+        }
+
+        var words = SampleWords();
+        var outputPath = Path.Combine(_directory, "nocrop2.ocr.pdf");
+
+        using (var document = PdfReader.Open(path, PdfDocumentOpenMode.Modify))
+        {
+            var page = document.Pages[0];
+            var geometry = SearchablePdfBuilder.CreateGeometry(page, 3300, 2550, 1);
+            var font = new InvisibleFont(document);
+            new TextLayerWriter().WritePage(page, geometry, words, font);
+            font.Finalise();
+            document.Save(outputPath);
+        }
+
+        using (var document = PdfReader.Open(outputPath, PdfDocumentOpenMode.Modify))
+        {
+            var geometry = SearchablePdfBuilder.CreateGeometry(document.Pages[0], 3300, 2550, 1);
+            var verification = TextLayerVerifier.VerifyPage(outputPath, 1, words, geometry);
+
+            Assert.Equal(words.Length, verification.MatchedWords);
+            Assert.True(verification.WorstDeviationPt < TolerancePt,
+                $"worst deviation {verification.WorstDeviationPt:F3} pt on a page with no crop box");
+        }
     }
 
     [Fact]

@@ -256,8 +256,14 @@ public sealed class SearchablePdfBuilder(
     {
         ArgumentNullException.ThrowIfNull(page);
 
-        var media = page.MediaBox;
-        var crop = page.CropBox;
+        // The ReadOnly accessors matter more than they look. PDFsharp's ordinary MediaBox and
+        // CropBox getters *materialise* the entry when it is absent, so merely reading
+        // page.CropBox on a page that has no crop box writes /CropBox [0 0 0 0] into the document.
+        // That is an invalid rectangle: PDFium ignores it, but PdfPig honours it and reports the
+        // page as zero-sized, which throws every extracted text coordinate out by a page
+        // dimension. Reading a page must not change it.
+        var media = page.MediaBoxReadOnly;
+        var crop = page.CropBoxReadOnly;
 
         // A crop box is optional, and a degenerate one appears often enough in old scans that it
         // is worth falling back rather than failing.
