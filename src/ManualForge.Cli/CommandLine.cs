@@ -130,6 +130,8 @@ internal sealed class CommandLine
               --csv <path>            Write the survey table to CSV (survey only).
               --limit <n>             Stop after n files (run only).
               --survey-only           Classify and report, then stop (run only).
+              --retry-skipped         Reconsider files skipped by an earlier run.
+              --allow-signed          Process digitally signed files, invalidating their signatures.
 
             general options:
               --models <path>         Model cache directory.

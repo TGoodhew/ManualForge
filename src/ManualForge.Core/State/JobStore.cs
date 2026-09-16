@@ -294,6 +294,24 @@ public sealed class JobStore : IDisposable
         return pages;
     }
 
+    /// <summary>
+    /// Puts every deliberately-skipped file back to Discovered so the next survey reclassifies it.
+    ///
+    /// Skipping is a decision, not a fact about the file, and decisions change: a policy is
+    /// widened, or a file was skipped for a reason that has since been fixed. Without this the only
+    /// way to revisit a skipped file is to delete the state database, which throws away the history
+    /// of everything else as well.
+    /// </summary>
+    public int ResetSkipped()
+    {
+        using var command = _connection.CreateCommand();
+        command.CommandText =
+            "UPDATE files SET status = 'Discovered', page_count = 0, error = NULL, updated_utc = $u " +
+            "WHERE status = 'Skipped'";
+        command.Parameters.AddWithValue("$u", Now());
+        return command.ExecuteNonQuery();
+    }
+
     public void ClearPages(string path)
     {
         using var command = _connection.CreateCommand();

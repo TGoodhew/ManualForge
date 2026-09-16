@@ -579,6 +579,38 @@ public class JobStoreTests : IDisposable
     }
 
     [Fact]
+    public void SkippedFilesCanBeReconsideredWithoutDiscardingEverythingElse()
+    {
+        // Skipping is a decision, not a fact about the file. When the reason changes - a widened
+        // policy, or a skip that turned out to be a false positive - the skipped files have to come
+        // back without throwing away the record of everything already finished.
+        var skipped = MakeFile("skipped.pdf");
+        var finished = MakeFile("finished.pdf");
+
+        using var store = NewStore("retry.db");
+
+        store.Register(skipped);
+        store.RecordClassification(skipped, Classification(skipped), Capabilities(skipped), ClassAction.Ocr);
+        store.SetStatus(skipped, FileStatus.Skipped, "refused as signed");
+
+        store.Register(finished);
+        store.RecordClassification(finished, Classification(finished), Capabilities(finished), ClassAction.Ocr);
+        store.UpdateFingerprint(finished);
+        store.SetStatus(finished, FileStatus.Completed);
+
+        Assert.Empty(store.Outstanding());
+
+        var reset = store.ResetSkipped();
+
+        Assert.Equal(1, reset);
+        Assert.Equal(FileStatus.Discovered, store.Find(skipped)!.Status);
+        Assert.Null(store.Find(skipped)!.Error);
+
+        // The finished file must be untouched by this.
+        Assert.Equal(FileStatus.Completed, store.Find(finished)!.Status);
+    }
+
+    [Fact]
     public void ClassificationNumbersRoundTrip()
     {
         var file = MakeFile("i.pdf");

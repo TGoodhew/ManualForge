@@ -37,6 +37,12 @@ public sealed class LibraryOptions
     /// signature, and flattening removes it outright.
     /// </summary>
     public bool AllowSignedFiles { get; init; }
+
+    /// <summary>
+    /// Reconsider files that were previously skipped. Needed whenever the reason for skipping has
+    /// changed — a widened policy, or a skip that turned out to be wrong.
+    /// </summary>
+    public bool RetrySkipped { get; init; }
 }
 
 public sealed record FileOutcome(
@@ -83,6 +89,12 @@ public sealed class LibraryProcessor(
     {
         ArgumentNullException.ThrowIfNull(options);
         using var store = OpenStore(options);
+
+        if (options.RetrySkipped)
+        {
+            var reset = store.ResetSkipped();
+            _logger.LogInformation("Reconsidering {Count} previously skipped file(s)", reset);
+        }
 
         foreach (var path in Discover(options))
         {

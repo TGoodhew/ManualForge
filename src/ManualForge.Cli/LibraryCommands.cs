@@ -158,6 +158,7 @@ internal static class RunCommand
             Limit = arguments.GetInt("limit") ?? 0,
             OriginalsFolderName = arguments.Get("originals") ?? "_Originals",
             AllowSignedFiles = arguments.Has("allow-signed"),
+            RetrySkipped = arguments.Has("retry-skipped"),
         };
 
         var engineOptions = new OcrEngineOptions
