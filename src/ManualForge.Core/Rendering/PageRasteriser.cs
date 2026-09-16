@@ -54,7 +54,7 @@ public sealed class RasterisedPage(int pageNumber, SKBitmap bitmap, int requeste
 /// the bitmap matches what a reader displays; <see cref="Geometry.PageGeometry"/> undoes both to
 /// get back to content-stream coordinates.
 /// </summary>
-public sealed class PageRasteriser(RasterOptions? options = null)
+public class PageRasteriser(RasterOptions? options = null)
 {
     private readonly RasterOptions _options = options ?? new RasterOptions();
 
@@ -74,7 +74,13 @@ public sealed class PageRasteriser(RasterOptions? options = null)
     }
 
     /// <param name="pageIndex">Zero-based page index.</param>
-    public RasterisedPage Render(byte[] pdfBytes, int pageIndex)
+    /// <remarks>
+    /// Virtual so a test can count what the pipeline actually asked for. The bound on rasterised
+    /// pages waiting for the GPU is the property that keeps memory flat on a long manual, and a
+    /// test that cannot see the rasteriser can only assert it indirectly - which is how the first
+    /// version of that test came to pass against an unbounded queue.
+    /// </remarks>
+    public virtual RasterisedPage Render(byte[] pdfBytes, int pageIndex)
     {
         ArgumentNullException.ThrowIfNull(pdfBytes);
 

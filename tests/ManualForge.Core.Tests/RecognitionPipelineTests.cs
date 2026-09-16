@@ -30,11 +30,41 @@ public class RecognitionPipelineTests : IDisposable
 
     private const string Settings = "test-settings";
 
+    /// <summary>
+    /// How long any wait on the pipeline is allowed to take.
+    ///
+    /// Every test here reads from a channel that the pipeline is responsible for completing, so a
+    /// pipeline that fails to complete one does not fail the test, it hangs it. That is worse than
+    /// a failure: it wedges the suite, leaves a test host holding the build output, and gives no
+    /// clue what broke. Checking these tests against a deliberately broken build is how that was
+    /// discovered, so the bound is here rather than in the one test that happened to have it.
+    /// </summary>
+    private static readonly TimeSpan Patience = TimeSpan.FromSeconds(30);
+
     private string Scanned(string name, int pages) =>
         TestPdf.Scanned(Path.Combine(_directory, name), pages);
 
     private static RecognitionPipeline NewPipeline(IOcrEngine engine, IPageOcrCache cache) =>
         new(engine, new PageRasteriser(new RasterOptions { Dpi = 150 }), cache, Settings);
+
+    private static RecognitionPipeline NewPipeline(
+        IOcrEngine engine, IPageOcrCache cache, PageRasteriser rasteriser) =>
+        new(engine, rasteriser, cache, Settings);
+
+    /// <summary>Counts every page the pipeline asked to have rasterised.</summary>
+    private sealed class CountingRasteriser(RasterOptions options) : PageRasteriser(options)
+    {
+        private int _count;
+
+        public int Rasterised => Volatile.Read(ref _count);
+
+        public override RasterisedPage Render(byte[] pdfBytes, int pageIndex)
+        {
+            var page = base.Render(pdfBytes, pageIndex);
+            Interlocked.Increment(ref _count);
+            return page;
+        }
+    }
 
     private static RecognitionJob Job(string path, int pages) =>
         new(path, Path.GetFullPath(path), pages);
@@ -47,7 +77,7 @@ public class RecognitionPipelineTests : IDisposable
         var cache = new MemoryPageOcrCache();
         var engine = new FakeOcrEngine();
 
-        var report = await NewPipeline(engine, cache).RunAsync([Job(a, 3), Job(b, 2)]);
+        var report = await NewPipeline(engine, cache).RunAsync([Job(a, 3), Job(b, 2)]).WaitAsync(Patience);
 
         Assert.Equal(5, report.PagesRecognised);
         Assert.Equal(0, report.PagesReused);
@@ -79,7 +109,7 @@ public class RecognitionPipelineTests : IDisposable
                 new CachedPage(1275, 1649, [new RecognisedWord("EARLIER", new RectD(10, 10, 50, 12), 0.9)]));
         }
 
-        var report = await NewPipeline(engine, cache).RunAsync([Job(path, 4)]);
+        var report = await NewPipeline(engine, cache).RunAsync([Job(path, 4)]).WaitAsync(Patience);
 
         Assert.Equal(2, report.PagesRecognised);
         Assert.Equal(2, report.PagesReused);
@@ -112,9 +142,10 @@ public class RecognitionPipelineTests : IDisposable
         });
 
         await NewPipeline(new FakeOcrEngine(), cache)
-            .RunAsync([Job(a, 2), Job(b, 3)], new PipelineOptions { Completed = completed.Writer });
+            .RunAsync([Job(a, 2), Job(b, 3)], new PipelineOptions { Completed = completed.Writer })
+            .WaitAsync(Patience);
 
-        await consumer;
+        await consumer.WaitAsync(Patience);
 
         Assert.Equal(2, announced.Count);
         Assert.Equal(2, announced.Single(x => x.Path == Path.GetFullPath(a)).CachedAtTheTime);
@@ -135,10 +166,12 @@ public class RecognitionPipelineTests : IDisposable
         }
 
         var completed = Channel.CreateUnbounded<RecognitionJob>();
-        await NewPipeline(engine, cache).RunAsync([Job(path, 2)], new PipelineOptions { Completed = completed.Writer });
+        await NewPipeline(engine, cache)
+            .RunAsync([Job(path, 2)], new PipelineOptions { Completed = completed.Writer })
+            .WaitAsync(Patience);
 
         Assert.Equal(0, engine.PagesRecognised);
-        Assert.Single(await completed.Reader.ReadAllAsync().ToListAsync());
+        Assert.Single(await completed.Reader.ReadAllAsync().ToListAsync().WaitAsync(Patience));
     }
 
     [Fact]
@@ -148,7 +181,8 @@ public class RecognitionPipelineTests : IDisposable
         var engine = new FakeOcrEngine { OnPage = _ => Task.Delay(40) };
 
         await NewPipeline(engine, new MemoryPageOcrCache())
-            .RunAsync([Job(path, 8)], new PipelineOptions { GpuConcurrency = 3, RasterWorkers = 2 });
+            .RunAsync([Job(path, 8)], new PipelineOptions { GpuConcurrency = 3, RasterWorkers = 2 })
+            .WaitAsync(Patience);
 
         // The whole point of the stage: more than one page in flight at a time. Exactly three is
         // not guaranteed on a loaded machine, but more than one is, given eight pages and a delay
@@ -163,7 +197,8 @@ public class RecognitionPipelineTests : IDisposable
         var engine = new FakeOcrEngine { OnPage = _ => Task.Delay(20) };
 
         await NewPipeline(engine, new MemoryPageOcrCache())
-            .RunAsync([Job(path, 6)], new PipelineOptions { GpuConcurrency = 1, RasterWorkers = 2 });
+            .RunAsync([Job(path, 6)], new PipelineOptions { GpuConcurrency = 1, RasterWorkers = 2 })
+            .WaitAsync(Patience);
 
         // Past what VRAM holds, throughput does not degrade, it collapses. So a request for one
         // has to mean one.
@@ -176,26 +211,50 @@ public class RecognitionPipelineTests : IDisposable
         // A 300 dpi page is several megabytes decoded. An unbounded queue in front of the slowest
         // stage would let a fast rasteriser fill the heap with bitmaps the GPU will not reach for
         // minutes, so the queue depth is what keeps memory flat on a 639-page manual.
-        var path = Scanned("a.pdf", 20);
-        var cache = new MemoryPageOcrCache();
-        var engine = new FakeOcrEngine { OnPage = _ => Task.Delay(30) };
+        //
+        // This asserts the lead directly - pages rasterised minus pages recognised - because the
+        // first version of it inferred the bound from how far recognition had got, which an
+        // unbounded queue does not change at all. It passed against exactly the defect it was
+        // written to catch.
+        const int pages = 24;
+        const int queueDepth = 2;
+        const int rasterWorkers = 4;
 
-        var pipeline = NewPipeline(engine, cache);
-        var run = pipeline.RunAsync([Job(path, 20)], new PipelineOptions
+        var path = Scanned("a.pdf", pages);
+        var rasteriser = new CountingRasteriser(new RasterOptions { Dpi = 150 });
+
+        var worstLead = 0;
+        var engine = new FakeOcrEngine
         {
-            RasterWorkers = 4,
-            GpuConcurrency = 1,
-            RasterQueueDepth = 2,
-        });
+            OnPage = _ =>
+            {
+                // Sampled while a page is held in recognition, which is when the rasteriser has
+                // had every chance to run ahead.
+                var lead = rasteriser.Rasterised - _recognised;
+                worstLead = Math.Max(worstLead, lead);
+                Interlocked.Increment(ref _recognised);
+                return Task.Delay(25);
+            },
+        };
 
-        // While the GPU is the bottleneck, the rasteriser cannot be more than the queue depth plus
-        // its own workers ahead of it, so recognition is still going when most pages are unread.
-        await Task.Delay(120);
-        Assert.True(engine.PagesRecognised < 20, "the run finished before back-pressure could be observed");
+        var report = await NewPipeline(engine, new MemoryPageOcrCache(), rasteriser)
+            .RunAsync([Job(path, pages)], new PipelineOptions
+            {
+                RasterWorkers = rasterWorkers,
+                GpuConcurrency = 1,
+                RasterQueueDepth = queueDepth,
+            })
+            .WaitAsync(Patience);
 
-        var report = await run;
-        Assert.Equal(20, report.PagesRecognised);
+        Assert.Equal(pages, report.PagesRecognised);
+
+        // At most the queue itself, plus one page held by each worker waiting to hand it over,
+        // plus the one being recognised. Anything beyond that means the bound is not holding.
+        Assert.InRange(worstLead, 1, queueDepth + rasterWorkers + 1);
+        Assert.True(worstLead < pages, "the rasteriser ran ahead of the GPU without limit");
     }
+
+    private int _recognised;
 
     [Fact]
     public async Task CancellingStopsTheRunAndLetsTheConsumerFinish()
@@ -219,8 +278,8 @@ public class RecognitionPipelineTests : IDisposable
         await Task.Delay(100);
         await cancellation.CancelAsync();
 
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run);
-        await consumer.WaitAsync(TimeSpan.FromSeconds(10));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run.WaitAsync(Patience));
+        await consumer.WaitAsync(Patience);
     }
 
     [Fact]
@@ -239,7 +298,8 @@ public class RecognitionPipelineTests : IDisposable
 
         var completed = Channel.CreateUnbounded<RecognitionJob>();
         var report = await NewPipeline(engine, cache)
-            .RunAsync([Job(path, 4)], new PipelineOptions { Completed = completed.Writer });
+            .RunAsync([Job(path, 4)], new PipelineOptions { Completed = completed.Writer })
+            .WaitAsync(Patience);
 
         Assert.Equal(3, report.PagesRecognised);
         Assert.Equal(1, report.PagesFailed);
@@ -247,7 +307,7 @@ public class RecognitionPipelineTests : IDisposable
         // The document is still handed on. The page it could not do is simply not cached, and the
         // assembler will rasterise and recognise it itself - which is where a failure belongs,
         // because that is the code that records it against the file.
-        Assert.Single(await completed.Reader.ReadAllAsync().ToListAsync());
+        Assert.Single(await completed.Reader.ReadAllAsync().ToListAsync().WaitAsync(Patience));
         Assert.Null(cache.TryGet(Path.GetFullPath(path), 2, Settings));
         Assert.NotNull(cache.TryGet(Path.GetFullPath(path), 3, Settings));
     }
@@ -259,7 +319,7 @@ public class RecognitionPipelineTests : IDisposable
         var cache = new MemoryPageOcrCache();
 
         var report = await NewPipeline(new FakeOcrEngine { MisreportPixelWidth = 999 }, cache)
-            .RunAsync([Job(path, 2)]);
+            .RunAsync([Job(path, 2)]).WaitAsync(Patience);
 
         // Boxes from a differently sized raster would be wrong everywhere and undetectably so.
         Assert.Equal(0, report.PagesRecognised);
@@ -274,11 +334,13 @@ public class RecognitionPipelineTests : IDisposable
 
         var serial = new MemoryPageOcrCache();
         await NewPipeline(new FakeOcrEngine(), serial)
-            .RunAsync([Job(path, 6)], new PipelineOptions { GpuConcurrency = 1, RasterWorkers = 1 });
+            .RunAsync([Job(path, 6)], new PipelineOptions { GpuConcurrency = 1, RasterWorkers = 1 })
+            .WaitAsync(Patience);
 
         var parallel = new MemoryPageOcrCache();
         await NewPipeline(new FakeOcrEngine(), parallel)
-            .RunAsync([Job(path, 6)], new PipelineOptions { GpuConcurrency = 3, RasterWorkers = 4 });
+            .RunAsync([Job(path, 6)], new PipelineOptions { GpuConcurrency = 3, RasterWorkers = 4 })
+            .WaitAsync(Patience);
 
         for (var page = 1; page <= 6; page++)
         {
