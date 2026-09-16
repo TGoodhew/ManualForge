@@ -45,6 +45,29 @@ public class DeduplicationTests : IDisposable
     }
 
     [Fact]
+    public void ReferenceCopiesAndPreservedOriginalsAreNeverDiscoveredAsWork()
+    {
+        // BASELINE holds another engine's output, kept so its quality can be measured against ours.
+        // Processing those would overwrite the very thing they exist to compare against.
+        Write("real-manual.pdf", "a manual");
+        Write(Path.Combine("BASELINE", "real-manual.pdf"), "the same manual as Acrobat left it");
+        Write(Path.Combine("_Originals", "real-manual.pdf"), "the untouched original");
+        Write(Path.Combine("Subfolder", "another.pdf"), "another manual");
+
+        var options = new LibraryOptions { Root = _directory };
+        var found = new LibraryProcessor(null, new DocumentClassifier())
+            .Discover(options)
+            .Select(f => Path.GetRelativePath(_directory, f))
+            .ToArray();
+
+        Assert.Equal(2, found.Length);
+        Assert.Contains("real-manual.pdf", found);
+        Assert.Contains(Path.Combine("Subfolder", "another.pdf"), found);
+        Assert.DoesNotContain(found, f => f.StartsWith("BASELINE", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(found, f => f.StartsWith("_Originals", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void IdenticalFilesAreRecognisedOnceAndCopiedToTheRest()
     {
         const string content = "the same scanned manual, byte for byte";

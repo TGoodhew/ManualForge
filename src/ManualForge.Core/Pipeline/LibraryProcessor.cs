@@ -17,6 +17,15 @@ public sealed class LibraryOptions
     /// <summary>Where untouched originals are kept, mirroring the source tree.</summary>
     public string OriginalsFolderName { get; init; } = "_Originals";
 
+    /// <summary>
+    /// Top-level folders excluded from discovery, beyond the originals tree.
+    ///
+    /// BASELINE holds reference copies kept deliberately as they are — another engine's output,
+    /// retained so its quality can be measured against ours. Processing those would overwrite the
+    /// very thing they exist to compare against, so they are never candidates for work.
+    /// </summary>
+    public IReadOnlyList<string> ExcludedFolderNames { get; init; } = ["BASELINE"];
+
     /// <summary>State database. Defaults to one inside the originals folder.</summary>
     public string? StatePath { get; init; }
 
@@ -468,11 +477,18 @@ public sealed class LibraryProcessor(
     public IEnumerable<string> Discover(LibraryOptions options)
     {
         var root = Path.GetFullPath(options.Root);
-        var originals = Path.Combine(root, options.OriginalsFolderName);
+
+        var excluded = new List<string>
+        {
+            // Never treat an original we set aside as a new input; that would loop forever.
+            Path.Combine(root, options.OriginalsFolderName) + Path.DirectorySeparatorChar,
+        };
+
+        foreach (var name in options.ExcludedFolderNames)
+            excluded.Add(Path.Combine(root, name) + Path.DirectorySeparatorChar);
 
         return Directory.EnumerateFiles(root, "*.pdf", SearchOption.AllDirectories)
-            // Never treat an original we set aside as a new input; that would loop forever.
-            .Where(f => !f.StartsWith(originals + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            .Where(f => !excluded.Any(e => f.StartsWith(e, StringComparison.OrdinalIgnoreCase)))
             .OrderBy(f => f, StringComparer.OrdinalIgnoreCase);
     }
 
