@@ -509,9 +509,21 @@ to `%LOCALAPPDATA%\Packages\Claude_<publisher>\LocalCache\Roaming\Claude\`.
 ## Working alongside GPIB-MCP
 
 [GPIB-MCP](https://github.com/TGoodhew/GPIB-MCP) is an MCP server that controls GPIB/VISA test
-instruments, and it has a `manual_search` tool over the same folder of manuals this indexes. The two
-are **complementary and neither replaces the other.** Each works perfectly well with the other
-absent; when both are present each should be better for it.
+instruments, and it has a `manual_search` tool over the same folder of manuals this indexes.
+
+**Both applications are standalone, and neither deprecates anything in the other.**
+
+* ManualForge does everything described in this README with GPIB-MCP absent.
+* GPIB-MCP does everything described in its README with ManualForge absent, unchanged. Its
+  filename-and-model search is not being replaced or demoted — it is the better tool whenever the
+  instrument model is known, and that is most of the time for a server whose job is driving
+  instruments.
+* When both are installed, each is better for it. That happens by **detection, not dependency**:
+  GPIB-MCP notices the index and uses it to choose which manuals to open, and carries on exactly as
+  before if it is not there.
+
+Tracked as [ManualForge#1](https://github.com/TGoodhew/ManualForge/issues/1) on this side and
+[GPIB-MCP#134](https://github.com/TGoodhew/GPIB-MCP/issues/134) on that one.
 
 ### Why both exist
 
@@ -590,9 +602,10 @@ query language. ManualForge does this in `SearchQuery.Prepare`.
 
 **1. The index tells GPIB-MCP which files to open.** This is the valuable one and the reason the
 contract above is documented. `ManualLibrary.Candidates()` can consult the index when it exists and
-choose its twelve files by content rather than by name, falling back to filename scoring when there
-is no index. The cap stays, the passage extraction stays, the citations stay — only the *choice* of
-which files to open gets better. Tracked as an issue on GPIB-MCP.
+choose its twelve files by content as well as by name, using filename scoring alone when there is no
+index. The cap stays, the model filter stays, the passage extraction stays, the citations stay —
+only the *choice* of which files to open gets better, and only when the index is there.
+[GPIB-MCP#134](https://github.com/TGoodhew/GPIB-MCP/issues/134).
 
 **2. OCR gives GPIB-MCP text that was not there before.** A quarter of a typical scanned library has
 no text layer at all, and `pdftotext` returns nothing for those files. Once ManualForge has added a
