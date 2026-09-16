@@ -5,13 +5,62 @@ namespace ManualForge.Core.Tests;
 public class ClassifierTests
 {
     private static DocumentClassification ClassifyWords(
-        IEnumerable<IEnumerable<string>> pages, ClassifierOptions? options = null)
+        IEnumerable<IEnumerable<string>> pages, ClassifierOptions? options = null, int glyphsPerPage = 0)
     {
         var classifier = new DocumentClassifier(options);
         var metrics = pages
-            .Select((words, index) => TextMetricsCalculator.Measure(index + 1, words))
+            .Select((words, index) => TextMetricsCalculator.Measure(index + 1, words, glyphsPerPage))
             .ToList();
         return classifier.Summarise("test.pdf", metrics.Count, metrics);
+    }
+
+    /// <summary>
+    /// What PdfPig returns for a page of a 1990s HP manual typeset with cdsdvips: a Type 1 font
+    /// with a custom encoding and no /ToUnicode, so the glyphs are all there and almost none of
+    /// them decode. Taken from page 20 of `8714 Service Guide.pdf`.
+    /// </summary>
+    private static string[] UndecodableGlyphs() => Dense(
+        """&" '(") *++, 0707$ $07' !#4(5-<  "  ' +!+37 ' ) *++ , !"#$%&"()""".Split(' '), times: 3);
+
+    [Fact]
+    public void GlyphsWithoutCharactersAreATextLayerWeCannotRead()
+    {
+        // The expensive mistake this prevents: reading a font we cannot decode as no text at all,
+        // then adding a second text layer on top of the first. Three files in the real library
+        // were damaged that way. The affected pages drew 355 to 3,276 glyphs each while decoding
+        // between 0 and 68 characters.
+        var result = ClassifyWords([UndecodableGlyphs(), UndecodableGlyphs()], glyphsPerPage: 1200);
+
+        Assert.Equal(TextClass.UnreadableTextLayer, result.Class);
+        Assert.Contains("cannot make sense of", result.Rationale, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void NoGlyphsAndNoCharactersIsGenuinelyImageOnly()
+    {
+        // The same undecodable text with no glyphs behind it is what a scanned page looks like:
+        // nothing drawn, nothing decoded. This one really does want OCR.
+        var result = ClassifyWords([UndecodableGlyphs(), UndecodableGlyphs()], glyphsPerPage: 0);
+
+        Assert.Equal(TextClass.ImageOnly, result.Class);
+    }
+
+    [Fact]
+    public void AScannedPageWithAStampedPageNumberIsStillImageOnly()
+    {
+        // A few stray glyphs - a stamped folio, a signature block - must not be mistaken for a
+        // text layer, or every scanned manual would be refused.
+        var result = ClassifyWords([["7"], ["8"]], glyphsPerPage: 3);
+
+        Assert.Equal(TextClass.ImageOnly, result.Class);
+    }
+
+    [Fact]
+    public void RealTextIsUnaffectedByHowManyGlyphsDrewIt()
+    {
+        // Glyph count only ever decides between "no text" and "text we cannot read". A page whose
+        // text decodes is judged on the text.
+        Assert.Equal(TextClass.GoodText, ClassifyWords([Prose(), Prose()], glyphsPerPage: 5000).Class);
     }
 
     /// <summary>

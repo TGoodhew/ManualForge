@@ -80,8 +80,8 @@ internal static class SurveyCommand
         Console.WriteLine();
 
         PrintMissing(allRecords, trimmingMissing);
-        Console.WriteLine($"  {"Class",-14}{"Files",8}{"Pages",10}  {"Action",-14}");
-        Console.WriteLine("  " + new string('-', 48));
+        Console.WriteLine($"  {"Class",-21}{"Files",8}{"Pages",10}  {"Action",-14}");
+        Console.WriteLine("  " + new string('-', 55));
 
         foreach (var textClass in Enum.GetValues<TextClass>())
         {
@@ -91,7 +91,7 @@ internal static class SurveyCommand
 
             var pages = inClass.Sum(r => (long)r.PageCount);
             var action = options.Policy.ActionFor(textClass);
-            Console.WriteLine($"  {textClass,-14}{inClass.Length,8:N0}{pages,10:N0}  {action,-14}");
+            Console.WriteLine($"  {textClass,-21}{inClass.Length,8:N0}{pages,10:N0}  {action,-14}");
         }
 
         Console.WriteLine();

@@ -7,7 +7,8 @@ public sealed record PageTextMetrics(
     int TokenCount,
     int PlausibleTokenCount,
     int WordLikeTokenCount,
-    int CommonWordCount)
+    int CommonWordCount,
+    int GlyphCount = 0)
 {
     /// <summary>
     /// Share of tokens that look like a word or a part number rather than OCR confetti. This is
@@ -22,6 +23,20 @@ public sealed record PageTextMetrics(
     /// manual scores near zero with flawless text, so it must never condemn a file on its own.
     /// </summary>
     public double CommonWordShare => WordLikeTokenCount == 0 ? 0 : CommonWordCount / (double)WordLikeTokenCount;
+
+    /// <summary>
+    /// Whether the page carries a text layer at all, asked structurally rather than semantically.
+    ///
+    /// <see cref="GlyphCount"/> counts the glyphs the page draws, whatever they decode to.
+    /// <see cref="AlphanumericCount"/> counts the characters we could make sense of. The two come
+    /// apart on any font with a custom encoding and no /ToUnicode — 1990s HP manuals typeset with
+    /// cdsdvips are full of them — where a page draws three thousand glyphs and decodes to
+    /// <c>&amp;" '(") *++,</c>. There is a text layer there; we simply cannot read it.
+    ///
+    /// The distinction decides whether adding a text layer is safe. It is safe only on a page that
+    /// has none.
+    /// </summary>
+    public bool HasTextLayer => GlyphCount > 0;
 
     public static PageTextMetrics Empty(int pageNumber) => new(pageNumber, 0, 0, 0, 0, 0);
 }
@@ -41,7 +56,12 @@ public static class TextMetricsCalculator
     private static readonly char[] TrimCharacters =
         ['-', '_', '"', '\'', '*', '.', ',', ';', ':', '(', ')', '[', ']', '|', '/', '\\'];
 
-    public static PageTextMetrics Measure(int pageNumber, IEnumerable<string> words)
+    /// <param name="glyphCount">
+    /// Glyphs the page draws, whatever they decode to. Zero means the caller did not measure it,
+    /// which keeps every existing call site working; it only ever suppresses the
+    /// "there is a text layer here we cannot read" finding.
+    /// </param>
+    public static PageTextMetrics Measure(int pageNumber, IEnumerable<string> words, int glyphCount = 0)
     {
         ArgumentNullException.ThrowIfNull(words);
 
@@ -99,7 +119,7 @@ public static class TextMetricsCalculator
             }
         }
 
-        return new PageTextMetrics(pageNumber, alphanumeric, tokens, plausible, wordLike, common);
+        return new PageTextMetrics(pageNumber, alphanumeric, tokens, plausible, wordLike, common, glyphCount);
     }
 
     /// <summary>

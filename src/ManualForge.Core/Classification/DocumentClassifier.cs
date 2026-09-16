@@ -10,6 +10,19 @@ public enum TextClass
     /// <summary>Text is present but looks garbled. A candidate for strip-and-redo.</summary>
     SuspectText,
 
+    /// <summary>
+    /// The pages carry a text layer, but almost none of it decodes: the glyphs are there and the
+    /// characters are not. Typically a font with a custom encoding and no /ToUnicode, which some
+    /// readers cope with and others do not.
+    ///
+    /// This is kept apart from both <see cref="ImageOnly"/> and <see cref="SuspectText"/> because
+    /// the right action differs. There is nothing to strip-and-redo — the text may well be the
+    /// original typesetting and better than any OCR of it — and it must never be treated as
+    /// image-only, because adding a second layer to a page that already has one makes the document
+    /// less searchable than leaving it alone.
+    /// </summary>
+    UnreadableTextLayer,
+
     /// <summary>Text is present and mostly clean, but not clean enough to be certain.</summary>
     ProbablyGood,
 
@@ -46,6 +59,17 @@ public sealed class ClassifierOptions
 
     /// <summary>Below this many alphanumeric characters per page, treat the document as image-only.</summary>
     public double ImageOnlyAlphanumericPerPage { get; init; } = 100;
+
+    /// <summary>
+    /// At or above this many glyphs per page, the page is drawing text whether or not any of it
+    /// decodes — so it is not image-only, whatever the character count says.
+    ///
+    /// Set well below what a page of prose draws (several thousand) and well above the stray
+    /// glyphs a scanned page picks up from a stamped page number or a signature block. Measured on
+    /// this library, the affected files draw 355 to 3,276 glyphs a page while decoding 0 to 68
+    /// characters; genuinely image-only files draw none at all.
+    /// </summary>
+    public double TextLayerGlyphsPerPage { get; init; } = 100;
 
     /// <summary>At or above this plausible-token ratio, text is clean enough to trust on its own.</summary>
     public double GoodPlausibleRatio { get; init; } = 0.85;
@@ -114,8 +138,13 @@ public sealed class DocumentClassifier(ClassifierOptions? options = null)
                 try
                 {
                     // GetWords, not Text: see the remarks on TextMetricsCalculator.
-                    var words = document.GetPage(pageNumber).GetWords().Select(w => w.Text);
-                    metrics.Add(TextMetricsCalculator.Measure(pageNumber, words));
+                    var page = document.GetPage(pageNumber);
+                    var words = page.GetWords().Select(w => w.Text);
+
+                    // Letters, not words: this counts the glyphs the page draws whatever they
+                    // decode to, which is how a text layer we cannot read is told apart from no
+                    // text layer at all.
+                    metrics.Add(TextMetricsCalculator.Measure(pageNumber, words, page.Letters.Count));
                 }
                 catch (Exception)
                 {
@@ -144,6 +173,7 @@ public sealed class DocumentClassifier(ClassifierOptions? options = null)
         }
 
         var alphanumericPerPage = metrics.Average(m => (double)m.AlphanumericCount);
+        var glyphsPerPage = metrics.Average(m => (double)m.GlyphCount);
 
         // Pool the counts rather than averaging the per-page ratios: a document with one dense page
         // and seven sparse ones should be judged on the text it actually has.
@@ -155,7 +185,7 @@ public sealed class DocumentClassifier(ClassifierOptions? options = null)
         var plausibleRatio = tokens == 0 ? 0 : plausibleTokens / (double)tokens;
         var commonShare = wordLike == 0 ? 0 : commonWords / (double)wordLike;
 
-        var (textClass, rationale) = Decide(alphanumericPerPage, plausibleRatio, commonShare);
+        var (textClass, rationale) = Decide(alphanumericPerPage, glyphsPerPage, plausibleRatio, commonShare);
 
         return new DocumentClassification(
             path, pageCount, metrics.Count,
@@ -164,13 +194,28 @@ public sealed class DocumentClassifier(ClassifierOptions? options = null)
     }
 
     private (TextClass Class, string Rationale) Decide(
-        double alphanumericPerPage, double plausibleRatio, double commonShare)
+        double alphanumericPerPage, double glyphsPerPage, double plausibleRatio, double commonShare)
     {
         if (alphanumericPerPage < _options.ImageOnlyAlphanumericPerPage)
         {
+            // Nothing decodes — but is that because there is no text, or because we cannot read
+            // the text that is there? The two call for opposite actions, and getting it wrong is
+            // the expensive direction: adding a layer to a page that already has one leaves the
+            // document with two, which an extractor interleaves character by character
+            // ("BBrrooaaddbbaanndd") and makes it less searchable than before we touched it. It
+            // happened to three files in this library before this check existed.
+            if (glyphsPerPage >= _options.TextLayerGlyphsPerPage)
+            {
+                return (TextClass.UnreadableTextLayer,
+                    $"the pages draw {glyphsPerPage:F0} glyphs each but only {alphanumericPerPage:F0} " +
+                    "characters decode, so there is a text layer here that this reader cannot make " +
+                    "sense of — most likely a font with a custom encoding and no /ToUnicode. " +
+                    "Adding a second layer would make it worse, so it is left alone.");
+            }
+
             return (TextClass.ImageOnly,
-                $"{alphanumericPerPage:F0} characters per page, below the {_options.ImageOnlyAlphanumericPerPage:F0} " +
-                "threshold, so there is effectively no text layer.");
+                $"{alphanumericPerPage:F0} characters per page from {glyphsPerPage:F0} glyphs, below the " +
+                $"{_options.ImageOnlyAlphanumericPerPage:F0} threshold, so there is effectively no text layer.");
         }
 
         if (plausibleRatio >= _options.GoodPlausibleRatio)
@@ -240,6 +285,7 @@ public sealed class ClassificationPolicy
         {
             [TextClass.ImageOnly] = ClassAction.Ocr,
             [TextClass.SuspectText] = ClassAction.Skip,
+            [TextClass.UnreadableTextLayer] = ClassAction.Skip,
             [TextClass.ProbablyGood] = ClassAction.Skip,
             [TextClass.GoodText] = ClassAction.Skip,
             [TextClass.Unreadable] = ClassAction.Skip,

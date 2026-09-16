@@ -708,6 +708,51 @@ public class LibraryProcessorTests : IDisposable
     }
 
 
+
+    // ---------------------------------------------------------------- never a second text layer
+
+    [Fact]
+    public void APageThatAlreadyCarriesTextIsRefusedRatherThanGivenASecondLayer()
+    {
+        // Three files in the real library were damaged exactly this way: a font the classifier
+        // could not decode read as no text at all, so OCR was added on top of the text that was
+        // already there. Two layers do not merge - an extractor sorts them together by position
+        // and returns them interleaved character by character, and "Broadband" comes back as
+        // "BBrrooaaddbbaanndd".
+        var path = TestPdf.ScannedWithText(InRoot("hastext.pdf"), "Broadband Frequency Response", pages: 2);
+        var before = File.ReadAllBytes(path);
+
+        // Ocr, not StripAndRedo: the mistake being guarded against.
+        var options = NewOptions(PolicyOf(ClassAction.Ocr));
+        var (processor, engine) = NewProcessor();
+        processor.Survey(options);
+        var outcome = Assert.Single(processor.Run(options));
+
+        Assert.Equal(FileStatus.Failed, outcome.Status);
+        Assert.Contains("already carry a text layer", outcome.Error!, StringComparison.Ordinal);
+        Assert.Equal(0, engine.PagesRecognised);
+
+        Assert.Equal(before, File.ReadAllBytes(path));
+        Assert.Contains("Broadband", ExtractText(path), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void StrippingFirstMakesTheSameFileSafeToProcess()
+    {
+        var path = TestPdf.ScannedWithText(InRoot("hastext.pdf"), "Broadband Frequency Response", pages: 2);
+
+        var options = NewOptions(PolicyOf(ClassAction.StripAndRedo));
+        var (processor, _) = NewProcessor();
+        processor.Survey(options);
+        var outcome = Assert.Single(processor.Run(options));
+
+        Assert.Equal(FileStatus.Completed, outcome.Status);
+
+        var text = ExtractText(path);
+        Assert.Contains("HEWLETT", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("Broadband", text, StringComparison.Ordinal);
+    }
+
     // ---------------------------------------------------------------- records for files that have gone
 
     [Fact]

@@ -79,8 +79,8 @@ internal static class StatusCommand
 
     private static void PrintByClass(IReadOnlyList<FileRecord> records)
     {
-        Console.WriteLine($"  {"Class",-14}{"Files",8}{"Pages",12}  Action");
-        Console.WriteLine("  " + new string('-', 46));
+        Console.WriteLine($"  {"Class",-21}{"Files",8}{"Pages",12}  Action");
+        Console.WriteLine("  " + new string('-', 53));
 
         var present = records.Where(r => r.Status != FileStatus.Missing).ToArray();
 
@@ -92,7 +92,7 @@ internal static class StatusCommand
 
             var actions = string.Join("/", inClass.Select(r => r.Action).Distinct().Order());
             Console.WriteLine(
-                $"  {textClass,-14}{inClass.Length,8:N0}{inClass.Sum(r => (long)r.PageCount),12:N0}  {actions}");
+                $"  {textClass,-21}{inClass.Length,8:N0}{inClass.Sum(r => (long)r.PageCount),12:N0}  {actions}");
         }
 
         Console.WriteLine();

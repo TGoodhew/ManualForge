@@ -326,6 +326,30 @@ public sealed class LibraryProcessor(
                 source = strippedPath;
             }
 
+            // The invariant that matters more than any classification: a text layer is only ever
+            // written onto a page that has none. Two layers do not merge - an extractor sorts them
+            // together by position and returns them interleaved character by character, so
+            // "Broadband" comes back as "BBrrooaaddbbaanndd" and the document ends up less
+            // searchable than it was before. Three files in this library were damaged that way by
+            // a classifier that read a font it could not decode as no text at all.
+            //
+            // Checked here, on whatever is about to be recognised, so it covers a stripped
+            // document whose strip silently left a page alone as well as a misclassification.
+            var pagesWithText = TextLayerProbe.PagesWithText(source);
+            if (pagesWithText.Count > 0)
+            {
+                var detail =
+                    $"Pages {string.Join(", ", pagesWithText.Take(5))} already carry a text layer, so adding " +
+                    "another would leave two interleaved and make the document less searchable. " +
+                    (record.Action == ClassAction.StripAndRedo
+                        ? "Stripping did not remove it."
+                        : "Classify it again, or use StripAndRedo if the existing layer should be replaced.");
+
+                store.SetStatus(path, FileStatus.Failed, detail);
+                _logger.LogWarning("Refusing to add a second text layer to {Path}. {Detail}", path, detail);
+                return Outcome(record, FileStatus.Failed, 0, 0, flattened, stopwatch.Elapsed, detail);
+            }
+
             // Step 3: OCR into a new file in the working directory. Nothing in the library has
             // been touched at this point.
             var outputPath = Path.Combine(workingDirectory, "searchable.pdf");

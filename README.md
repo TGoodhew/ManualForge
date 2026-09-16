@@ -187,6 +187,34 @@ common-word share with flawless text. So **a low common-word share never condemn
 only promote a middling token score. Both numbers, and the reasoning behind the verdict, are
 reported per file.
 
+### A third measurement: is there a text layer at all?
+
+Both of those ask how *good* the text is. Neither answers whether there is any, and the two
+questions have to be kept apart, because a text layer that will not decode looks exactly like no
+text layer at all.
+
+A page draws glyphs; a reader turns them into characters. On a font with a custom encoding and no
+`/ToUnicode` — 1990s HP manuals typeset with `cdsdvips` are full of them — those two come apart
+completely. Page 40 of `8714 Service Guide.pdf` draws **3,276 glyphs** and decodes to 68 characters
+of `&" '(") *++,`. Poppler reads that page perfectly. PdfPig reads punctuation soup.
+
+So the classifier counts glyphs as well as characters, and a document that draws glyphs while
+decoding almost nothing is **`UnreadableTextLayer`**, not `ImageOnly`:
+
+| | decodes | does not decode |
+|---|---|---|
+| **draws glyphs** | judged on the text | `UnreadableTextLayer` — leave it alone |
+| **draws none** | — | `ImageOnly` — OCR is pure gain |
+
+It is skipped by default, because the right answer is genuinely unclear: the text may be the
+original typesetting and better than any OCR of it, and other readers can see it even when we
+cannot. `--policy UnreadableTextLayer=redo` strips and re-OCRs them deliberately.
+
+Measured against the 156 pre-OCR originals: 151 correctly stay `ImageOnly`, 5 are
+`UnreadableTextLayer`, none of the genuine scans is flagged. A stamped page number or a signature
+block does not trip it; the threshold is 100 glyphs per page, and the affected files draw 355 to
+3,276.
+
 Two bugs found by measuring rather than assuming, each of which would have sent thousands of pages
 of perfectly good text back through OCR:
 
@@ -279,6 +307,7 @@ pixel dimensions and compression filter of every image on every page must match 
 
 The order of operations is the guarantee:
 
+0. Refuse outright if the pages already carry text. See below — this is the one that was missing.
 1. OCR into a temporary file. Nothing in the library has been touched.
 2. Verify: opens cleanly, page count matches, text layer is non-empty, word alignment measured.
 3. Only then move the original into `_Originals`, mirroring the source tree.
@@ -301,6 +330,22 @@ their paths — it is the deliberate way to clean up after a library has been re
 Verified on a sandbox copy before the first real run: originals byte-identical to the library,
 files marked GoodText untouched, replaced files carrying full text layers, and a second run
 changing nothing at all.
+
+### Never a second text layer
+
+Two text layers do not merge. An extractor sorts them together by position and returns them
+interleaved character by character, so `Broadband` comes back as `BBrrooaaddbbaanndd` and the
+document ends up **less searchable than before it was touched**.
+
+Three files in this library were damaged exactly that way — `8714 Service Guide.pdf`,
+`83620A User.pdf` and `8714 IBASIC.pdf` — because the classifier read a font it could not decode as
+no text at all. All three have been restored from their preserved originals, which is what keeping
+originals is for, and the run summary would have said nothing was wrong.
+
+Two things now prevent it. The classifier tells a text layer it cannot read apart from no text
+layer, as above. And independently of any classification, the processor probes whatever it is about
+to recognise and refuses the file if a sampled page draws a single glyph. That second check runs
+*after* stripping, so it also catches a strip that silently left a page alone.
 
 ## How the text layer is built
 
@@ -355,7 +400,7 @@ src/ManualForge.Core/
   Pipeline/SearchablePdfBuilder.cs end-to-end for one file
   Diagnostics/RunLog.cs           Serilog: JSON lines, rolled daily, shared
 src/ManualForge.Cli/              the prototype's command line
-tests/ManualForge.Core.Tests/     164 tests, no GPU or network needed
+tests/ManualForge.Core.Tests/     170 tests, no GPU or network needed
 ```
 
 ## Tests
@@ -364,7 +409,7 @@ tests/ManualForge.Core.Tests/     164 tests, no GPU or network needed
 dotnet test
 ```
 
-164 tests, a few seconds, no models and no network required:
+170 tests, a few seconds, no models and no network required:
 
 - **`PageGeometryTests`** — the corner mapping for all four rotations, non-zero crop origins,
   text-matrix direction, points-per-pixel, rotation normalisation.
