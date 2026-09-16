@@ -186,8 +186,9 @@ public sealed class LibraryProcessor(
 
     /// <summary>
     /// Processes everything the policy marks for work. Safe to run repeatedly: finished files are
-    /// skipped, and an interrupted run continues from the first document that did not finish.
-    /// Resume is between documents, not within one: see "Known gaps" in the README.
+    /// skipped, and an interrupted run continues from the first document that did not finish —
+    /// reusing the pages that document had already recognised, so an interruption costs the page in
+    /// flight rather than the document.
     /// </summary>
     public IReadOnlyList<FileOutcome> Run(
         LibraryOptions options,

@@ -98,15 +98,15 @@ public sealed record FileRecord(
 ///
 /// Two properties matter and both are tested:
 ///
-/// * <b>Resumable between documents.</b> Documents that finished stay finished; the next run picks
-///   up from the first that did not.
+/// * <b>Resumable.</b> Documents that finished stay finished; the next run picks up from the first
+///   that did not, and within that document from the first page not yet recognised.
 /// * <b>Idempotent.</b> Re-running over a finished folder does nothing at all, unless a source file
 ///   has changed — which the fingerprint detects, and which resets that file's state.
 ///
-/// The page table exists and is written to, but <b>resume is not yet per-page</b>: rows are
-/// recorded only once a whole document finishes, so interrupting a 639-page manual loses that
-/// manual's work rather than the current page's. Closing that gap needs the writer to append to a
-/// partly-finished document, which lands with the phase 3 pipeline. See "Known gaps" in the README.
+/// The page rows here record what a finished document did. What makes resume work inside a
+/// document is <see cref="SqlitePageOcrCache"/>, which keeps the recognition itself: the expensive
+/// half is recognising the pages, not assembling the PDF, so the document is rebuilt from scratch
+/// on every attempt from results already in hand.
 /// </summary>
 public sealed class JobStore : IDisposable
 {

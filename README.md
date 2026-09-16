@@ -279,7 +279,7 @@ src/ManualForge.Core/
   Pipeline/SearchablePdfBuilder.cs end-to-end for one file
   Diagnostics/JsonFileLogger.cs   JSON-lines log provider
 src/ManualForge.Cli/              the prototype's command line
-tests/ManualForge.Core.Tests/     50 tests, no GPU or network needed
+tests/ManualForge.Core.Tests/     156 tests, no GPU or network needed
 ```
 
 ## Tests
@@ -288,7 +288,7 @@ tests/ManualForge.Core.Tests/     50 tests, no GPU or network needed
 dotnet test
 ```
 
-122 tests, about 0.9 s, no models and no network required:
+156 tests, a few seconds, no models and no network required:
 
 - **`PageGeometryTests`** — the corner mapping for all four rotations, non-zero crop origins,
   text-matrix direction, points-per-pixel, rotation normalisation.
@@ -305,6 +305,12 @@ dotnet test
   modifiable with page count, geometry, rotation and every image stream unchanged. Stripping
   removes text and leaves images alone.
 - **`JobStoreTests`** - resume, idempotency, and a changed source resetting its own progress.
+- **`LibraryProcessorTests`** - the replace-in-place sequence end to end, against a fake OCR
+  engine. Everything downstream of recognition is real: PDFium rasterises, PDFsharp writes, PdfPig
+  reads back. Most of these assert what happened to the bytes on disk rather than what the code
+  returned - that the original is kept byte for byte, that a document that fails verification
+  leaves its source untouched, that an owner password is flattened first, that identical copies are
+  recognised once, and that an interrupted document resumes from the recognition it already has.
 
 ## Resume
 
