@@ -46,6 +46,8 @@ try
         "survey" => SurveyCommand.Run(arguments, loggerFactory, cancellation.Token),
         "status" => StatusCommand.Run(arguments),
         "run" => await RunCommand.RunAsync(arguments, loggerFactory, logPath, cancellation.Token),
+        "index" => await IndexCommand.RunAsync(arguments, loggerFactory, cancellation.Token),
+        "search" => SearchCommand.Run(arguments),
         _ => Unknown(arguments.Command),
     };
 }

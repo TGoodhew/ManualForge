@@ -7,6 +7,7 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     xmlns:vm="using:ManualForge.Shell.ViewModels"
     xmlns:pipeline="using:ManualForge.Core.Pipeline"
+    xmlns:indexing="using:ManualForge.Core.Indexing"
     mc:Ignorable="d">
 
     <Grid Padding="16" RowSpacing="12">
@@ -218,13 +219,66 @@
             </TabViewItem>
 
             <TabViewItem Header="Search" IsClosable="False">
-                <StackPanel Padding="0,16,0,0" Spacing="8">
-                    <TextBlock Style="{StaticResource SubtitleTextBlockStyle}" Text="Not built yet" />
+                <Grid RowSpacing="8" Padding="0,8,0,0">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <Grid Grid.Row="0" ColumnSpacing="8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <TextBox
+                            Grid.Column="0"
+                            PlaceholderText="which pins carry the HP-IB handshake"
+                            Text="{x:Bind Search.Query, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                            IsEnabled="{x:Bind Search.IsIdle, Mode=OneWay}"
+                            KeyDown="SearchKeyDown" />
+
+                        <Button
+                            Grid.Column="1"
+                            Content="Search"
+                            Style="{StaticResource AccentButtonStyle}"
+                            Command="{x:Bind Search.SearchCommand}" />
+
+                        <Button
+                            Grid.Column="2"
+                            Content="Build index"
+                            Command="{x:Bind Search.BuildIndexCommand}" />
+                    </Grid>
+
                     <TextBlock
+                        Grid.Row="1"
+                        Text="{x:Bind Search.Status, Mode=OneWay}"
                         TextWrapping="Wrap"
                         Opacity="0.8"
-                        Text="The FTS5 index and this search over it are phase 5. It will query the sidecar text and show the manual, the page and a snippet." />
-                </StackPanel>
+                        Style="{StaticResource CaptionTextBlockStyle}" />
+
+                    <ListView Grid.Row="2" ItemsSource="{x:Bind Search.Results, Mode=OneWay}" SelectionMode="Single">
+                        <ListView.ItemTemplate>
+                            <DataTemplate x:DataType="indexing:SearchHit">
+                                <StackPanel Spacing="2" Padding="0,8,0,8">
+                                    <TextBlock>
+                                        <Run Text="{x:Bind Title}" FontWeight="SemiBold" />
+                                        <Run Text="  page " Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                        <Run Text="{x:Bind PageNumber}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                    </TextBlock>
+                                    <TextBlock Text="{x:Bind Snippet}" TextWrapping="Wrap" />
+                                    <TextBlock
+                                        Text="{x:Bind Path}"
+                                        Style="{StaticResource CaptionTextBlockStyle}"
+                                        Opacity="0.6"
+                                        TextTrimming="CharacterEllipsis" />
+                                </StackPanel>
+                            </DataTemplate>
+                        </ListView.ItemTemplate>
+                    </ListView>
+                </Grid>
             </TabViewItem>
 
         </TabView>

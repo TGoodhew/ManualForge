@@ -20,6 +20,8 @@ public partial class App : Application
     /// <summary>The shell's state. One instance, shared by every page that shows part of it.</summary>
     public static LibraryViewModel Library { get; private set; } = null!;
 
+    public static SearchViewModel Search { get; private set; } = null!;
+
     private static RunLog? _log;
     private static LibraryService? _service;
 
@@ -78,7 +80,9 @@ public partial class App : Application
             "ManualForge", "logs", "manualforge-.jsonl"));
 
         _service = new LibraryService(new LibraryServiceOptions(), _log.Factory);
-        Library = new LibraryViewModel(_service, dispatcher: new DispatcherQueueAdapter(DispatcherQueue));
+        var dispatcher = new DispatcherQueueAdapter(DispatcherQueue);
+        Library = new LibraryViewModel(_service, dispatcher: dispatcher);
+        Search = new SearchViewModel(new SearchService(_log.Factory), dispatcher);
 
         // A folder given on the command line, so the application can be started on one and so this
         // window can be driven by something other than a person with a mouse.

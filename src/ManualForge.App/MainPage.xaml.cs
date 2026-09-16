@@ -22,15 +22,42 @@ public sealed partial class MainPage : Page
         InitializeComponent();
 
         _gpuTimer.Tick += (_, _) => ViewModel.RefreshGpu();
-        Loaded += (_, _) =>
+        Loaded += async (_, _) =>
         {
             ViewModel.RefreshGpu();
             _gpuTimer.Start();
+
+            // The search tab needs to know whether an index exists for whatever folder is set.
+            Search.Folder = ViewModel.Folder;
+            await Search.RefreshAsync();
+        };
+
+        // Choosing a folder in the library tab is choosing which index to search.
+        ViewModel.PropertyChanged += async (_, e) =>
+        {
+            if (e.PropertyName != nameof(LibraryViewModel.Folder))
+                return;
+
+            Search.Folder = ViewModel.Folder;
+            await Search.RefreshAsync();
         };
         Unloaded += (_, _) => _gpuTimer.Stop();
     }
 
     public LibraryViewModel ViewModel => App.Library;
+
+    public SearchViewModel Search => App.Search;
+
+    /// <summary>Enter searches. A keystroke is a view concern; what it does is not.</summary>
+    private void SearchKeyDown(object sender, Microsoft.UI.Xaml.Input.KeyRoutedEventArgs e)
+    {
+        if (e.Key != Windows.System.VirtualKey.Enter)
+            return;
+
+        e.Handled = true;
+        if (Search.SearchCommand.CanExecute(null))
+            Search.SearchCommand.Execute(null);
+    }
 
     private async void BrowseAsync(object sender, RoutedEventArgs e)
     {

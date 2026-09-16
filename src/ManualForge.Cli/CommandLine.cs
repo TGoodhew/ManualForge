@@ -107,6 +107,8 @@ internal sealed class CommandLine
               manualforge status <folder>                Show the work queue on disk; changes nothing
               manualforge survey <folder>                Classify a library; changes nothing
               manualforge run <folder>                   Classify, flatten, OCR and replace, resumably
+              manualforge index <folder>                 Build the full-text index over a library
+              manualforge search <query> --library <f>    Query it: manual, page and snippet
               manualforge gpu                            Report which execution provider is active
 
             ocr options:
@@ -144,6 +146,14 @@ internal sealed class CommandLine
               --cpu-threads <n>       Cap the threads ONNX Runtime uses per operator. The default
                                       is every core, which is right for a CPU-only run and rude if
                                       you want to use the machine while it works.
+
+            index / search options:
+              --index <path>          Index database. Default <root>/_Originals/manualforge-index.db.
+              --library <folder>      Which library to search, when --index is not given.
+              --reindex               Re-read every document, not just the ones that changed.
+              --sidecars <folder>     Also write one plain-text file per document.
+              --limit <n>             Results to show. Default 10.
+              --show-duplicates       List identical copies separately instead of folding them.
 
             general options:
               --models <path>         Model cache directory.
