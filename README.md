@@ -2,12 +2,12 @@
 
 Searchable PDFs from scanned technical manuals, and a searchable index over them.
 
-**Status: phase 3 - the parallel pipeline, running on CUDA at 104 pages/min.** It OCRs a PDF
-end to end with an invisible text layer whose alignment is measured rather than assumed,
+**Status: phase 4 - the WinUI shell, over a pipeline running on CUDA at 104 pages/min.** It OCRs
+a PDF end to end with an invisible text layer whose alignment is measured rather than assumed,
 classifies a whole library to decide what is worth re-OCRing, rebuilds files that refuse
-modification, and processes a library resumably without ever overwriting a source - now
-recognising pages ahead of the document that needs them, which halved the wall clock. The WinUI
-shell, FTS5 index, VLM sidecar and benchmark mode are phases 4-7 and are not built yet.
+modification, processes a library resumably without ever overwriting a source, and now has a
+desktop application over all of it. The FTS5 index, VLM sidecar and benchmark mode are phases 5-7
+and are not built yet.
 
 ## What it does
 
@@ -416,6 +416,67 @@ The lever this points at instead is reducing the CPU work on the critical path �
 buy is a question for benchmark mode in phase 7, measured against the BASELINE folder rather than
 guessed at.
 
+## The desktop application
+
+Phase 4. `src/ManualForge.App` is the window; `src/ManualForge.Shell` is everything it does.
+
+That split is the whole point of "MVVM, no code-behind logic", which otherwise means nothing you
+can check. The shell is a plain library with no XAML in it, so the test project drives it directly:
+a survey that groups by class and totals its pages, an action changed in the table reaching the
+policy the run obeys, a failure landing in the error list, an invalidated signature reported even
+though the file succeeded, cancel offered only while something is running, and the report exporting
+as CSV or JSON. Twenty tests, no window, no GPU.
+
+What is left in code-behind is a file picker, which needs the native window handle, and a
+two-second timer that asks the card how it is doing. Both belong to a window rather than to a view
+model.
+
+The window shows the folder, a class summary to review before committing to anything, live per-file
+and per-page state, throughput, GPU utilisation and VRAM, a running list of problems, and the
+results with an export. Cancel stops at the page in flight and says so — *"recognised pages are
+kept, so running again resumes from here"* — because a user who does not know that will never dare
+press it.
+
+The search tab exists and says it is phase 5, rather than pretending.
+
+```
+manualforge-app [folder]
+```
+
+A folder on the command line is optional. It is there because a window that can only be driven by a
+mouse cannot be checked after a change.
+
+### Unpackaged, and why
+
+MSIX packaging refuses this application outright:
+
+```
+error APPX1101: Payload contains two or more files with the same destination path 'onnxruntime.dll'
+  ...microsoft.ml.onnxruntime.gpu.windows\1.30.0\runtimes\win-x64\native\onnxruntime.dll
+  ...microsoft.ml.onnxruntime\1.30.0\runtimes\win-x64\native\onnxruntime.dll
+```
+
+PaddleOcrNet pulls in both the CPU and the GPU builds of ONNX Runtime, and each ships its own
+`onnxruntime.dll` — the same collision that kept DirectML out. So the app is unpackaged and
+self-contained on the Windows App SDK, which needs no install and matches how the command line is
+already run.
+
+### Two defects the view-model tests found
+
+Both were real, and neither would have been obvious from clicking around.
+
+**`IProgress<T>` posts rather than runs.** When a run finished there was no guarantee every report
+had been applied, so the final counts were usually right — the worst kind of right. Rebuilding the
+totals from what the run returned then produced the opposite bug: duplicated rows from reports that
+landed *after* the rebuild. The answer was to stop using `Progress<T>`. An `IUiDispatcher` makes the
+ordering explicit — the window's FIFO queue in the app, inline in a test — and the returned list
+reconciles on top of it.
+
+**A binding referenced a converter that did not exist**, which XAML compiles quite happily. It
+failed at startup with exit code `0xC000027B` and nothing else: a stowed exception, somewhere. It is
+now an ordinary property where the compiler can see it, and an unhandled-exception handler writes
+the next one to `crash.txt`.
+
 ## Safety
 
 The order of operations is the guarantee:
@@ -514,8 +575,10 @@ src/ManualForge.Core/
   Verification/                   PdfPig re-extraction, baseline deviation, ink comparison
   Pipeline/SearchablePdfBuilder.cs end-to-end for one file
   Diagnostics/RunLog.cs           Serilog: JSON lines, rolled daily, shared
-src/ManualForge.Cli/              the prototype's command line
-tests/ManualForge.Core.Tests/     197 tests, no GPU or network needed
+src/ManualForge.Cli/              the command line
+src/ManualForge.Shell/            view models and the services behind them - no XAML, so testable
+src/ManualForge.App/              WinUI 3: XAML, a file picker, a GPU timer, nothing else
+tests/ManualForge.Core.Tests/     213 tests, no GPU or network needed
 ```
 
 ## Tests
@@ -524,7 +587,7 @@ tests/ManualForge.Core.Tests/     197 tests, no GPU or network needed
 dotnet test
 ```
 
-197 tests, a few seconds, no models and no network required:
+213 tests, a few seconds, no models and no network required:
 
 - **`PageGeometryTests`** — the corner mapping for all four rotations, non-zero crop origins,
   text-matrix direction, points-per-pixel, rotation normalisation.
@@ -547,6 +610,8 @@ dotnet test
   cancelling does not leave a consumer waiting on a channel nobody will complete. Every wait is
   bounded, because a pipeline defect that hangs the suite is worse than one that fails it.
 - **`GpuMemoryTests`** - the arithmetic that decides concurrency, which errs downwards on purpose.
+- **`LibraryViewModelTests`** - the shell driven with no window: survey, policy edits reaching the
+  run, the error list, cancel and resume, and the exported report.
 - **`LibraryProcessorTests`** - the replace-in-place sequence end to end, against a fake OCR
   engine. Everything downstream of recognition is real: PDFium rasterises, PDFsharp writes, PdfPig
   reads back. Most of these assert what happened to the bytes on disk rather than what the code
