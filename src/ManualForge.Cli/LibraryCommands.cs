@@ -28,6 +28,7 @@ internal static class SurveyCommand
             Root = root,
             Policy = ClassificationPolicy.Parse(arguments.Get("policy")),
             StatePath = arguments.Get("state"),
+            Deduplicate = !arguments.Has("no-dedup"),
         };
 
         var processor = new LibraryProcessor(
@@ -103,6 +104,16 @@ internal static class SurveyCommand
         // "Marked for work" must mean work still to do, not merely a non-Skip action. Counting by
         // action alone reported 155 files outstanding when every one of them was already finished,
         // which flatly contradicted the run that followed it.
+        var duplicates = records.Where(r => r.Action == ClassAction.CopyFromDuplicate).ToArray();
+        if (duplicates.Length > 0)
+        {
+            var spared = duplicates.Sum(r => (long)r.PageCount);
+            Console.WriteLine(
+                $"  {duplicates.Length:N0} file(s) are byte-identical copies of another and will be copied " +
+                $"rather than recognised, sparing {spared:N0} pages (~{spared / 55.9 / 60:F1} hours).");
+            Console.WriteLine();
+        }
+
         var marked = records.Where(r => r.Action != ClassAction.Skip).ToArray();
         var outstanding = marked
             .Where(r => r.Status is not (FileStatus.Completed or FileStatus.Skipped))
@@ -159,6 +170,7 @@ internal static class RunCommand
             OriginalsFolderName = arguments.Get("originals") ?? "_Originals",
             AllowSignedFiles = arguments.Has("allow-signed"),
             RetrySkipped = arguments.Has("retry-skipped"),
+            Deduplicate = !arguments.Has("no-dedup"),
         };
 
         var engineOptions = new OcrEngineOptions

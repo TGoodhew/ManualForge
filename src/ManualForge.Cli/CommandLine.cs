@@ -104,6 +104,7 @@ internal sealed class CommandLine
             usage:
               manualforge ocr <input.pdf> [options]      OCR a PDF and overlay an invisible text layer
               manualforge inspect <input.pdf>            Report page count, sizes and existing text
+              manualforge status <folder>                Show the work queue on disk; changes nothing
               manualforge survey <folder>                Classify a library; changes nothing
               manualforge run <folder>                   Classify, flatten, OCR and replace, resumably
               manualforge gpu                            Report which execution provider is active
@@ -131,6 +132,7 @@ internal sealed class CommandLine
               --limit <n>             Stop after n files (run only).
               --survey-only           Classify and report, then stop (run only).
               --retry-skipped         Reconsider files skipped by an earlier run.
+              --no-dedup              Recognise every copy separately instead of once per document.
               --allow-signed          Process digitally signed files, invalidating their signatures.
 
             general options:

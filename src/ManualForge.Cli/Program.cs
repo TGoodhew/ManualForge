@@ -40,6 +40,7 @@ try
         "ocr" => await OcrCommand.RunAsync(arguments, loggerFactory, logPath, cancellation.Token),
         "inspect" => InspectCommand.Run(arguments),
         "survey" => SurveyCommand.Run(arguments, loggerFactory, cancellation.Token),
+        "status" => StatusCommand.Run(arguments),
         "run" => await RunCommand.RunAsync(arguments, loggerFactory, logPath, cancellation.Token),
         _ => Unknown(arguments.Command),
     };

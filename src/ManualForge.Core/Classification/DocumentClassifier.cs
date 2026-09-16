@@ -31,6 +31,12 @@ public enum ClassAction
 
     /// <summary>Remove the existing text layer, then OCR.</summary>
     StripAndRedo,
+
+    /// <summary>
+    /// Byte-for-byte identical to another file that is being processed. Take that file's finished
+    /// result rather than recognising the same pages twice.
+    /// </summary>
+    CopyFromDuplicate,
 }
 
 public sealed class ClassifierOptions
@@ -274,6 +280,7 @@ public sealed class ClassificationPolicy
                 "ocr" => ClassAction.Ocr,
                 "skip" => ClassAction.Skip,
                 "redo" or "stripandredo" or "strip" => ClassAction.StripAndRedo,
+                "copy" or "copyfromduplicate" => ClassAction.CopyFromDuplicate,
                 _ => throw new ArgumentException($"'{actionName}' is not an action. Use ocr, skip or redo.", nameof(specification)),
             };
 

@@ -43,6 +43,12 @@ public sealed class LibraryOptions
     /// changed — a widened policy, or a skip that turned out to be wrong.
     /// </summary>
     public bool RetrySkipped { get; init; }
+
+    /// <summary>
+    /// Recognise each distinct document once, copying the result to any byte-identical twins.
+    /// On a library assembled over years this is not a marginal saving.
+    /// </summary>
+    public bool Deduplicate { get; init; } = true;
 }
 
 public sealed record FileOutcome(
@@ -120,7 +126,35 @@ public sealed class LibraryProcessor(
             progress?.Report(classification);
         }
 
+        if (options.Deduplicate)
+            DeduplicateOutstanding(store, cancellationToken);
+
         return store.All();
+    }
+
+    /// <summary>
+    /// Hashes the files that are about to be worked on and points duplicates at a single primary.
+    /// Only files marked for work are hashed: sparing effort on files nobody is touching would
+    /// cost more to discover than it saves.
+    /// </summary>
+    private void DeduplicateOutstanding(JobStore store, CancellationToken cancellationToken)
+    {
+        var candidates = store.All()
+            .Where(r => r.Action is ClassAction.Ocr or ClassAction.StripAndRedo)
+            .Where(r => r.Status is not FileStatus.Completed)
+            .ToArray();
+
+        if (candidates.Length == 0)
+            return;
+
+        var report = new ContentDeduplicator(_logger).Apply(store, candidates, cancellationToken);
+
+        if (report.RedundantFiles > 0)
+        {
+            _logger.LogInformation(
+                "Deduplication: {Distinct} distinct documents among {Examined} files, sparing {Pages} pages of recognition",
+                report.DistinctDocuments, report.FilesExamined, report.RedundantPages);
+        }
     }
 
     /// <summary>
@@ -141,6 +175,12 @@ public sealed class LibraryProcessor(
         var outstanding = store.Outstanding();
         if (options.SmallestFirst)
             outstanding = outstanding.OrderBy(r => r.Fingerprint.SizeBytes).ToList();
+
+        // A copy cannot be taken until its primary has been produced, so process every primary
+        // first and the copies afterwards.
+        outstanding = outstanding
+            .OrderBy(r => r.Action == ClassAction.CopyFromDuplicate ? 1 : 0)
+            .ToList();
         if (options.Limit > 0)
             outstanding = outstanding.Take(options.Limit).ToList();
 
@@ -169,6 +209,12 @@ public sealed class LibraryProcessor(
         {
             store.SetStatus(path, FileStatus.InProgress);
             Directory.CreateDirectory(workingDirectory);
+
+            // A byte-identical twin of a file we have already recognised: take its finished
+            // result instead of spending the GPU on the same pages again. The copy still gets its
+            // own original preserved, so the originals tree stays a complete mirror.
+            if (record.Action == ClassAction.CopyFromDuplicate)
+                return CopyFromPrimary(store, options, record, stopwatch);
 
             var source = path;
 
@@ -342,6 +388,68 @@ public sealed class LibraryProcessor(
         }
     }
 
+    /// <summary>
+    /// Gives a duplicate the searchable file already produced for its primary.
+    /// </summary>
+    private FileOutcome CopyFromPrimary(
+        JobStore store, LibraryOptions options, FileRecord record, System.Diagnostics.Stopwatch stopwatch)
+    {
+        var path = record.Path;
+
+        if (record.DuplicateOf is null)
+        {
+            const string reason = "Marked as a duplicate but with no primary recorded.";
+            store.SetStatus(path, FileStatus.Failed, reason);
+            return Outcome(record, FileStatus.Failed, 0, 0, false, stopwatch.Elapsed, reason);
+        }
+
+        var primary = store.Find(record.DuplicateOf);
+        if (primary is null || primary.Status != FileStatus.Completed || !File.Exists(primary.Path))
+        {
+            // The primary failed, or was never reached. Leave this one outstanding rather than
+            // failing it: another run may yet produce the primary.
+            var reason = $"Waiting for its primary, {Path.GetFileName(record.DuplicateOf)}, to be produced.";
+            store.SetStatus(path, FileStatus.Classified, reason);
+            return Outcome(record, FileStatus.Classified, 0, 0, false, stopwatch.Elapsed, reason);
+        }
+
+        if (options.DryRun)
+        {
+            _logger.LogInformation("Dry run: {Path} would be copied from {Primary}", path, primary.Path);
+            return Outcome(record, FileStatus.Classified, 0, 0, false, stopwatch.Elapsed, null);
+        }
+
+        // Same ordering as the OCR path: preserve this file's original first, then put the
+        // searchable version in its place.
+        var originalDestination = OriginalsPathFor(options, path);
+        Directory.CreateDirectory(Path.GetDirectoryName(originalDestination)!);
+        File.Move(path, originalDestination, overwrite: false);
+
+        try
+        {
+            File.Copy(primary.Path, path, overwrite: false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "Moved {Path} to {Original} but could not copy the searchable version from {Primary}",
+                path, originalDestination, primary.Path);
+            store.SetStatus(path, FileStatus.Failed,
+                $"Original is at {originalDestination}. {ex.Message}");
+            throw;
+        }
+
+        store.SetPaths(path, path, originalDestination);
+        store.UpdateFingerprint(path);
+        store.SetStatus(path, FileStatus.Completed);
+
+        _logger.LogInformation(
+            "Copied {Primary} to {Path}: identical content, so it needed no recognition of its own",
+            primary.Path, path);
+
+        return Outcome(record, FileStatus.Completed, 0, 0, false, stopwatch.Elapsed, null);
+    }
+
     private static FileOutcome Outcome(
         FileRecord record, FileStatus status, int words, double deviation, bool flattened, TimeSpan duration, string? error)
         => new(record.Path, record.TextClass, record.Action, status, record.PageCount, words, deviation, flattened, duration, error);
@@ -368,10 +476,11 @@ public sealed class LibraryProcessor(
             .OrderBy(f => f, StringComparer.OrdinalIgnoreCase);
     }
 
-    public static JobStore OpenStore(LibraryOptions options)
-    {
-        var path = options.StatePath
-            ?? Path.Combine(Path.GetFullPath(options.Root), options.OriginalsFolderName, "manualforge.db");
-        return new JobStore(path);
-    }
+    public static JobStore OpenStore(LibraryOptions options, bool readOnly = false)
+        => new(StatePathFor(options), readOnly);
+
+    /// <summary>Where a library's state database lives.</summary>
+    public static string StatePathFor(LibraryOptions options)
+        => options.StatePath
+           ?? Path.Combine(Path.GetFullPath(options.Root), options.OriginalsFolderName, "manualforge.db");
 }

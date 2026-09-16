@@ -82,7 +82,9 @@ public sealed record FileRecord(
     string? OutputPath,
     string? OriginalPath,
     string? Error,
-    int PagesCompleted);
+    int PagesCompleted,
+    string? ContentHash = null,
+    string? DuplicateOf = null);
 
 /// <summary>
 /// Per-file and per-page progress, kept in SQLite so a crash, a reboot or a cancelled run resumes
@@ -99,21 +101,29 @@ public sealed class JobStore : IDisposable
 {
     private readonly SqliteConnection _connection;
 
-    public JobStore(string databasePath)
+    /// <param name="readOnly">
+    /// Open without taking a write lock, so the queue can be inspected while a run is in progress.
+    /// SQLite's write-ahead log makes concurrent readers safe.
+    /// </param>
+    public JobStore(string databasePath, bool readOnly = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(databasePath);
         DatabasePath = Path.GetFullPath(databasePath);
-        Directory.CreateDirectory(Path.GetDirectoryName(DatabasePath)!);
+
+        if (!readOnly)
+            Directory.CreateDirectory(Path.GetDirectoryName(DatabasePath)!);
 
         _connection = new SqliteConnection(new SqliteConnectionStringBuilder
         {
             DataSource = DatabasePath,
-            Mode = SqliteOpenMode.ReadWriteCreate,
+            Mode = readOnly ? SqliteOpenMode.ReadOnly : SqliteOpenMode.ReadWriteCreate,
             Pooling = false,
         }.ToString());
 
         _connection.Open();
-        Initialise();
+
+        if (!readOnly)
+            Initialise();
     }
 
     public string DatabasePath { get; }
@@ -140,6 +150,8 @@ public sealed class JobStore : IDisposable
                 output_path       TEXT,
                 original_path     TEXT,
                 error             TEXT,
+                content_sha256    TEXT,
+                duplicate_of      TEXT,
                 updated_utc       TEXT NOT NULL
             );
 
@@ -156,8 +168,31 @@ public sealed class JobStore : IDisposable
             );
 
             CREATE INDEX IF NOT EXISTS idx_files_status ON files(status);
+            CREATE INDEX IF NOT EXISTS idx_files_content ON files(content_sha256);
             CREATE INDEX IF NOT EXISTS idx_pages_path ON pages(path, status);
             """);
+
+        AddColumnIfMissing("files", "content_sha256", "TEXT");
+        AddColumnIfMissing("files", "duplicate_of", "TEXT");
+    }
+
+    /// <summary>
+    /// Grafts a column onto an existing database. Cheaper and less alarming than versioned
+    /// migrations for a store whose contents can always be rebuilt by surveying again.
+    /// </summary>
+    private void AddColumnIfMissing(string table, string column, string type)
+    {
+        using (var check = _connection.CreateCommand())
+        {
+            check.CommandText = $"SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name = $c";
+            check.Parameters.AddWithValue("$c", column);
+            if (Convert.ToInt64(check.ExecuteScalar(), CultureInfo.InvariantCulture) > 0)
+                return;
+        }
+
+        using var alter = _connection.CreateCommand();
+        alter.CommandText = $"ALTER TABLE {table} ADD COLUMN {column} {type}";
+        alter.ExecuteNonQuery();
     }
 
     /// <summary>
@@ -180,6 +215,12 @@ public sealed class JobStore : IDisposable
             ClearPages(full);
             Upsert(full, FileStatus.Discovered, fingerprint, 0, TextClass.Unreadable, 0, 0, 0,
                 ModificationBlocker.None, ClassAction.Skip, null, null, null);
+
+            // Including the content hash, which Upsert deliberately leaves alone so that an
+            // ordinary status change does not discard it. A stale hash here would be worse than
+            // useless: deduplication would group the file with whatever it used to match, and
+            // could copy an entirely different manual over it.
+            ClearContentIdentity(full);
             return Find(full)!;
         }
 
@@ -312,6 +353,43 @@ public sealed class JobStore : IDisposable
         return command.ExecuteNonQuery();
     }
 
+    /// <summary>
+    /// Records the full content hash of a file, and, when it is a byte-for-byte copy of another,
+    /// which file it duplicates.
+    /// </summary>
+    public void SetContentIdentity(string path, string contentHash, string? duplicateOf)
+    {
+        using var command = _connection.CreateCommand();
+        command.CommandText =
+            "UPDATE files SET content_sha256 = $h, duplicate_of = $d, updated_utc = $u WHERE path = $p";
+        command.Parameters.AddWithValue("$h", contentHash);
+        command.Parameters.AddWithValue("$d", (object?)duplicateOf ?? DBNull.Value);
+        command.Parameters.AddWithValue("$u", Now());
+        command.Parameters.AddWithValue("$p", Path.GetFullPath(path));
+        command.ExecuteNonQuery();
+    }
+
+    /// <summary>Forgets a file's content hash and any duplicate relationship it had.</summary>
+    public void ClearContentIdentity(string path)
+    {
+        using var command = _connection.CreateCommand();
+        command.CommandText =
+            "UPDATE files SET content_sha256 = NULL, duplicate_of = NULL, updated_utc = $u WHERE path = $p";
+        command.Parameters.AddWithValue("$u", Now());
+        command.Parameters.AddWithValue("$p", Path.GetFullPath(path));
+        command.ExecuteNonQuery();
+    }
+
+    public void SetAction(string path, ClassAction action)
+    {
+        using var command = _connection.CreateCommand();
+        command.CommandText = "UPDATE files SET action = $a, updated_utc = $u WHERE path = $p";
+        command.Parameters.AddWithValue("$a", action.ToString());
+        command.Parameters.AddWithValue("$u", Now());
+        command.Parameters.AddWithValue("$p", Path.GetFullPath(path));
+        command.ExecuteNonQuery();
+    }
+
     public void ClearPages(string path)
     {
         using var command = _connection.CreateCommand();
@@ -327,7 +405,8 @@ public sealed class JobStore : IDisposable
             SELECT f.path, f.status, f.size_bytes, f.modified_ticks, f.content_hash, f.page_count,
                    f.text_class, f.alnum_per_page, f.plausible_ratio, f.common_share, f.blocker,
                    f.action, f.output_path, f.original_path, f.error,
-                   (SELECT COUNT(*) FROM pages p WHERE p.path = f.path AND p.status = 'Completed')
+                   (SELECT COUNT(*) FROM pages p WHERE p.path = f.path AND p.status = 'Completed'),
+                   f.content_sha256, f.duplicate_of
             FROM files f WHERE f.path = $p
             """;
         command.Parameters.AddWithValue("$p", Path.GetFullPath(path));
@@ -343,7 +422,8 @@ public sealed class JobStore : IDisposable
             SELECT f.path, f.status, f.size_bytes, f.modified_ticks, f.content_hash, f.page_count,
                    f.text_class, f.alnum_per_page, f.plausible_ratio, f.common_share, f.blocker,
                    f.action, f.output_path, f.original_path, f.error,
-                   (SELECT COUNT(*) FROM pages p WHERE p.path = f.path AND p.status = 'Completed')
+                   (SELECT COUNT(*) FROM pages p WHERE p.path = f.path AND p.status = 'Completed'),
+                   f.content_sha256, f.duplicate_of
             FROM files f ORDER BY f.path
             """;
 
@@ -380,7 +460,9 @@ public sealed class JobStore : IDisposable
         reader.IsDBNull(12) ? null : reader.GetString(12),
         reader.IsDBNull(13) ? null : reader.GetString(13),
         reader.IsDBNull(14) ? null : reader.GetString(14),
-        reader.GetInt32(15));
+        reader.GetInt32(15),
+        reader.IsDBNull(16) ? null : reader.GetString(16),
+        reader.IsDBNull(17) ? null : reader.GetString(17));
 
     private void Upsert(
         string path, FileStatus status, FileFingerprint fingerprint, int pageCount, TextClass textClass,
