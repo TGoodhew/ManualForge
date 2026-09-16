@@ -32,9 +32,26 @@ internal sealed class FakeOcrEngine(Func<int, IReadOnlyList<RecognisedWord>>? wo
     public OcrRuntimeSummary Runtime { get; } = new("Fake", UsingGpu: false, null, "(no models)");
 
     /// <summary>How many pages actually went through recognition, as opposed to coming from cache.</summary>
-    public int PagesRecognised => PagesSeen.Count;
+    public int PagesRecognised
+    {
+        get { lock (_seen) return _seen.Count; }
+    }
 
-    public List<int> PagesSeen { get; } = [];
+    /// <summary>The engine is called from several threads once the pipeline is driving it.</summary>
+    private readonly List<int> _seen = [];
+
+    public IReadOnlyList<int> PagesSeen
+    {
+        get { lock (_seen) return _seen.ToArray(); }
+    }
+
+    /// <summary>Held for the duration of each call, so a test can observe how many overlap.</summary>
+    public Func<int, Task>? OnPage { get; init; }
+
+    private int _inFlight;
+
+    /// <summary>The most pages that were ever being recognised at the same moment.</summary>
+    public int PeakConcurrency { get; private set; }
 
     /// <summary>Runs before each page, so a test can interrupt or fail at a chosen point.</summary>
     public Action<int>? BeforePage { get; init; }
@@ -45,13 +62,28 @@ internal sealed class FakeOcrEngine(Func<int, IReadOnlyList<RecognisedWord>>? wo
     /// </summary>
     public int MisreportPixelWidth { get; init; }
 
-    public Task<RecognisedPage> RecognisePageAsync(
+    public async Task<RecognisedPage> RecognisePageAsync(
         byte[] imageBytes, int pageNumber, CancellationToken cancellationToken = default)
     {
         BeforePage?.Invoke(pageNumber);
         cancellationToken.ThrowIfCancellationRequested();
 
-        PagesSeen.Add(pageNumber);
+        lock (_seen)
+        {
+            _seen.Add(pageNumber);
+            PeakConcurrency = Math.Max(PeakConcurrency, ++_inFlight);
+        }
+
+        try
+        {
+            if (OnPage is not null)
+                await OnPage(pageNumber).ConfigureAwait(false);
+        }
+        finally
+        {
+            lock (_seen)
+                _inFlight--;
+        }
 
         var (width, height) = PngSize(imageBytes);
         var page = _words(pageNumber);
@@ -68,13 +100,13 @@ internal sealed class FakeOcrEngine(Func<int, IReadOnlyList<RecognisedWord>>? wo
                 page.Average(w => w.Confidence),
                 page)];
 
-        return Task.FromResult(new RecognisedPage(
+        return new RecognisedPage(
             pageNumber,
             MisreportPixelWidth != 0 ? MisreportPixelWidth : width,
             height,
             lines,
             "Fake",
-            TimeSpan.Zero));
+            TimeSpan.Zero);
     }
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;

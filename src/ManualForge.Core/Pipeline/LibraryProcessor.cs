@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Threading.Channels;
 using ManualForge.Core.Classification;
 using ManualForge.Core.Ocr;
 using ManualForge.Core.Pdf;
@@ -93,9 +94,14 @@ public sealed class LibraryProcessor(
     SearchablePdfBuilder? builder,
     DocumentClassifier classifier,
     ILogger<LibraryProcessor>? logger = null,
-    IPageOcrCache? pageCache = null)
+    IPageOcrCache? pageCache = null,
+    RecognitionPipeline? pipeline = null)
 {
     private readonly IPageOcrCache _pageCache = pageCache ?? NullPageOcrCache.Instance;
+
+    // Optional: without it Run is exactly the serial path phase 2 shipped, which is what the
+    // tests exercise and what a machine with no usable GPU should do.
+    private readonly RecognitionPipeline? _pipeline = pipeline;
 
     // Null is legitimate: Survey classifies without ever running OCR, and constructing an engine
     // just to look at text layers would download models and occupy the GPU for nothing.
@@ -210,6 +216,26 @@ public sealed class LibraryProcessor(
         LibraryOptions options,
         IProgress<FileOutcome>? progress = null,
         CancellationToken cancellationToken = default)
+        => RunAsync(options, progress, cancellationToken).GetAwaiter().GetResult();
+
+    /// <summary>
+    /// Processes everything the policy marks for work, recognising pages ahead of the document
+    /// that needs them when a pipeline is available.
+    ///
+    /// The overlap is between recognising one document and assembling another. Assembly - writing
+    /// the text layer, saving, verifying, comparing structure, moving the original aside - is CPU
+    /// work that used to leave the GPU idle for as long as it took, which on a 639-page manual was
+    /// a minute and a half. It now happens while the next document is being recognised.
+    ///
+    /// Nothing about the assembly itself changed. It is still one document at a time, still the
+    /// same verified replace-in-place sequence, and the pipeline never touches a file in the
+    /// library. All it does is fill the page cache that assembly reads from.
+    /// </summary>
+    public async Task<IReadOnlyList<FileOutcome>> RunAsync(
+        LibraryOptions options,
+        IProgress<FileOutcome>? progress = null,
+        CancellationToken cancellationToken = default,
+        PipelineOptions? pipelineOptions = null)
     {
         ArgumentNullException.ThrowIfNull(options);
         if (_builder is null)
@@ -231,7 +257,57 @@ public sealed class LibraryProcessor(
 
         var outcomes = new List<FileOutcome>(outstanding.Count);
 
-        foreach (var record in outstanding)
+        // Documents the pipeline can recognise ahead: those whose bytes it would rasterise are the
+        // same bytes assembly will. A document that has to be flattened or stripped first is read
+        // from a rebuilt copy, and pre-recognising the original would be trusting that the two
+        // render identically - true as far as anyone can tell, but not something to assume when
+        // the cost of being wrong is every word box on the page in the wrong place. Those take the
+        // serial path, which is correct, just not overlapped.
+        var prefetched = _pipeline is null
+            ? []
+            : outstanding.Where(CanRecogniseAhead).ToList();
+
+        var remaining = outstanding.Except(prefetched).ToList();
+
+        if (prefetched.Count > 0)
+        {
+            var byKey = prefetched.ToDictionary(r => Path.GetFullPath(r.Path), StringComparer.OrdinalIgnoreCase);
+            var jobs = prefetched
+                .Select(r => new RecognitionJob(r.Path, Path.GetFullPath(r.Path), r.PageCount))
+                .ToArray();
+
+            var completed = Channel.CreateUnbounded<RecognitionJob>(new UnboundedChannelOptions
+            {
+                SingleReader = true,
+            });
+
+            var configured = pipelineOptions ?? new PipelineOptions();
+            var recognising = _pipeline!.RunAsync(
+                jobs,
+                new PipelineOptions
+                {
+                    RasterWorkers = configured.RasterWorkers,
+                    GpuConcurrency = configured.GpuConcurrency,
+                    RasterQueueDepth = configured.RasterQueueDepth,
+                    Progress = configured.Progress,
+                    Completed = completed.Writer,
+                },
+                cancellationToken);
+
+            await foreach (var job in completed.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                var outcome = ProcessOne(store, options, byKey[job.CacheKey], cancellationToken);
+                outcomes.Add(outcome);
+                progress?.Report(outcome);
+            }
+
+            // Surfaces anything the pipeline threw, now that the consumer has drained.
+            await recognising.ConfigureAwait(false);
+        }
+
+        foreach (var record in remaining)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var outcome = ProcessOne(store, options, record, cancellationToken);
@@ -241,6 +317,19 @@ public sealed class LibraryProcessor(
 
         return outcomes;
     }
+
+    /// <summary>
+    /// Whether a document can be recognised before the assembler reaches it.
+    ///
+    /// Only plain OCR of a file that needs no rebuilding first. A duplicate takes its primary's
+    /// result and needs no recognition at all; a strip-and-redo is recognised from a copy with the
+    /// old text removed, which is not the image the original renders; an owner-password file is
+    /// recognised from a flattened rebuild.
+    /// </summary>
+    private static bool CanRecogniseAhead(FileRecord record)
+        => record.Action == ClassAction.Ocr
+           && record.PageCount > 0
+           && record.Blocker is ModificationBlocker.None or ModificationBlocker.Signature;
 
     private FileOutcome ProcessOne(
         JobStore store, LibraryOptions options, FileRecord record, CancellationToken cancellationToken)
