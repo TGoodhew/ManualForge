@@ -1,3 +1,4 @@
+using PdfSharp.Pdf;
 using PdfSharp.Pdf.IO;
 
 namespace ManualForge.Core.Pdf;
@@ -125,9 +126,71 @@ public static class PdfInspector
     /// </summary>
     public static bool HasEncryptDictionary(string path) => ContainsBytes(path, "/Encrypt"u8);
 
-    /// <summary>Looks for the markers a signature field leaves behind.</summary>
+    /// <summary>
+    /// Whether the document carries an actual digital signature.
+    /// </summary>
+    /// <remarks>
+    /// Scanning for the bytes "/SigFlags" is not good enough, and refusing a file on that basis
+    /// silently skips work the user asked for. An empty AcroForm with /SigFlags 0 contains those
+    /// bytes and is not signed; so does a form that merely declares an unsigned signature field.
+    /// A real signature always has a /Sig dictionary carrying a /ByteRange, so that is what this
+    /// looks for, with a cheap byte scan first to avoid parsing every file in the library.
+    /// </remarks>
     public static bool HasSignatureMarker(string path)
-        => ContainsBytes(path, "/SigFlags"u8) || ContainsBytes(path, "/Type/Sig"u8) || ContainsBytes(path, "/Type /Sig"u8);
+    {
+        // No /ByteRange anywhere means no signature, and this rules out almost every file without
+        // opening it.
+        if (!ContainsBytes(path, "/ByteRange"u8))
+            return false;
+
+        try
+        {
+            using var document = PdfReader.Open(path, PdfDocumentOpenMode.Import);
+            var acroForm = document.Internals.Catalog.Elements.GetDictionary("/AcroForm");
+            if (acroForm is null)
+                return false;
+
+            var fields = acroForm.Elements.GetArray("/Fields");
+            if (fields is not null && AnySignedField(fields, depth: 0))
+                return true;
+
+            // Fall back on the flag: bit 1 of /SigFlags is SignaturesExist. Combined with a
+            // /ByteRange being present, that is good enough evidence.
+            return (acroForm.Elements.GetInteger("/SigFlags") & 1) != 0;
+        }
+        catch (Exception)
+        {
+            // If it cannot be parsed, the byte evidence is all there is. Requiring both markers
+            // keeps the false-positive rate low.
+            return ContainsBytes(path, "/SigFlags"u8);
+        }
+    }
+
+    /// <summary>Walks form fields, including nested ones, looking for a field that is actually signed.</summary>
+    private static bool AnySignedField(PdfArray fields, int depth)
+    {
+        if (depth > 8)
+            return false;
+
+        for (var i = 0; i < fields.Elements.Count; i++)
+        {
+            if (fields.Elements.GetDictionary(i) is not { } field)
+                continue;
+
+            if (field.Elements.GetName("/FT") == "/Sig")
+            {
+                // A signature field is only signed once its value carries a byte range.
+                var value = field.Elements.GetDictionary("/V");
+                if (value?.Elements.ContainsKey("/ByteRange") == true)
+                    return true;
+            }
+
+            if (field.Elements.GetArray("/Kids") is { } kids && AnySignedField(kids, depth + 1))
+                return true;
+        }
+
+        return false;
+    }
 
     private static bool ContainsBytes(string path, ReadOnlySpan<byte> needle)
     {

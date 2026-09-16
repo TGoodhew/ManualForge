@@ -240,6 +240,95 @@ public class FlattenTests : IDisposable
     }
 
     [Fact]
+    public void AnEmptyAcroFormIsNotMistakenForASignature()
+    {
+        // Regression from the repair run: detection scanned for the bytes "/SigFlags" and refused
+        // any file containing them. An AcroForm with /SigFlags 0 and no fields contains that string
+        // and is not signed, so real work was being skipped silently.
+        var path = CreateDocument("emptyform.pdf");
+
+        using (var document = PdfReader.Open(path, PdfDocumentOpenMode.Modify))
+        {
+            var acroForm = new PdfDictionary(document);
+            acroForm.Elements["/SigFlags"] = new PdfInteger(0);
+            acroForm.Elements["/Fields"] = new PdfArray(document);
+            document.Internals.Catalog.Elements["/AcroForm"] = acroForm;
+            document.Save(path);
+        }
+
+        Assert.False(PdfInspector.HasSignatureMarker(path));
+        Assert.Equal(ModificationBlocker.None, PdfInspector.Inspect(path).Blocker);
+    }
+
+    [Fact]
+    public void AnUnsignedSignatureFieldIsNotASignature()
+    {
+        // A form that declares a signature field nobody has signed yet is still safe to modify.
+        var path = CreateDocument("unsignedfield.pdf");
+
+        using (var document = PdfReader.Open(path, PdfDocumentOpenMode.Modify))
+        {
+            var field = new PdfDictionary(document);
+            field.Elements["/FT"] = new PdfName("/Sig");
+            field.Elements["/T"] = new PdfString("Signature1");
+            // No /V, so nothing has been signed.
+
+            var fields = new PdfArray(document);
+            fields.Elements.Add(field);
+
+            var acroForm = new PdfDictionary(document);
+            acroForm.Elements["/SigFlags"] = new PdfInteger(0);
+            acroForm.Elements["/Fields"] = fields;
+            document.Internals.Catalog.Elements["/AcroForm"] = acroForm;
+            document.Save(path);
+        }
+
+        Assert.False(PdfInspector.HasSignatureMarker(path));
+    }
+
+    [Fact]
+    public void AFieldCarryingAByteRangeIsRecognisedAsSigned()
+    {
+        var path = CreateDocument("signed.pdf");
+
+        using (var document = PdfReader.Open(path, PdfDocumentOpenMode.Modify))
+        {
+            var byteRange = new PdfArray(document);
+            byteRange.Elements.Add(new PdfInteger(0));
+            byteRange.Elements.Add(new PdfInteger(840));
+            byteRange.Elements.Add(new PdfInteger(960));
+            byteRange.Elements.Add(new PdfInteger(240));
+
+            var value = new PdfDictionary(document);
+            value.Elements["/Type"] = new PdfName("/Sig");
+            value.Elements["/ByteRange"] = byteRange;
+
+            var field = new PdfDictionary(document);
+            field.Elements["/FT"] = new PdfName("/Sig");
+            field.Elements["/V"] = value;
+
+            var fields = new PdfArray(document);
+            fields.Elements.Add(field);
+
+            var acroForm = new PdfDictionary(document);
+            acroForm.Elements["/SigFlags"] = new PdfInteger(3);
+            acroForm.Elements["/Fields"] = fields;
+            document.Internals.Catalog.Elements["/AcroForm"] = acroForm;
+            document.Save(path);
+        }
+
+        Assert.True(PdfInspector.HasSignatureMarker(path));
+        Assert.Equal(ModificationBlocker.Signature, PdfInspector.Inspect(path).Blocker);
+    }
+
+    [Fact]
+    public void AnOrdinaryScanIsNotMistakenForASignature()
+    {
+        var path = CreateDocument("ordinary.pdf");
+        Assert.False(PdfInspector.HasSignatureMarker(path));
+    }
+
+    [Fact]
     public void StrippingRemovesTextButLeavesTheImage()
     {
         var path = CreateDocument("withtext.pdf", pages: 2);
