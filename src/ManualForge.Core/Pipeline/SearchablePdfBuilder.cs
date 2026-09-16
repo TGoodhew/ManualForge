@@ -158,98 +158,125 @@ public sealed class SearchablePdfBuilder(
 
             var page = document.Pages[pageNumber - 1];
 
-            var rasterWatch = Stopwatch.StartNew();
-            using var raster = _rasteriser.Render(sourceBytes, pageNumber - 1);
-            rasterWatch.Stop();
-
-            var geometry = CreateGeometry(page, raster.Width, raster.Height, pageNumber);
-
-            if (Math.Abs(geometry.EffectiveDpiX - raster.RequestedDpi) > 2)
-            {
-                warnings.Add(
-                    $"Page {pageNumber}: rasterised at an effective {geometry.EffectiveDpiX:F1} dpi " +
-                    $"rather than the requested {raster.RequestedDpi}; positions are scaled from the " +
-                    "actual raster size, so alignment is unaffected.");
-            }
-
-            var ocrWatch = Stopwatch.StartNew();
-
             // A page recognised on an earlier attempt is reused rather than recognised again. This
             // is what makes an interrupted document cost the page in flight rather than the whole
             // document: recognition is the expensive half, assembling the PDF is not.
+            //
+            // Asked before rasterising, because a cached page carries the pixel dimensions it was
+            // recognised at, and the raster would have been needed for nothing else. Skipping it
+            // saves the 55 ms a page that a resumed run used to pay for a bitmap it discarded.
             var cached = _pageCache.TryGet(cacheKey, pageNumber, SettingsFingerprint);
-            RecognisedWord[] words;
-            var recognisedWordCount = 0;
-            var meanConfidence = 0.0;
-            var fromCache = cached is not null;
 
-            if (cached is not null)
+            var rasterWatch = Stopwatch.StartNew();
+            RasterisedPage? raster = null;
+            int pixelWidth, pixelHeight;
+
+            if (cached is { HasDimensions: true })
             {
-                words = cached.Where(w => w.IsUsable).ToArray();
-                recognisedWordCount = cached.Count;
-                meanConfidence = cached.Count == 0 ? 0 : cached.Average(w => w.Confidence);
-                resumedPages++;
+                pixelWidth = cached.PixelWidth;
+                pixelHeight = cached.PixelHeight;
             }
             else
             {
-                var recognised = await _ocrEngine
-                    .RecognisePageAsync(raster.EncodePng(), pageNumber, cancellationToken)
-                    .ConfigureAwait(false);
-
-                if (recognised.PixelWidth != 0 && recognised.PixelWidth != raster.Width)
-                {
-                    warnings.Add(
-                        $"Page {pageNumber}: the OCR engine reports a {recognised.PixelWidth}x{recognised.PixelHeight} " +
-                        $"source but the raster is {raster.Width}x{raster.Height}. Word boxes would be misplaced, " +
-                        "so the page was left without a text layer.");
-                    continue;
-                }
-
-                words = recognised.Words.Where(w => w.IsUsable).ToArray();
-                recognisedWordCount = recognised.WordCount;
-                meanConfidence = recognised.MeanConfidence;
-
-                // Persisted before the page is written, so a crash between the two loses nothing.
-                _pageCache.Save(cacheKey, pageNumber, SettingsFingerprint, words);
+                raster = _rasteriser.Render(sourceBytes, pageNumber - 1);
+                pixelWidth = raster.Width;
+                pixelHeight = raster.Height;
             }
 
-            ocrWatch.Stop();
+            rasterWatch.Stop();
 
-            var writeWatch = Stopwatch.StartNew();
-            var layerResult = _textLayerWriter.WritePage(page, geometry, words, font);
-            writeWatch.Stop();
+            try
+            {
+                var geometry = CreateGeometry(page, pixelWidth, pixelHeight, pageNumber);
 
-            // Record the words that were actually emitted, not the ones that were offered: the
-            // writer drops some, and verification has to line up with the content stream.
-            _lastPageInputs[pageNumber] = new PageInput(geometry, layerResult.Written);
+                if (Math.Abs(geometry.EffectiveDpiX - _rasteriser.Options.Dpi) > 2)
+                {
+                    warnings.Add(
+                        $"Page {pageNumber}: rasterised at an effective {geometry.EffectiveDpiX:F1} dpi " +
+                        $"rather than the requested {_rasteriser.Options.Dpi}; positions are scaled from " +
+                        "the actual raster size, so alignment is unaffected.");
+                }
 
-            textDump?.Add($"--- page {pageNumber} ---");
-            if (textDump is not null)
-                textDump.AddRange(words.Select(w => w.Text));
+                var ocrWatch = Stopwatch.StartNew();
 
-            var report = new PageReport(
-                pageNumber,
-                raster.Width,
-                raster.Height,
-                geometry.EffectiveDpiX,
-                geometry.Rotation,
-                recognisedWordCount,
-                layerResult.WordsWritten,
-                layerResult.WordsSkipped,
-                meanConfidence,
-                rasterWatch.Elapsed,
-                ocrWatch.Elapsed,
-                writeWatch.Elapsed);
+                RecognisedWord[] words;
+                var recognisedWordCount = 0;
+                var meanConfidence = 0.0;
+                var fromCache = cached is not null;
 
-            reports.Add(report);
-            progress?.Report(report);
+                if (cached is not null)
+                {
+                    words = cached.Words.Where(w => w.IsUsable).ToArray();
+                    recognisedWordCount = cached.Words.Count;
+                    meanConfidence = cached.Words.Count == 0 ? 0 : cached.Words.Average(w => w.Confidence);
+                    resumedPages++;
+                }
+                else
+                {
+                    var recognised = await _ocrEngine
+                        .RecognisePageAsync(raster!.EncodePng(), pageNumber, cancellationToken)
+                        .ConfigureAwait(false);
 
-            _logger.LogInformation(
-                "Page {Page}/{Total}: {Written} words written, {Skipped} skipped, {Dpi:F0} dpi, " +
-                "raster {Raster}ms, ocr {Ocr}ms{Resumed}",
-                pageNumber, pageNumbers.Length, layerResult.WordsWritten, layerResult.WordsSkipped,
-                geometry.EffectiveDpiX, rasterWatch.ElapsedMilliseconds, ocrWatch.ElapsedMilliseconds,
-                fromCache ? " (reused from an earlier attempt)" : "");
+                    if (recognised.PixelWidth != 0 && recognised.PixelWidth != pixelWidth)
+                    {
+                        warnings.Add(
+                            $"Page {pageNumber}: the OCR engine reports a {recognised.PixelWidth}x" +
+                            $"{recognised.PixelHeight} source but the raster is {pixelWidth}x{pixelHeight}. " +
+                            "Word boxes would be misplaced, so the page was left without a text layer.");
+                        continue;
+                    }
+
+                    words = recognised.Words.Where(w => w.IsUsable).ToArray();
+                    recognisedWordCount = recognised.WordCount;
+                    meanConfidence = recognised.MeanConfidence;
+
+                    // Persisted before the page is written, so a crash between the two loses nothing.
+                    _pageCache.Save(cacheKey, pageNumber, SettingsFingerprint,
+                        new CachedPage(pixelWidth, pixelHeight, words));
+                }
+
+                ocrWatch.Stop();
+
+                var writeWatch = Stopwatch.StartNew();
+                var layerResult = _textLayerWriter.WritePage(page, geometry, words, font);
+                writeWatch.Stop();
+
+                // Record the words that were actually emitted, not the ones that were offered: the
+                // writer drops some, and verification has to line up with the content stream.
+                _lastPageInputs[pageNumber] = new PageInput(geometry, layerResult.Written);
+
+                textDump?.Add($"--- page {pageNumber} ---");
+                if (textDump is not null)
+                    textDump.AddRange(words.Select(w => w.Text));
+
+                var report = new PageReport(
+                    pageNumber,
+                    pixelWidth,
+                    pixelHeight,
+                    geometry.EffectiveDpiX,
+                    geometry.Rotation,
+                    recognisedWordCount,
+                    layerResult.WordsWritten,
+                    layerResult.WordsSkipped,
+                    meanConfidence,
+                    rasterWatch.Elapsed,
+                    ocrWatch.Elapsed,
+                    writeWatch.Elapsed);
+
+                reports.Add(report);
+                progress?.Report(report);
+
+                _logger.LogInformation(
+                    "Page {Page}/{Total}: {Written} words written, {Skipped} skipped, {Dpi:F0} dpi, " +
+                    "raster {Raster}ms, ocr {Ocr}ms{Resumed}",
+                    pageNumber, pageNumbers.Length, layerResult.WordsWritten, layerResult.WordsSkipped,
+                    geometry.EffectiveDpiX, rasterWatch.ElapsedMilliseconds, ocrWatch.ElapsedMilliseconds,
+                    fromCache ? " (reused from an earlier attempt)" : "");
+            }
+            finally
+            {
+                raster?.Dispose();
+            }
         }
 
         font.Finalise();

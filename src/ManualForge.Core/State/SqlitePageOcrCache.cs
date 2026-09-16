@@ -44,26 +44,50 @@ public sealed class SqlitePageOcrCache : IPageOcrCache, IDisposable
             );
             """;
         command.ExecuteNonQuery();
+
+        // Added after the first full run. Rows written before it report zero, which callers read
+        // as "not known" and fall back to rasterising, so nothing has to be discarded.
+        AddColumnIfMissing("pixel_width", "INTEGER NOT NULL DEFAULT 0");
+        AddColumnIfMissing("pixel_height", "INTEGER NOT NULL DEFAULT 0");
+    }
+
+    private void AddColumnIfMissing(string name, string definition)
+    {
+        using var existing = _connection.CreateCommand();
+        existing.CommandText = "SELECT 1 FROM pragma_table_info('page_ocr') WHERE name = $n";
+        existing.Parameters.AddWithValue("$n", name);
+        if (existing.ExecuteScalar() is not null)
+            return;
+
+        using var add = _connection.CreateCommand();
+        add.CommandText = $"ALTER TABLE page_ocr ADD COLUMN {name} {definition}";
+        add.ExecuteNonQuery();
     }
 
     public string DatabasePath { get; }
 
-    public IReadOnlyList<RecognisedWord>? TryGet(string documentPath, int pageNumber, string settingsFingerprint)
+    public CachedPage? TryGet(string documentPath, int pageNumber, string settingsFingerprint)
     {
         using var command = _connection.CreateCommand();
         command.CommandText =
-            "SELECT words_json FROM page_ocr WHERE path = $p AND page_number = $n AND settings = $s";
+            "SELECT words_json, pixel_width, pixel_height FROM page_ocr " +
+            "WHERE path = $p AND page_number = $n AND settings = $s";
         command.Parameters.AddWithValue("$p", Path.GetFullPath(documentPath));
         command.Parameters.AddWithValue("$n", pageNumber);
         command.Parameters.AddWithValue("$s", settingsFingerprint);
 
-        if (command.ExecuteScalar() is not string json)
+        using var reader = command.ExecuteReader();
+        if (!reader.Read())
             return null;
 
         try
         {
-            var stored = JsonSerializer.Deserialize(json, PageOcrJsonContext.Default.StoredWordArray);
-            return stored?.Select(w => new RecognisedWord(w.T, new RectD(w.X, w.Y, w.W, w.H), w.C)).ToArray();
+            var stored = JsonSerializer.Deserialize(reader.GetString(0), PageOcrJsonContext.Default.StoredWordArray);
+            if (stored is null)
+                return null;
+
+            var words = stored.Select(w => new RecognisedWord(w.T, new RectD(w.X, w.Y, w.W, w.H), w.C)).ToArray();
+            return new CachedPage(reader.GetInt32(1), reader.GetInt32(2), words);
         }
         catch (JsonException)
         {
@@ -72,26 +96,29 @@ public sealed class SqlitePageOcrCache : IPageOcrCache, IDisposable
         }
     }
 
-    public void Save(string documentPath, int pageNumber, string settingsFingerprint, IReadOnlyList<RecognisedWord> words)
+    public void Save(string documentPath, int pageNumber, string settingsFingerprint, CachedPage page)
     {
-        ArgumentNullException.ThrowIfNull(words);
+        ArgumentNullException.ThrowIfNull(page);
 
-        var stored = words
+        var stored = page.Words
             .Select(w => new StoredWord(w.Text, w.BoxPx.X, w.BoxPx.Y, w.BoxPx.Width, w.BoxPx.Height, w.Confidence))
             .ToArray();
 
         using var command = _connection.CreateCommand();
         command.CommandText = """
-            INSERT INTO page_ocr (path, page_number, settings, words_json, updated_utc)
-            VALUES ($p, $n, $s, $j, $u)
+            INSERT INTO page_ocr (path, page_number, settings, words_json, updated_utc, pixel_width, pixel_height)
+            VALUES ($p, $n, $s, $j, $u, $w, $h)
             ON CONFLICT(path, page_number, settings) DO UPDATE SET
-                words_json = excluded.words_json, updated_utc = excluded.updated_utc
+                words_json = excluded.words_json, updated_utc = excluded.updated_utc,
+                pixel_width = excluded.pixel_width, pixel_height = excluded.pixel_height
             """;
         command.Parameters.AddWithValue("$p", Path.GetFullPath(documentPath));
         command.Parameters.AddWithValue("$n", pageNumber);
         command.Parameters.AddWithValue("$s", settingsFingerprint);
         command.Parameters.AddWithValue("$j", JsonSerializer.Serialize(stored, PageOcrJsonContext.Default.StoredWordArray));
         command.Parameters.AddWithValue("$u", DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture));
+        command.Parameters.AddWithValue("$w", page.PixelWidth);
+        command.Parameters.AddWithValue("$h", page.PixelHeight);
         command.ExecuteNonQuery();
     }
 
