@@ -2,6 +2,11 @@
 
 Searchable PDFs from scanned technical manuals, and a searchable index over them.
 
+Built for vintage test-equipment documentation — 1950s-80s scans at 200-400 dpi, mostly CCITT G4
+bitonal, where roughly a quarter of files have no text layer and many of the rest carry poor
+2000s-era OCR. The figures throughout are measured on a corpus of that shape: about 576 documents
+and 100,000 pages.
+
 **Status: phase 4 - the WinUI shell, over a pipeline running on CUDA at 104 pages/min.** It OCRs
 a PDF end to end with an invisible text layer whose alignment is measured rather than assumed,
 classifies a whole library to decide what is worth re-OCRing, rebuilds files that refuse
@@ -40,8 +45,8 @@ change and the text layer added no ink:
 Page images are byte-identical: the text layer adds no ink.
 ```
 
-Measured on `11683A.pdf`, including its two `/Rotate 90` pages: 749 of 749 words within 0.000 pt,
-renders byte-identical, source MD5 unchanged.
+Measured on a 100-page instrument manual including its two `/Rotate 90` pages: 749 of 749 words
+within 0.000 pt, renders byte-identical, source MD5 unchanged.
 
 ## Requirements
 
@@ -85,12 +90,12 @@ rolling.
 A first run, on three pages, writing nothing over the source:
 
 ```
-manualforge ocr "C:\...\Manuals\11683A.pdf" --out out.pdf --pages 6,29,31 --verify-ink
+manualforge ocr "C:\Manuals\service-manual.pdf" --out out.pdf --pages 6,29,31 --verify-ink
 ```
 
 ## GPU: CUDA
 
-**CUDA is active on this machine.** Measured on 20 pages of `11683A.pdf` at 300 dpi:
+Measured on 20 pages at 300 dpi, on an RTX 3060 Ti against a 24-thread CPU:
 
 | Provider | 20 pages | Throughput | ~100k pages |
 |---|---|---|---|
@@ -144,9 +149,11 @@ remaining phases. Its value is running on non-NVIDIA GPUs, which this tool does 
 path remains as the fallback and degrades gracefully. This is a deviation from the original spec,
 which asked for a selectable DirectML fallback; it is reversible at any point.
 
-## The library: what is actually in it
+## What a real corpus looks like
 
-Measured over the real corpus with `manualforge survey`:
+These are the numbers from the corpus this was developed against, reported by
+`manualforge survey`. They are here because the design decisions further down only make sense
+against a distribution like this one.
 
 ```
 576 files, 101,733 pages
@@ -165,13 +172,12 @@ Measured over the real corpus with `manualforge survey`:
     Corrupt              1   needs manual attention
 ```
 
-A quarter of the library refuses modification, so the flatten path is load-bearing rather than an
+A quarter of the corpus refuses modification, so the flatten path is load-bearing rather than an
 edge case.
 
 The ImageOnly count is what is *left*: 94 of the original 238 image-only files have been processed
-and now carry a text layer, which is why they are counted as GoodText above. Two files resist and
-need a look by hand — `LeCroy-5674 service.pdf`, whose single page will not parse, and
-`HP8340B/HP 8340A Operating & Service Vol. 3.pdf`, which reports zero pages.
+and now carry a text layer, which is why they count as GoodText above. Two resist and need a look by
+hand — one whose single page will not parse, and one that reports zero pages.
 
 ## Deciding what to re-OCR
 
@@ -194,9 +200,9 @@ questions have to be kept apart, because a text layer that will not decode looks
 text layer at all.
 
 A page draws glyphs; a reader turns them into characters. On a font with a custom encoding and no
-`/ToUnicode` — 1990s HP manuals typeset with `cdsdvips` are full of them — those two come apart
-completely. Page 40 of `8714 Service Guide.pdf` draws **3,276 glyphs** and decodes to 68 characters
-of `&" '(") *++,`. Poppler reads that page perfectly. PdfPig reads punctuation soup.
+`/ToUnicode` — 1990s manuals typeset with `cdsdvips` are full of them — those two come apart
+completely. One sampled page draws **3,276 glyphs** and decodes to 68 characters of `&" '(") *++,`.
+Poppler reads that page perfectly. PdfPig reads punctuation soup.
 
 So the classifier counts glyphs as well as characters, and a document that draws glyphs while
 decoding almost nothing is **`UnreadableTextLayer`**, not `ImageOnly`:
@@ -210,48 +216,42 @@ It is skipped by default, because the right answer is genuinely unclear: the tex
 original typesetting and better than any OCR of it, and other readers can see it even when we
 cannot. `--policy UnreadableTextLayer=redo` strips and re-OCRs them deliberately.
 
-Measured against the 156 pre-OCR originals: 151 correctly stay `ImageOnly`, 5 are
-`UnreadableTextLayer`, none of the genuine scans is flagged. A stamped page number or a signature
-block does not trip it; the threshold is 100 glyphs per page, and the affected files draw 355 to
-3,276.
+Measured against 156 pre-OCR originals: 151 correctly stay `ImageOnly`, 5 are
+`UnreadableTextLayer`, and no genuine scan is flagged. A stamped page number or a signature block
+does not trip it; the threshold is 100 glyphs per page, and the affected files draw 355 to 3,276.
 
 Two bugs found by measuring rather than assuming, each of which would have sent thousands of pages
 of perfectly good text back through OCR:
 
 1. Word statistics were computed from raw extracted text. Many PDFs position words rather than
-   emitting space characters, so their text arrives as one unbroken run — `DPO3034User.pdf` yields
-   *zero* whitespace characters — and every word-frequency measure reads as gibberish. Fixed by
-   segmenting with PdfPig's `GetWords()`. That alone moved 22 files out of SuspectText.
+   emitting space characters, so their text arrives as one unbroken run — one 300-page user guide
+   yields *zero* whitespace characters — and every word-frequency measure reads as gibberish. Fixed
+   by segmenting with PdfPig's `GetWords()`. That alone moved 22 files out of SuspectText.
 2. Internal separators counted as noise, so `SENSe:FREQuency:STARt` scored as garbled and every
    programming manual looked like bad OCR. Colons, hyphens, underscores, dots and slashes are now
    treated as structure.
 
 ## Recognising each document once
 
-A library assembled over years accumulates copies: a manual filed under two model numbers, a folder
-left behind by an earlier tool, the same PDF downloaded twice. This one holds **560 distinct
-documents across 576 files** — 13 duplicate groups, 16 redundant files, 3,236 pages between them.
-Recognising those twice would cost just under an hour of GPU time at 55.9 pages/min.
+A collection assembled over years accumulates copies: a manual filed under two model numbers, a
+folder left behind by an earlier tool, the same PDF downloaded twice. The test corpus holds **560
+distinct documents across 576 files** — 13 duplicate groups, 16 redundant files, 3,236 pages between
+them. Recognising those twice would cost just under an hour of GPU time at 55.9 pages/min.
 
-As it happens every one of those 13 groups is `GoodText` and therefore skipped, so under the current
-policy deduplication spares nothing on *this* library today. It earned its keep on the staging
-folders that are now gone, and it earns it again the moment a wider policy queues any of these for
-work. The honest summary is that the saving is real but contingent.
+As it happens all 13 groups are `GoodText` and therefore skipped, so under the default policy
+deduplication spares nothing on that corpus today. It earns its keep the moment a wider policy
+queues any of them for work. The honest summary is that the saving is real but contingent.
 
 Matching is by SHA-256 of the content, not by filename, because copies rarely keep the same name.
-The real ones in this library show every variety of that:
+The duplicate groups found show every variety of that:
 
-```
-2015THD Service.pdf                  Keithley 2015 THD Schematics\KEI 2015 Service.pdf   kei2015-sman.pdf
-DG1000Z User's Guide.pdf             DG1000Z%20User's%20Guide.pdf
-M404_QSG.pdf                         M404_QSG-TG-OldToshiba.pdf
-TDS 784D User.pdf                    TDS784D User.pdf
-Basic THD Measurement.pdf            smd-00243_AN30.pdf
-```
+* a part number against a description of the same manual
+* URL-escaping that was never undone, so `%20` where a space should be
+* a suffix naming whichever machine the file was copied off
+* a space that came and went between two otherwise identical names
+* the same document filed once at the top level and once in a vendor subfolder
 
-Part numbers against descriptions, URL-escaping that was never undone, a suffix from whichever
-machine the file came off, a space that came and went. No filename rule would group those; the
-content hash groups all of them.
+No filename rule would group those; the content hash groups all of them.
 
 One copy becomes the **primary** and is recognised; the rest take its finished result by copy, and
 each still gets its own original preserved, so the originals tree stays a complete mirror and every
@@ -263,16 +263,15 @@ Since the copies are identical, the choice does not affect what any file ends up
 decides which path the search index will cite for the document, which is a question about what a
 person will recognise at a glance. The rule is:
 
-1. **Shallowest path.** A manual in the library root beats the same manual staged in a working
+1. **Shallowest path.** A manual in the collection root beats the same manual staged in a working
    subfolder, and this needs no knowledge of what any particular folder is called.
 2. **Most descriptive name**, approximated by how many word-like runs it contains.
 3. Alphabetical, so the result never depends on the order files were walked in.
 
 The second criterion used to be the *shortest* name, which is the obvious choice and the wrong one:
-it systematically picks part numbers over descriptions — `kei2015-sman.pdf` over
-`2015THD Service.pdf`, `LC574AL.pdf` over `LeCroy-5674 User.pdf`, `08340-90243.pdf` over
-`HP 8340B, 41B Assembly Level Service.pdf`. The two rules disagreed on six of the thirteen groups
-here, and the descriptive name was the better answer in all six.
+it systematically picks part numbers over descriptions, so a document ends up cited by its
+publisher's stock number rather than by a name a person would recognise. The two rules disagreed on six of
+the thirteen groups in the test corpus, and the descriptive name was the better answer in all six.
 
 `--no-dedup` recognises every copy separately.
 
@@ -281,13 +280,13 @@ here, and the descriptive name was the better answer in all six.
 Deduplication runs only over the files marked for work, because hashing the whole library to spare
 effort on files nobody is touching costs more to discover than it saves. That is right for
 recognition and wrong for search: a duplicate that was skipped is never grouped, so phase 5 would
-still return `8340 Assembly Service.pdf` and its three twins as four separate results. The index
-needs its own pass over content hashes, independent of whether a file needed OCR.
+still return one manual and its three identical twins as four separate results. The index needs its
+own pass over content hashes, independent of whether a file needed OCR.
 
 ## Flattening files that refuse modification
 
-147 files carry owner-password permissions. PDFsharp will not open them for modification, but it
-*will* import their pages, so they are rebuilt into a fresh document:
+In the test corpus 147 files carry owner-password permissions. PDFsharp will not open them for
+modification, but it *will* import their pages, so they are rebuilt into a fresh document:
 
 ```
 8350A-OSM.pdf   Modify  FAIL  owner password required
@@ -327,7 +326,7 @@ flight leaves those gaps empty. Feeding the engine more than one page at a time 
 
 ### What it buys, measured end to end
 
-The same five manuals, 378 pages, from the same starting state each time:
+Five manuals, 378 pages, from the same starting state each time:
 
 | | wall clock | pages/min | |
 |---|---|---|---|
@@ -335,8 +334,8 @@ The same five manuals, 378 pages, from the same starting state each time:
 | Pipeline, one page on the GPU | 316.6 s | 72.1 | **1.35x** from overlap alone |
 | Pipeline, two pages on the GPU | **219.9 s** | **104.1** | **1.95x** |
 
-Identical output at every setting: 84,489 words, worst alignment deviation 0.001 pt. On the ~30
-hours the full library took, this is about fourteen hours.
+Identical output at every setting: 84,489 words, worst alignment deviation 0.001 pt. Against the
+~30 hours a full pass over the test corpus took, that is about fourteen hours saved.
 
 ### VRAM is a cliff, not a slope
 
@@ -371,16 +370,16 @@ leave the GPU idle - now happens while the next document is being recognised.
 Documents that need flattening or stripping first are excluded from the pre-pass and take the
 serial path. Pre-rasterising the original would be assuming the rebuilt copy renders identically to
 it; that is true as far as anything can tell, and the flatten is verified structurally, but assuming
-it costs every word box on the page if it is ever wrong. Eleven of the 156 originals here are
-affected.
+it costs every word box on the page if it is ever wrong. It affected eleven of 156 originals in the
+test corpus.
 
 ### A CPU pipeline alongside the GPU one makes it slower
 
 Worth writing down because the idea is a good one and the answer is not the obvious one.
 
-During a GPU pipeline run this machine's CPU averages **26.8% of 24 threads** — about 17 threads
-idle — while the GPU sits at 40%. Neither resource is saturated. So a second OCR pipeline on the
-CPU looks like free throughput: it is 15.4 pages/min on its own, which would be a 15% top-up.
+During a GPU pipeline run the CPU averages **26.8% of 24 threads** — about 17 threads idle — while
+the GPU sits at 40%. Neither resource is saturated. So a second OCR pipeline on the CPU looks like
+free throughput: it is 15.4 pages/min on its own, which would be a 15% top-up.
 
 It is not free. Measured on 30 pages, with both engines pulling from one shared queue so the slower
 one simply takes fewer pages:
@@ -511,10 +510,9 @@ Two text layers do not merge. An extractor sorts them together by position and r
 interleaved character by character, so `Broadband` comes back as `BBrrooaaddbbaanndd` and the
 document ends up **less searchable than before it was touched**.
 
-Three files in this library were damaged exactly that way — `8714 Service Guide.pdf`,
-`83620A User.pdf` and `8714 IBASIC.pdf` — because the classifier read a font it could not decode as
-no text at all. All three have been restored from their preserved originals, which is what keeping
-originals is for, and the run summary would have said nothing was wrong.
+Three files were damaged exactly that way during development, because the classifier read a font it
+could not decode as no text at all. All three were restored from their preserved originals, which is
+what keeping originals is for — and the run summary would have said nothing was wrong.
 
 Two things now prevent it. The classifier tells a text layer it cannot read apart from no text
 layer, as above. And independently of any classification, the processor probes whatever it is about
