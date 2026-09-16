@@ -133,7 +133,8 @@ internal sealed class CommandLine
               --survey-only           Classify and report, then stop (run only).
               --retry-skipped         Reconsider files skipped by an earlier run.
               --no-dedup              Recognise every copy separately instead of once per document.
-              --allow-signed          Process digitally signed files, invalidating their signatures.
+              --refuse-signed         Skip digitally signed files. By default they are processed,
+                                      which invalidates their signatures; every one is reported.
 
             general options:
               --models <path>         Model cache directory.

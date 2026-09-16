@@ -110,8 +110,18 @@ public sealed class ContentDeduplicator(ILogger? logger = null)
 
     /// <summary>
     /// Chooses which copy to treat as the original: the one nearest the top of the tree, then the
-    /// one with the shortest name. That favours <c>2235_lg.pdf</c> over
-    /// <c>_OCR_QUEUE\005_2235_lg.pdf</c> without needing to know anything about either folder.
+    /// one whose name says most about what it is.
+    ///
+    /// The choice does not affect what any file ends up containing — the copies are identical, so
+    /// the primary's result is equally valid for all of them. It decides which path the search
+    /// index will cite for the document, which is why the second criterion is descriptiveness
+    /// rather than brevity. Preferring the shortest name systematically picks part numbers over
+    /// descriptions: `kei2015-sman.pdf` over `2015THD Service.pdf`, `LC574AL.pdf` over
+    /// `LeCroy-5674 User.pdf`. Exactly backwards for a result a person has to recognise at a glance.
+    ///
+    /// Depth comes first because it needs no knowledge of any particular folder: a manual in the
+    /// library root beats the same manual staged in a working subfolder, whatever that folder is
+    /// called.
     /// </summary>
     private static readonly IComparer<string> PrimaryPreference =
         Comparer<string>.Create((a, b) =>
@@ -119,11 +129,20 @@ public sealed class ContentDeduplicator(ILogger? logger = null)
             var depth = Depth(a).CompareTo(Depth(b));
             if (depth != 0) return depth;
 
-            var length = Path.GetFileName(a).Length.CompareTo(Path.GetFileName(b).Length);
-            if (length != 0) return length;
+            // More descriptive wins, so the comparison is reversed.
+            var descriptive = Descriptiveness(b).CompareTo(Descriptiveness(a));
+            if (descriptive != 0) return descriptive;
 
             return string.Compare(a, b, StringComparison.OrdinalIgnoreCase);
         });
+
+    /// <summary>
+    /// How much a filename says about its contents, approximated by the number of word-like runs
+    /// in it. "HP 8340B, 41B Assembly Level Service" scores 4; "08340-90243" scores 0.
+    /// </summary>
+    private static int Descriptiveness(string path)
+        => System.Text.RegularExpressions.Regex.Matches(
+            Path.GetFileNameWithoutExtension(path), "[A-Za-z]{3,}").Count;
 
     private static int Depth(string path) => path.Count(c => c == Path.DirectorySeparatorChar);
 

@@ -171,7 +171,7 @@ internal static class RunCommand
             DryRun = arguments.Has("dry-run"),
             Limit = arguments.GetInt("limit") ?? 0,
             OriginalsFolderName = arguments.Get("originals") ?? "_Originals",
-            AllowSignedFiles = arguments.Has("allow-signed"),
+            RefuseSignedFiles = arguments.Has("refuse-signed"),
             RetrySkipped = arguments.Has("retry-skipped"),
             Deduplicate = !arguments.Has("no-dedup"),
         };
@@ -262,6 +262,17 @@ internal static class RunCommand
 
         var worst = outcomes.Where(o => o.Status == FileStatus.Completed).Select(o => o.WorstDeviationPt).DefaultIfEmpty(0).Max();
         Console.WriteLine($"Worst alignment deviation: {worst:F3} pt");
+
+        // Signatures are invalidated by default, but never quietly.
+        var signed = outcomes.Where(o => o.SignatureInvalidated).ToArray();
+        if (signed.Length > 0)
+        {
+            Console.WriteLine();
+            Console.WriteLine($"{signed.Length} file(s) were digitally signed; their signatures are now invalid.");
+            Console.WriteLine("The untouched originals are kept, so this is reversible.");
+            foreach (var o in signed)
+                Console.WriteLine($"  {Path.GetFileName(o.Path)}");
+        }
 
         foreach (var failure in outcomes.Where(o => o.Status == FileStatus.Failed).Take(10))
             Console.WriteLine($"  failed: {Path.GetFileName(failure.Path)} — {failure.Error}");

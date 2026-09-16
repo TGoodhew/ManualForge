@@ -140,17 +140,40 @@ public class DeduplicationTests : IDisposable
         Assert.Equal(hashA, hashB);
     }
 
-    [Fact]
-    public void TheShortestNameBreaksATieAtTheSameDepth()
+    [Theory]
+    // Real pairs from the library. In every one the descriptive name is the better search result,
+    // and the shortest-name rule this replaced picked the part number instead.
+    [InlineData("kei2015-sman.pdf", "2015THD Service.pdf")]
+    [InlineData("LC574AL.pdf", "LeCroy-5674 User.pdf")]
+    [InlineData("smd-00243_AN30.pdf", "Basic THD Measurement.pdf")]
+    [InlineData("08340-90243.pdf", "HP 8340B, 41B Assembly Level Service.pdf")]
+    public void TheMoreDescriptiveNameWinsATieAtTheSameDepth(string terse, string descriptive)
     {
-        const string content = "same";
-        var longName = Write("HP 8340B, 41B Assembly Level Service.pdf", content);
-        var shortName = Write("08340-90243.pdf", content);
+        const string content = "the same manual under two names";
+        var a = Write(terse, content);
+        var b = Write(descriptive, content);
 
-        using var store = NewStore("tie.db");
-        var report = new ContentDeduplicator().Apply(store, [Register(store, longName), Register(store, shortName)]);
+        using var store = NewStore(Guid.NewGuid().ToString("N") + ".db");
+        var report = new ContentDeduplicator().Apply(store, [Register(store, a), Register(store, b)]);
 
-        Assert.Equal(shortName, Assert.Single(report.Groups).Primary);
+        // The primary is the path the search index will cite, so it should be the one a person can
+        // recognise at a glance.
+        Assert.Equal(b, Assert.Single(report.Groups).Primary);
+    }
+
+    [Fact]
+    public void DepthStillBeatsDescriptiveness()
+    {
+        // A manual in the library root beats the same manual staged in a subfolder, however much
+        // more the subfolder copy's name says. That rule needs no knowledge of the folder.
+        const string content = "identical";
+        var shallow = Write("LC574AL.pdf", content);
+        var deep = Write(Path.Combine("_OCR_QUEUE", "083_LeCroy 5674 Service Manual.pdf"), content);
+
+        using var store = NewStore("depth.db");
+        var report = new ContentDeduplicator().Apply(store, [Register(store, shallow), Register(store, deep)]);
+
+        Assert.Equal(shallow, Assert.Single(report.Groups).Primary);
     }
 
     [Fact]

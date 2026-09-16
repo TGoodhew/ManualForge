@@ -43,10 +43,15 @@ public sealed class LibraryOptions
     public bool SmallestFirst { get; init; } = true;
 
     /// <summary>
-    /// Allow modifying digitally signed files. Off by default: adding a text layer invalidates the
-    /// signature, and flattening removes it outright.
+    /// Refuse to modify digitally signed files. Off by default, so signed files are processed like
+    /// any other.
+    ///
+    /// The default is deliberate for this library: the signatures on these manuals come from
+    /// whoever scanned or redistributed them decades ago, not from anything worth relying on, and
+    /// refusing silently left work undone that had been asked for. Every signature that is
+    /// invalidated is reported, so it is never a surprise.
     /// </summary>
-    public bool AllowSignedFiles { get; init; }
+    public bool RefuseSignedFiles { get; init; }
 
     /// <summary>
     /// Reconsider files that were previously skipped. Needed whenever the reason for skipping has
@@ -71,7 +76,8 @@ public sealed record FileOutcome(
     double WorstDeviationPt,
     bool WasFlattened,
     TimeSpan Duration,
-    string? Error);
+    string? Error,
+    bool SignatureInvalidated = false);
 
 /// <summary>
 /// Walks a manual library and brings each file to its target state: classify, flatten if the file
@@ -226,6 +232,7 @@ public sealed class LibraryProcessor(
         var path = record.Path;
         var workingDirectory = Path.Combine(Path.GetTempPath(), "ManualForge", Guid.NewGuid().ToString("N"));
         var flattened = false;
+        var signatureInvalidated = false;
 
         try
         {
@@ -250,14 +257,22 @@ public sealed class LibraryProcessor(
                 return Outcome(record, FileStatus.Failed, 0, 0, false, stopwatch.Elapsed, capabilities.Detail);
             }
 
-            // A digital signature is a claim about the bytes of the file. Adding a text layer
-            // breaks that claim, and flattening drops the signature entirely. Neither is ours to
-            // decide silently, so a signed file is refused unless explicitly allowed.
-            if (capabilities.HasSignature && !options.AllowSignedFiles)
+            // A digital signature is a claim about the bytes of the file, and adding a text layer
+            // breaks it. Processing anyway is the default, but never silently: every signature
+            // invalidated is reported and logged.
+            if (capabilities.HasSignature)
             {
-                const string reason = "The file is digitally signed; modifying it would invalidate the signature.";
-                store.SetStatus(path, FileStatus.Skipped, reason);
-                return Outcome(record, FileStatus.Skipped, 0, 0, false, stopwatch.Elapsed, reason);
+                if (options.RefuseSignedFiles)
+                {
+                    const string reason = "The file is digitally signed and --refuse-signed was given.";
+                    store.SetStatus(path, FileStatus.Skipped, reason);
+                    return Outcome(record, FileStatus.Skipped, 0, 0, false, stopwatch.Elapsed, reason);
+                }
+
+                signatureInvalidated = true;
+                _logger.LogWarning(
+                    "{Path} is digitally signed; adding a text layer invalidates that signature. " +
+                    "The untouched original is kept in the originals tree.", path);
             }
 
             if (capabilities.NeedsFlattening)
@@ -395,7 +410,8 @@ public sealed class LibraryProcessor(
                 "Completed {Path}: {Words} words, worst deviation {Deviation:F3} pt, original kept at {Original}",
                 path, report.TotalWordsWritten, worstDeviation, originalDestination);
 
-            return Outcome(record, FileStatus.Completed, report.TotalWordsWritten, worstDeviation, flattened, stopwatch.Elapsed, null);
+            return Outcome(record, FileStatus.Completed, report.TotalWordsWritten, worstDeviation, flattened,
+                stopwatch.Elapsed, null, signatureInvalidated);
         }
         catch (OperationCanceledException)
         {
@@ -487,8 +503,10 @@ public sealed class LibraryProcessor(
     }
 
     private static FileOutcome Outcome(
-        FileRecord record, FileStatus status, int words, double deviation, bool flattened, TimeSpan duration, string? error)
-        => new(record.Path, record.TextClass, record.Action, status, record.PageCount, words, deviation, flattened, duration, error);
+        FileRecord record, FileStatus status, int words, double deviation, bool flattened, TimeSpan duration,
+        string? error, bool signatureInvalidated = false)
+        => new(record.Path, record.TextClass, record.Action, status, record.PageCount, words, deviation, flattened,
+            duration, error, signatureInvalidated);
 
     /// <summary>
     /// Where a file's original is kept: one tree under the root, mirroring the source structure.
