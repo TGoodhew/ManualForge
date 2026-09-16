@@ -2,6 +2,8 @@
   <Folder Name="/src/">
     <Project Path="src/ManualForge.Cli/ManualForge.Cli.csproj" />
     <Project Path="src/ManualForge.Core/ManualForge.Core.csproj" />
+    <Project Path="src/ManualForge.Shell/ManualForge.Shell.csproj" />
+    <Project Path="src/ManualForge.App/ManualForge.App.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/ManualForge.Core.Tests/ManualForge.Core.Tests.csproj" />

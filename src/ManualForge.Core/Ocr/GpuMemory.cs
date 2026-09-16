@@ -3,13 +3,24 @@ using System.Globalization;
 
 namespace ManualForge.Core.Ocr;
 
-/// <summary>What the card has, and how much of it somebody else is already using.</summary>
-public sealed record GpuMemory(int TotalMiB, int UsedMiB, string? Name)
+/// <summary>
+/// What the card has, how much of it somebody else is already using, and how busy it is.
+/// </summary>
+/// <param name="UtilisationPercent">
+/// How much of the last sampling period the GPU spent executing. Null when it was not asked for.
+/// Worth showing next to the memory figure rather than instead of it: this application's two
+/// constraints pull in opposite directions, with utilisation saying whether to send more work and
+/// free memory saying whether there is room to.
+/// </param>
+public sealed record GpuMemory(int TotalMiB, int UsedMiB, string? Name, int? UtilisationPercent = null)
 {
     public int FreeMiB => Math.Max(0, TotalMiB - UsedMiB);
 
+    public int UsedPercent => TotalMiB <= 0 ? 0 : (int)Math.Round(100.0 * UsedMiB / TotalMiB);
+
     public override string ToString() =>
-        $"{Name ?? "GPU"}: {FreeMiB:N0} MiB free of {TotalMiB:N0}";
+        $"{Name ?? "GPU"}: {FreeMiB:N0} MiB free of {TotalMiB:N0}"
+        + (UtilisationPercent is { } u ? $", {u}% busy" : string.Empty);
 }
 
 /// <summary>
@@ -49,10 +60,14 @@ public static class GpuMemoryProbe
     /// <summary>Headroom left unused, so that a desktop that grows does not push the run over.</summary>
     public const int ReserveMiB = 512;
 
-    /// <summary>Reads the first CUDA device's memory, or null if nvidia-smi is not there.</summary>
+    /// <summary>
+    /// Reads the first CUDA device, or null if nvidia-smi is not there. Memory and utilisation come
+    /// from one invocation because the UI samples this on a timer and each call is a process start.
+    /// </summary>
     public static GpuMemory? TryRead()
     {
-        var line = RunNvidiaSmi("--query-gpu=memory.total,memory.used,name --format=csv,noheader,nounits");
+        var line = RunNvidiaSmi(
+            "--query-gpu=memory.total,memory.used,name,utilization.gpu --format=csv,noheader,nounits");
         if (line is null)
             return null;
 
@@ -64,7 +79,12 @@ public static class GpuMemoryProbe
             return null;
         }
 
-        return new GpuMemory(total, used, parts.Length > 2 ? parts[2] : null);
+        int? utilisation = parts.Length > 3
+            && int.TryParse(parts[3], NumberStyles.Integer, CultureInfo.InvariantCulture, out var busy)
+            ? busy
+            : null;
+
+        return new GpuMemory(total, used, parts.Length > 2 ? parts[2] : null, utilisation);
     }
 
     /// <summary>

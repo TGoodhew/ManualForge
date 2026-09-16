@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "ManualForge.App (Package)": {
+      "commandName": "MsixPackage"
+    },
+    "ManualForge.App (Unpackaged)": {
+      "commandName": "Project"
+    }
+  }
+}

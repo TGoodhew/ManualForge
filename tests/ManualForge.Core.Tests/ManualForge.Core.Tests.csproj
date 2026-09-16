@@ -17,6 +17,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\ManualForge.Core\ManualForge.Core.csproj" />
+    <ProjectReference Include="..\..\src\ManualForge.Shell\ManualForge.Shell.csproj" />
   </ItemGroup>
 
   <ItemGroup>
