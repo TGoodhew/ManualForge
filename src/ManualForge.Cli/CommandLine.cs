@@ -140,7 +140,8 @@ internal sealed class CommandLine
 
             general options:
               --models <path>         Model cache directory.
-              --log <path>            JSON-lines log file.
+              --log <path>            JSON-lines log file, written exactly there. The default is a
+                                      daily-rolling file under %LOCALAPPDATA%, kept for 30 days.
               --verbose               Debug-level logging and full stack traces.
 
             The source file is opened read-only and is never modified.

@@ -8,7 +8,10 @@ public enum OcrAccelerator
     /// <summary>Let the library pick: CUDA if usable, else DirectML, else CPU.</summary>
     Auto,
 
-    /// <summary>NVIDIA CUDA. Fastest here, but needs the CUDA 12 and cuDNN 9 runtimes present.</summary>
+    /// <summary>
+    /// NVIDIA CUDA. Fastest here, but ONNX Runtime 1.30 hard-imports cublas64_13.dll, so it needs
+    /// the CUDA <b>13</b> runtime and cuDNN 9 for CUDA 13. A CUDA 12 install will not load.
+    /// </summary>
     Cuda,
 
     /// <summary>DirectML. Slower than CUDA but works on any DX12 GPU with no extra runtime.</summary>

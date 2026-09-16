@@ -77,6 +77,11 @@ Structured logs, one JSON object per line, go to:
 %LOCALAPPDATA%\ManualForge\logs\manualforge-YYYYMMDD.jsonl
 ```
 
+Serilog writes them: rolled daily, kept for 30 days, opened shared so a run holding the log for
+hours does not stop a second command starting, and flushed as written so a run that is killed still
+ends with the last thing that happened. `--log <path>` writes to exactly that file instead, with no
+rolling.
+
 A first run, on three pages, writing nothing over the source:
 
 ```
@@ -290,9 +295,9 @@ src/ManualForge.Core/
   Rendering/PageRasteriser.cs     PDFium via PDFtoImage
   Verification/                   PdfPig re-extraction, baseline deviation, ink comparison
   Pipeline/SearchablePdfBuilder.cs end-to-end for one file
-  Diagnostics/JsonFileLogger.cs   JSON-lines log provider
+  Diagnostics/RunLog.cs           Serilog: JSON lines, rolled daily, shared
 src/ManualForge.Cli/              the prototype's command line
-tests/ManualForge.Core.Tests/     158 tests, no GPU or network needed
+tests/ManualForge.Core.Tests/     164 tests, no GPU or network needed
 ```
 
 ## Tests
@@ -301,7 +306,7 @@ tests/ManualForge.Core.Tests/     158 tests, no GPU or network needed
 dotnet test
 ```
 
-158 tests, a few seconds, no models and no network required:
+164 tests, a few seconds, no models and no network required:
 
 - **`PageGeometryTests`** — the corner mapping for all four rotations, non-zero crop origins,
   text-matrix direction, points-per-pixel, rotation normalisation.
@@ -387,10 +392,10 @@ enough for planning, wrong enough to mention.
 
 1. ~~**DirectML**~~ — resolved: not added, see "DirectML" above.
 2. ~~**CUDA 13 runtime + cuDNN 9**~~ — resolved: installed and active, 3.7x faster.
-3. **Serilog** — file logging is currently a 150-line hand-rolled JSON-lines provider to avoid an
-   unapproved dependency. Fine to keep, or would you rather have Serilog?
-4. **xunit** — the test projects use xunit, the `dotnet new` default. Called out for completeness
-   since it was not on the list.
+3. ~~**Serilog**~~ — resolved: adopted, replacing the hand-rolled provider. Adds `Serilog`,
+   `Serilog.Extensions.Logging` and `Serilog.Sinks.File`; the JSON formatter is in Serilog itself,
+   so writing JSON lines needed no formatting package on top.
+4. ~~**xunit**~~ — resolved: kept.
 5. **Locating CUDA without `PATH`** — the app relies on the user's `PATH` to find the CUDA and
    cuDNN DLLs, which is fragile for something launched by double-clicking. Phase 3 should locate
    them at startup and add them to the process DLL search path, reporting clearly when it cannot.

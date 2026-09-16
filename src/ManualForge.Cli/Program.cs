@@ -24,13 +24,17 @@ Console.CancelKeyPress += (_, e) =>
     cancellation.Cancel();
 };
 
-var logPath = arguments.Get("log")
+// The default log rolls daily, and Serilog inserts the date itself, so the template ends with the
+// separator and no date. A path given on the command line is taken literally instead.
+var explicitLog = arguments.Get("log");
+var logTemplate = explicitLog
     ?? Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "ManualForge", "logs", $"manualforge-{DateTime.Now:yyyyMMdd}.jsonl");
+        "ManualForge", "logs", "manualforge-.jsonl");
 
-using var logProvider = new JsonFileLoggerProvider(logPath, arguments.Has("verbose") ? LogLevel.Debug : LogLevel.Information);
-using var loggerFactory = LoggerFactory.Create(builder => builder.AddProvider(logProvider).SetMinimumLevel(LogLevel.Debug));
+using var runLog = RunLog.Open(logTemplate, arguments.Has("verbose"), roll: explicitLog is null);
+var loggerFactory = runLog.Factory;
+var logPath = runLog.Path;
 
 try
 {
@@ -95,8 +99,9 @@ namespace ManualForge.Cli
             if (!engine.Runtime.UsingGpu && options.Accelerator != OcrAccelerator.Cpu)
             {
                 Console.WriteLine();
-                Console.WriteLine("The GPU was not used. CUDA needs the CUDA 12 and cuDNN 9 runtime DLLs on PATH;");
-                Console.WriteLine("if they are missing, --engine directml works on any DX12 GPU with no extra setup.");
+                Console.WriteLine("The GPU was not used. ONNX Runtime 1.30 hard-imports cublas64_13.dll, so this");
+                Console.WriteLine("needs the CUDA 13 runtime and cuDNN 9 for CUDA 13 on PATH - CUDA 12 will not load.");
+                Console.WriteLine("The hint above names the exact DLL that was missing. Otherwise it runs on CPU.");
             }
 
             return 0;
