@@ -111,7 +111,15 @@ public sealed class LibraryProcessor(
             _logger.LogInformation("Reconsidering {Count} previously skipped file(s)", reset);
         }
 
-        foreach (var path in Discover(options))
+        var discovered = Discover(options).ToArray();
+
+        // Anything recorded but no longer on disk is marked before classifying, so totals describe
+        // the library as it is rather than as it once was.
+        var missing = store.MarkMissing(discovered.Select(Path.GetFullPath).ToHashSet(StringComparer.OrdinalIgnoreCase));
+        if (missing > 0)
+            _logger.LogInformation("{Count} recorded file(s) are no longer on disk", missing);
+
+        foreach (var path in discovered)
         {
             cancellationToken.ThrowIfCancellationRequested();
 

@@ -54,6 +54,11 @@ internal static class StatusCommand
 
     private static void PrintByStatus(IReadOnlyList<FileRecord> records)
     {
+        // Files that have gone from disk are shown, but kept out of the totals so those describe
+        // the library as it is now.
+        var present = records.Where(r => r.Status != FileStatus.Missing).ToArray();
+        var missing = records.Count - present.Length;
+
         Console.WriteLine($"  {"Status",-14}{"Files",8}{"Pages",12}");
         Console.WriteLine("  " + new string('-', 34));
 
@@ -66,7 +71,9 @@ internal static class StatusCommand
         }
 
         Console.WriteLine("  " + new string('-', 34));
-        Console.WriteLine($"  {"total",-14}{records.Count,8:N0}{records.Sum(r => (long)r.PageCount),12:N0}");
+        Console.WriteLine($"  {"in library",-14}{present.Length,8:N0}{present.Sum(r => (long)r.PageCount),12:N0}");
+        if (missing > 0)
+            Console.WriteLine($"  ({missing:N0} more recorded previously but no longer on disk)");
         Console.WriteLine();
     }
 
@@ -75,9 +82,11 @@ internal static class StatusCommand
         Console.WriteLine($"  {"Class",-14}{"Files",8}{"Pages",12}  Action");
         Console.WriteLine("  " + new string('-', 46));
 
+        var present = records.Where(r => r.Status != FileStatus.Missing).ToArray();
+
         foreach (var textClass in Enum.GetValues<TextClass>())
         {
-            var inClass = records.Where(r => r.TextClass == textClass).ToArray();
+            var inClass = present.Where(r => r.TextClass == textClass).ToArray();
             if (inClass.Length == 0)
                 continue;
 
@@ -94,7 +103,7 @@ internal static class StatusCommand
         // The same rule the run itself applies, so what is shown here is what will actually happen.
         var outstanding = records
             .Where(r => r.Action != ClassAction.Skip
-                     && r.Status is not (FileStatus.Completed or FileStatus.Skipped))
+                     && r.Status is not (FileStatus.Completed or FileStatus.Skipped or FileStatus.Missing))
             .OrderBy(r => r.Fingerprint.SizeBytes)
             .ToArray();
 

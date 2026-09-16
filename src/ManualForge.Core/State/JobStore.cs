@@ -25,6 +25,12 @@ public enum FileStatus
 
     /// <summary>Work was attempted and failed.</summary>
     Failed,
+
+    /// <summary>
+    /// Recorded once, but the file is no longer on disk. Kept rather than deleted so the record of
+    /// what was done to it survives, but excluded from totals and from the work queue.
+    /// </summary>
+    Missing,
 }
 
 public enum PageStatus
@@ -374,6 +380,38 @@ public sealed class JobStore : IDisposable
         command.ExecuteNonQuery();
     }
 
+    /// <summary>
+    /// Marks every recorded file that is no longer on disk, and returns how many were newly marked.
+    ///
+    /// Without this the database slowly stops describing reality: 149 files deleted from this
+    /// library left rows that inflated every total by a quarter and put a file that no longer
+    /// exists into the work queue, where it failed on every run. Marking rather than deleting keeps
+    /// the record of what was done, and lets a file that comes back be picked up again.
+    /// </summary>
+    public int MarkMissing(IReadOnlySet<string> existingPaths)
+    {
+        ArgumentNullException.ThrowIfNull(existingPaths);
+
+        var marked = 0;
+        foreach (var record in All())
+        {
+            var exists = existingPaths.Contains(record.Path) || File.Exists(record.Path);
+
+            if (!exists && record.Status != FileStatus.Missing)
+            {
+                SetStatus(record.Path, FileStatus.Missing, "The file is no longer on disk.");
+                marked++;
+            }
+            else if (exists && record.Status == FileStatus.Missing)
+            {
+                // It came back. Treat it as new so it is classified afresh.
+                SetStatus(record.Path, FileStatus.Discovered, null);
+            }
+        }
+
+        return marked;
+    }
+
     /// <summary>Forgets a file's content hash and any duplicate relationship it had.</summary>
     public void ClearContentIdentity(string path)
     {
@@ -445,7 +483,7 @@ public sealed class JobStore : IDisposable
     /// </summary>
     public IReadOnlyList<FileRecord> Outstanding()
         => All().Where(r => r.Action != ClassAction.Skip
-                         && r.Status is not (FileStatus.Completed or FileStatus.Skipped))
+                         && r.Status is not (FileStatus.Completed or FileStatus.Skipped or FileStatus.Missing))
                 .ToList();
 
     public IReadOnlyDictionary<TextClass, int> ClassCounts()

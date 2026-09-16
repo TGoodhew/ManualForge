@@ -616,6 +616,53 @@ public class JobStoreTests : IDisposable
     }
 
     [Fact]
+    public void FilesRemovedFromDiskAreMarkedMissingAndLeaveTheQueue()
+    {
+        // 149 files deleted from the real library left rows that inflated every total by a quarter
+        // and put a file that no longer existed into the work queue, where it failed on every run.
+        var kept = MakeFile("kept.pdf");
+        var removed = MakeFile("removed.pdf");
+
+        using var store = NewStore("missing.db");
+        foreach (var file in new[] { kept, removed })
+        {
+            store.Register(file);
+            store.RecordClassification(file, Classification(file), Capabilities(file), ClassAction.Ocr);
+        }
+
+        Assert.Equal(2, store.Outstanding().Count);
+
+        File.Delete(removed);
+        var marked = store.MarkMissing(new HashSet<string> { Path.GetFullPath(kept) });
+
+        Assert.Equal(1, marked);
+        Assert.Equal(FileStatus.Missing, store.Find(removed)!.Status);
+        Assert.Equal(kept, Assert.Single(store.Outstanding()).Path);
+
+        // Marking is not deleting: what was recorded about the file survives.
+        Assert.Equal(TextClass.ImageOnly, store.Find(removed)!.TextClass);
+    }
+
+    [Fact]
+    public void AFileThatComesBackIsPickedUpAgain()
+    {
+        var file = MakeFile("returning.pdf");
+        using var store = NewStore("returning.db");
+        store.Register(file);
+        store.RecordClassification(file, Classification(file), Capabilities(file), ClassAction.Ocr);
+
+        File.Delete(file);
+        store.MarkMissing(new HashSet<string>());
+        Assert.Equal(FileStatus.Missing, store.Find(file)!.Status);
+        Assert.Empty(store.Outstanding());
+
+        File.WriteAllText(file, "restored from a backup");
+        store.MarkMissing(new HashSet<string> { Path.GetFullPath(file) });
+
+        Assert.Equal(FileStatus.Discovered, store.Find(file)!.Status);
+    }
+
+    [Fact]
     public void ClassificationNumbersRoundTrip()
     {
         var file = MakeFile("i.pdf");

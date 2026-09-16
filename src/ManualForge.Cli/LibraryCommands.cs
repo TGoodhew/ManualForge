@@ -61,10 +61,13 @@ internal static class SurveyCommand
         return 0;
     }
 
-    public static void PrintSummary(IReadOnlyList<FileRecord> records, LibraryOptions options)
+    public static void PrintSummary(IReadOnlyList<FileRecord> allRecords, LibraryOptions options)
     {
+        // Records for files that have gone from disk are excluded, so the table describes the
+        // library as it stands rather than as it once did.
+        var records = allRecords.Where(r => r.Status != FileStatus.Missing).ToArray();
         var totalPages = records.Sum(r => (long)r.PageCount);
-        Console.WriteLine($"{records.Count:N0} files, {totalPages:N0} pages");
+        Console.WriteLine($"{records.Length:N0} files, {totalPages:N0} pages");
         Console.WriteLine();
         Console.WriteLine($"  {"Class",-14}{"Files",8}{"Pages",10}  {"Action",-14}");
         Console.WriteLine("  " + new string('-', 48));
@@ -116,7 +119,7 @@ internal static class SurveyCommand
 
         var marked = records.Where(r => r.Action != ClassAction.Skip).ToArray();
         var outstanding = marked
-            .Where(r => r.Status is not (FileStatus.Completed or FileStatus.Skipped))
+            .Where(r => r.Status is not (FileStatus.Completed or FileStatus.Skipped or FileStatus.Missing))
             .ToArray();
         var done = marked.Length - outstanding.Length;
         var workPages = outstanding.Sum(r => (long)r.PageCount);
