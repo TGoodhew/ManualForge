@@ -46,6 +46,8 @@ public sealed class PaddleOcrEngine : IOcrEngine
             UseGpu = options.Accelerator != OcrAccelerator.Cpu,
             DeviceId = options.DeviceId,
             Download = new ModelDownloadOptions { Offline = options.OfflineModels },
+            IntraOpNumThreads = options.CpuThreads,
+            InterOpNumThreads = options.CpuThreads is null ? null : 1,
         };
 
         _service = new PaddleOcrService(serviceOptions, logger: null);

@@ -52,6 +52,17 @@ public sealed class OcrEngineOptions
     /// <summary>Never hit the network for models; fail if they are not already cached.</summary>
     public bool OfflineModels { get; init; } = false;
 
+    /// <summary>
+    /// Cap on the threads ONNX Runtime uses for a single operator. Null leaves it to the runtime,
+    /// which takes every core.
+    ///
+    /// That default is right for a CPU-only run and wrong whenever anything else needs a core at
+    /// low latency. A CPU engine running beside the GPU one is the case that matters: the GPU path
+    /// averages only 27% of this machine's 24 threads, but it needs them in short bursts between
+    /// its GPU phases, and an uncapped CPU engine makes those bursts queue behind it.
+    /// </summary>
+    public int? CpuThreads { get; init; }
+
     internal OcrExecutionProvider ToExecutionProvider() => Accelerator switch
     {
         OcrAccelerator.Cuda => OcrExecutionProvider.Cuda,

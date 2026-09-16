@@ -215,6 +215,7 @@ internal static class RunCommand
             Accelerator = arguments.Accelerator(),
             ModelCachePath = arguments.Get("models") ?? new OcrEngineOptions().ModelCachePath,
             BatchSize = arguments.GetInt("batch") ?? 8,
+            CpuThreads = arguments.GetInt("cpu-threads"),
         };
 
         Console.WriteLine($"Library : {root}");

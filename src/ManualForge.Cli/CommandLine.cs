@@ -141,6 +141,9 @@ internal sealed class CommandLine
                                       VRAM; going past what the card holds collapses throughput
                                       rather than slowing it, so raise this deliberately.
               --raster-workers <n>    CPU threads turning pages into bitmaps. Default 2.
+              --cpu-threads <n>       Cap the threads ONNX Runtime uses per operator. The default
+                                      is every core, which is right for a CPU-only run and rude if
+                                      you want to use the machine while it works.
 
             general options:
               --models <path>         Model cache directory.

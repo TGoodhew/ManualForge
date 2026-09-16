@@ -374,6 +374,48 @@ it; that is true as far as anything can tell, and the flatten is verified struct
 it costs every word box on the page if it is ever wrong. Eleven of the 156 originals here are
 affected.
 
+### A CPU pipeline alongside the GPU one makes it slower
+
+Worth writing down because the idea is a good one and the answer is not the obvious one.
+
+During a GPU pipeline run this machine's CPU averages **26.8% of 24 threads** — about 17 threads
+idle — while the GPU sits at 40%. Neither resource is saturated. So a second OCR pipeline on the
+CPU looks like free throughput: it is 15.4 pages/min on its own, which would be a 15% top-up.
+
+It is not free. Measured on 30 pages, with both engines pulling from one shared queue so the slower
+one simply takes fewer pages:
+
+| configuration | pages/min | what the GPU alone managed | split |
+|---|---|---|---|
+| GPU x2 alone | **92.6** | 92.6 | gpu 30 |
+| \+ CPU x1, 8 threads | 78.7 | 62.9 | cpu 6, gpu 24 |
+| \+ CPU x1, 4 threads | 41.4 | 28.9 | cpu 9, gpu 21 |
+| \+ CPU x2, 4 threads | 37.2 | 22.3 | cpu 12, gpu 18 |
+| \+ CPU x1, uncapped | 46.6 | 32.6 | cpu 9, gpu 21 |
+
+Every mix is worse than the GPU on its own, and capping the CPU engine's threads does not rescue
+it. The third column is the reason: the GPU path's own throughput collapses as soon as anything
+else wants a core.
+
+The average was misleading. PaddleOCR's GPU path is heavily CPU-bound between its GPU phases —
+decode, deskew, denoise, crop, NMS, CTC — and those phases are **latency-critical**: while one runs,
+the GPU is idle waiting for it. 27% average CPU is 27% of short bursts that must happen *now*. A CPU
+OCR engine is a long, dense, low-priority workload that makes every one of those bursts queue, and
+it extends GPU idle time by more than the pages it contributes are worth.
+
+Put another way: a core spent feeding the GPU pipeline produces far more pages than the same core
+spent doing OCR itself, so the machine is better used by giving every core to the GPU path. An idle
+core is not waste when the GPU is the limit.
+
+What came out of it: `--cpu-threads` now caps ONNX Runtime's per-operator threads. It does not help
+a hybrid, but it is the difference between a CPU-only run that takes the whole machine and one you
+can work alongside.
+
+The lever this points at instead is reducing the CPU work on the critical path — `--no-deskew` and
+`--no-denoise` are both CPU-side OpenCV passes that run on every page. What they cost and what they
+buy is a question for benchmark mode in phase 7, measured against the BASELINE folder rather than
+guessed at.
+
 ## Safety
 
 The order of operations is the guarantee:
