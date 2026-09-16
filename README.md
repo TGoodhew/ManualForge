@@ -7,12 +7,12 @@ bitonal, where roughly a quarter of files have no text layer and many of the res
 2000s-era OCR. The figures throughout are measured on a corpus of that shape: about 576 documents
 and 100,000 pages.
 
-**Status: phase 4 - the WinUI shell, over a pipeline running on CUDA at 104 pages/min.** It OCRs
-a PDF end to end with an invisible text layer whose alignment is measured rather than assumed,
-classifies a whole library to decide what is worth re-OCRing, rebuilds files that refuse
-modification, processes a library resumably without ever overwriting a source, and now has a
-desktop application over all of it. The FTS5 index, VLM sidecar and benchmark mode are phases 5-7
-and are not built yet.
+**Status: phase 5 - the full-text index and search.** It OCRs a PDF end to end with an invisible
+text layer whose alignment is measured rather than assumed, classifies a whole library to decide
+what is worth re-OCRing, rebuilds files that refuse modification, processes a library resumably
+without ever overwriting a source at 104 pages/min, has a desktop application over all of it, and
+indexes every page so a question returns a manual, a page and a snippet - from the command line, the
+application, or Claude through MCP. A VLM sidecar and benchmark mode are phases 6-7.
 
 ## What it does
 
@@ -21,6 +21,8 @@ manualforge survey <folder>                classify a library; changes nothing
 manualforge run <folder>                   classify, flatten, OCR and replace, resumably
 manualforge ocr <input.pdf> [options]      rasterise → recognise → overlay → verify
 manualforge inspect <input.pdf>            page count, sizes, landscape pages, existing text
+manualforge index <folder>                 build the full-text index over a library
+manualforge search <query> --library <f>   ask it: manual, page and snippet
 manualforge gpu                            which execution provider is actually active
 ```
 
@@ -476,6 +478,166 @@ failed at startup with exit code `0xC000027B` and nothing else: a stowed excepti
 now an ordinary property where the compiler can see it, and an unhandled-exception handler writes
 the next one to `crash.txt`.
 
+## Asking Claude about the library
+
+The index is reachable from Claude Desktop and Claude Code as a local MCP server over stdio — a
+"connector" in the user interface, but MCP underneath, and local because a 275 MB index has no
+business going over a network.
+
+```
+%LOCALAPPDATA%\Programs\ManualForge\ManualForge.Mcp.exe
+```
+
+Three tools:
+
+* **`library_search`** — full text of every page, ranked. The manual, the page and a snippet.
+* **`read_manual_page`** — the text of one page, optionally with its neighbours. A snippet is enough
+  to choose a page and never enough to answer from, so this is the second half rather than a
+  convenience.
+* **`library_status`** — what is indexed and how old it is. An index built before a manual was added
+  will answer "not found", and a tool that cannot tell that from a real absence is not trustworthy.
+
+Register it with Claude Desktop in `claude_desktop_config.json`, or with Claude Code:
+
+```
+claude mcp add manualforge --scope user   --env MANUALFORGE_LIBRARY="D:\Manuals"   -- "%LOCALAPPDATA%\Programs\ManualForge\ManualForge.Mcp.exe"
+```
+
+On a Microsoft Store install of Claude Desktop the config is not in `%APPDATA%` — it is virtualised
+to `%LOCALAPPDATA%\Packages\Claude_<publisher>\LocalCache\Roaming\Claude\`.
+
+## Working alongside GPIB-MCP
+
+[GPIB-MCP](https://github.com/TGoodhew/GPIB-MCP) is an MCP server that controls GPIB/VISA test
+instruments, and it has a `manual_search` tool over the same folder of manuals this indexes. The two
+are **complementary and neither replaces the other.** Each works perfectly well with the other
+absent; when both are present each should be better for it.
+
+### Why both exist
+
+They solve opposite halves of the same problem, and the split is not arbitrary — it falls out of
+what each can afford to do.
+
+| | `gpib-mcp` `manual_search` | `manualforge` `library_search` |
+|---|---|---|
+| Picks candidate files by | filename and model | page content, ranked by relevance |
+| Looks at | at most 12 files | every page of every manual |
+| Returns | long passages, configurable context | page number and a snippet |
+| Extraction | `pdftotext`, cached per file | a prebuilt FTS5 index |
+| Best when | **you know the instrument model** | **you do not** |
+| Cost | seconds, bounded by the file cap | milliseconds, bounded by nothing |
+
+GPIB-MCP narrows by filename because content search was assumed to cost minutes — which was true
+before an index existed. Its own source is explicit about the limitation that buys:
+
+> it reports "searched 12 files, no match", which reads as "your library does not have this" when
+> the truth is "I never looked at the right file".
+
+That is a real blind spot, and easy to hit. A query for *"crystal oscillator troubleshooting"*
+returns nothing useful if no manual has "oscillator" in its filename, however many of them discuss
+it. Conversely, when the model *is* known, GPIB-MCP is the better tool by some distance: it goes
+straight to that instrument's manuals and returns enough surrounding text to read properly, where a
+ranked index has to be asked for the page and then asked again for its contents.
+
+### The shared surface is a file, not a protocol
+
+The two servers never talk to each other. The only thing between them is an index file, which one
+writes and the other may read:
+
+```
+<library>/_Originals/manualforge-index.db
+```
+
+SQLite, opened read-only, safe to read while ManualForge is writing (WAL). Its schema is a
+**stable contract** — it will not change shape without a version bump and a note here:
+
+```sql
+CREATE TABLE documents (
+    id            INTEGER PRIMARY KEY,
+    path          TEXT NOT NULL UNIQUE,   -- absolute path to the PDF
+    title         TEXT NOT NULL,          -- file name without extension
+    page_count    INTEGER NOT NULL,
+    content_hash  TEXT NOT NULL,          -- SHA-256, so identical copies can be folded
+    indexed_utc   TEXT NOT NULL
+);
+
+CREATE VIRTUAL TABLE pages USING fts5(
+    text,                   -- readable page text, hyphens at line ends rejoined
+    alternates,             -- the other reading of each rejoined hyphen; indexed, never displayed
+    doc_id UNINDEXED,       -- UNINDEXED so a query for a part number cannot match an id
+    page_number UNINDEXED,
+    tokenize = 'unicode61 remove_diacritics 2'
+);
+```
+
+A consumer wanting the best files for a query needs one statement:
+
+```sql
+SELECT d.path, COUNT(*) AS hits, MIN(bm25(pages)) AS best
+FROM pages p JOIN documents d ON d.id = p.doc_id
+WHERE pages MATCH ?           -- see "Queries must be escaped" below
+GROUP BY d.id
+ORDER BY best
+LIMIT 12;
+```
+
+**Queries must be escaped.** FTS5's `MATCH` takes a query language, not a phrase, and technical
+documentation is full of punctuation that collides with it — `HP-IB handshake` fails outright with
+`no such column: IB`. Quote each term (`"HP-IB" "handshake"`) unless the caller clearly meant the
+query language. ManualForge does this in `SearchQuery.Prepare`.
+
+### Three ways they help each other
+
+**1. The index tells GPIB-MCP which files to open.** This is the valuable one and the reason the
+contract above is documented. `ManualLibrary.Candidates()` can consult the index when it exists and
+choose its twelve files by content rather than by name, falling back to filename scoring when there
+is no index. The cap stays, the passage extraction stays, the citations stay — only the *choice* of
+which files to open gets better. Tracked as an issue on GPIB-MCP.
+
+**2. OCR gives GPIB-MCP text that was not there before.** A quarter of a typical scanned library has
+no text layer at all, and `pdftotext` returns nothing for those files. Once ManualForge has added a
+text layer, they extract like any other manual — so running ManualForge over a library improves
+GPIB-MCP's existing search with no code change on either side. Note that GPIB-MCP caches extracted
+text under `%LOCALAPPDATA%\GpibMcp\manual-text` keyed by path, size and modification time, so newly
+OCR'd files are picked up automatically as their timestamps change.
+
+**3. Sidecars, if you want them.** `ManualText` reads a `<name>.txt` sitting beside a PDF in
+preference to running `pdftotext`. `manualforge index --sidecars <folder>` writes exactly that text.
+Pointing it at the library itself would let GPIB-MCP skip extraction entirely — at the cost of one
+`.txt` per manual living beside it, which is why it is opt-in rather than the default.
+
+### Both installed: which tool gets used
+
+Two similarly-named tools over the same folder will be chosen between badly unless the descriptions
+say how. So the routing is written into them rather than left to chance:
+
+* `library_search`'s own description tells the caller to prefer `gpib-mcp`'s `manual_search` when
+  the instrument model is known, and to come here when it is not or when that found nothing.
+* ManualForge's server instructions, which a client reads before any tool call, say the same thing
+  at the level of the whole server.
+
+The environment variables are deliberately parallel — `GPIB_MCP_MANUALS` and `MANUALFORGE_LIBRARY`
+— because the same machine points both at the same folder, and two conventions for one idea is a
+trap.
+
+```json
+{
+  "mcpServers": {
+    "gpib-mcp": {
+      "command": "%LOCALAPPDATA%\\Programs\\GpibMcp\\GpibMcp.exe",
+      "env": { "GPIB_MCP_MANUALS": "D:\\Manuals" }
+    },
+    "manualforge": {
+      "command": "%LOCALAPPDATA%\\Programs\\ManualForge\\ManualForge.Mcp.exe",
+      "env": { "MANUALFORGE_LIBRARY": "D:\\Manuals" }
+    }
+  }
+}
+```
+
+Expand the variables to real paths; Claude Desktop does not.
+
+
 ## Safety
 
 The order of operations is the guarantee:
@@ -573,10 +735,14 @@ src/ManualForge.Core/
   Verification/                   PdfPig re-extraction, baseline deviation, ink comparison
   Pipeline/SearchablePdfBuilder.cs end-to-end for one file
   Diagnostics/RunLog.cs           Serilog: JSON lines, rolled daily, shared
+  Indexing/SearchIndex.cs         SQLite FTS5 over every page; the shared contract
+  Indexing/Dehyphenator.cs        rejoins words broken across line ends, for the index only
+  Indexing/LibraryIndexer.cs      walks the library, extracts, indexes, writes sidecars
 src/ManualForge.Cli/              the command line
 src/ManualForge.Shell/            view models and the services behind them - no XAML, so testable
 src/ManualForge.App/              WinUI 3: XAML, a file picker, a GPU timer, nothing else
-tests/ManualForge.Core.Tests/     213 tests, no GPU or network needed
+src/ManualForge.Mcp/              MCP server: library_search, read_manual_page, library_status
+tests/ManualForge.Core.Tests/     250 tests, no GPU or network needed
 ```
 
 ## Tests
@@ -585,7 +751,7 @@ tests/ManualForge.Core.Tests/     213 tests, no GPU or network needed
 dotnet test
 ```
 
-213 tests, a few seconds, no models and no network required:
+250 tests, a few seconds, no models and no network required:
 
 - **`PageGeometryTests`** — the corner mapping for all four rotations, non-zero crop origins,
   text-matrix direction, points-per-pixel, rotation normalisation.
@@ -676,7 +842,7 @@ pessimistic by about half. They are also a library-wide average over work ordere
 the tail of a run is the densest material. Both want fixing together, against a fresh full-library
 run rather than a five-manual sample.
 
-## Open questions for phase 2
+## Open questions
 
 1. ~~**DirectML**~~ — resolved: not added, see "DirectML" above.
 2. ~~**CUDA 13 runtime + cuDNN 9**~~ — resolved: installed and active, 3.7x faster.
