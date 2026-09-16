@@ -198,6 +198,64 @@ of perfectly good text back through OCR:
    programming manual looked like bad OCR. Colons, hyphens, underscores, dots and slashes are now
    treated as structure.
 
+## Recognising each document once
+
+A library assembled over years accumulates copies: a manual filed under two model numbers, a folder
+left behind by an earlier tool, the same PDF downloaded twice. This one holds **560 distinct
+documents across 576 files** — 13 duplicate groups, 16 redundant files, 3,236 pages between them.
+Recognising those twice would cost just under an hour of GPU time at 55.9 pages/min.
+
+As it happens every one of those 13 groups is `GoodText` and therefore skipped, so under the current
+policy deduplication spares nothing on *this* library today. It earned its keep on the staging
+folders that are now gone, and it earns it again the moment a wider policy queues any of these for
+work. The honest summary is that the saving is real but contingent.
+
+Matching is by SHA-256 of the content, not by filename, because copies rarely keep the same name.
+The real ones in this library show every variety of that:
+
+```
+2015THD Service.pdf                  Keithley 2015 THD Schematics\KEI 2015 Service.pdf   kei2015-sman.pdf
+DG1000Z User's Guide.pdf             DG1000Z%20User's%20Guide.pdf
+M404_QSG.pdf                         M404_QSG-TG-OldToshiba.pdf
+TDS 784D User.pdf                    TDS784D User.pdf
+Basic THD Measurement.pdf            smd-00243_AN30.pdf
+```
+
+Part numbers against descriptions, URL-escaping that was never undone, a suffix from whichever
+machine the file came off, a space that came and went. No filename rule would group those; the
+content hash groups all of them.
+
+One copy becomes the **primary** and is recognised; the rest take its finished result by copy, and
+each still gets its own original preserved, so the originals tree stays a complete mirror and every
+path in the library opens a searchable file.
+
+### Choosing the primary
+
+Since the copies are identical, the choice does not affect what any file ends up containing. It
+decides which path the search index will cite for the document, which is a question about what a
+person will recognise at a glance. The rule is:
+
+1. **Shallowest path.** A manual in the library root beats the same manual staged in a working
+   subfolder, and this needs no knowledge of what any particular folder is called.
+2. **Most descriptive name**, approximated by how many word-like runs it contains.
+3. Alphabetical, so the result never depends on the order files were walked in.
+
+The second criterion used to be the *shortest* name, which is the obvious choice and the wrong one:
+it systematically picks part numbers over descriptions — `kei2015-sman.pdf` over
+`2015THD Service.pdf`, `LC574AL.pdf` over `LeCroy-5674 User.pdf`, `08340-90243.pdf` over
+`HP 8340B, 41B Assembly Level Service.pdf`. The two rules disagreed on six of the thirteen groups
+here, and the descriptive name was the better answer in all six.
+
+`--no-dedup` recognises every copy separately.
+
+### It does not help the index yet
+
+Deduplication runs only over the files marked for work, because hashing the whole library to spare
+effort on files nobody is touching costs more to discover than it saves. That is right for
+recognition and wrong for search: a duplicate that was skipped is never grouped, so phase 5 would
+still return `8340 Assembly Service.pdf` and its three twins as four separate results. The index
+needs its own pass over content hashes, independent of whether a file needed OCR.
+
 ## Flattening files that refuse modification
 
 147 files carry owner-password permissions. PDFsharp will not open them for modification, but it
