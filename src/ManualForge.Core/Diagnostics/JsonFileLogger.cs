@@ -28,9 +28,16 @@ public sealed class JsonFileLoggerProvider : ILoggerProvider
         Directory.CreateDirectory(System.IO.Path.GetDirectoryName(Path)!);
 
         _minimum = minimum;
-        _writer = new StreamWriter(
-            new FileStream(Path, FileMode.Append, FileAccess.Write, FileShare.Read),
-            new UTF8Encoding(encoderShouldEmitUTF8Identifier: false))
+
+        // FileShare.ReadWrite, not FileShare.Read: a long library run holds this file open for
+        // hours, and anything less stops a second process starting at all — no inspecting a file,
+        // no surveying, no second run. Append mode keeps whole lines from interleaving.
+        // If the file is unavailable anyway, fall back to a process-specific name rather than
+        // failing to start over a log file.
+        var stream = TryOpen(Path) ?? OpenFallback(ref path);
+        Path = System.IO.Path.GetFullPath(path);
+
+        _writer = new StreamWriter(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false))
         {
             AutoFlush = false,
         };
@@ -46,6 +53,37 @@ public sealed class JsonFileLoggerProvider : ILoggerProvider
     public string Path { get; }
 
     public ILogger CreateLogger(string categoryName) => new JsonFileLogger(this, categoryName);
+
+    private static FileStream? TryOpen(string path)
+    {
+        try
+        {
+            return new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
+        }
+        catch (IOException)
+        {
+            return null;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    private static FileStream OpenFallback(ref string path)
+    {
+        var directory = System.IO.Path.GetDirectoryName(System.IO.Path.GetFullPath(path))!;
+        var stem = System.IO.Path.GetFileNameWithoutExtension(path);
+        var extension = System.IO.Path.GetExtension(path);
+        var candidate = System.IO.Path.Combine(
+            directory, $"{stem}-{Environment.ProcessId}{extension}");
+
+        var stream = TryOpen(candidate)
+            ?? throw new IOException($"Could not open a log file at '{path}' or '{candidate}'.");
+
+        path = candidate;
+        return stream;
+    }
 
     private void Pump()
     {
