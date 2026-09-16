@@ -2,14 +2,14 @@
 
 Searchable PDFs from scanned technical manuals, and a searchable index over them.
 
-**Status: phase 2 - classifier, flatten, safety and resume, running on CUDA.** It OCRs a PDF
+**Status: phase 3 - the parallel pipeline, running on CUDA at 104 pages/min.** It OCRs a PDF
 end to end with an invisible text layer whose alignment is measured rather than assumed,
 classifies a whole library to decide what is worth re-OCRing, rebuilds files that refuse
-modification, and processes a library resumably without ever overwriting a source. The parallel
-pipeline, WinUI shell, FTS5 index, VLM sidecar and benchmark mode are phases 3-7 and are not
-built yet.
+modification, and processes a library resumably without ever overwriting a source - now
+recognising pages ahead of the document that needs them, which halved the wall clock. The WinUI
+shell, FTS5 index, VLM sidecar and benchmark mode are phases 4-7 and are not built yet.
 
-## What phase 1 does
+## What it does
 
 ```
 manualforge survey <folder>                classify a library; changes nothing
@@ -122,11 +122,11 @@ If it reports `Cpu`, the hint line names the exact DLL that failed to load.
 
 ### VRAM is the binding constraint, not compute
 
-Peak VRAM during that run was **7,556 MiB of 8,192**, and the desktop, Copilot and Claude already
-held 2,865 MiB before it started — roughly **640 MiB of headroom** at batch size 8, one page at a
-time. Phase 3 must therefore size batches against *free* VRAM measured at startup rather than
-against the card's nominal 8 GB, and must not assume it can raise the batch size or run pages
-concurrently without checking first.
+Peak VRAM is **7,556 MiB of 8,192**, and the desktop and anything else running already hold
+2.6–2.9 GB before work starts — a few hundred megabytes of headroom at batch size 8. That is why
+concurrency is sized against *free* VRAM at startup rather than the card's nominal 8 GB, and why
+going past it is a cliff rather than a slope. See "The pipeline" below for what happens when it is
+exceeded, and what it is worth when it is not.
 
 ### Results are not bit-identical across providers
 
@@ -303,6 +303,77 @@ every page and lose detail that cannot be recovered.
 Every flatten is verified before it is used: page count, per-page geometry and rotation, and the
 pixel dimensions and compression filter of every image on every page must match the source.
 
+## The pipeline
+
+Phase 3. Measured before it was built, because the architecture in the original design is not
+aimed at where the time goes.
+
+Over the 40,000 pages of the first full run, rasterising averages **55 ms a page against 1,034 ms
+of recognition**. Overlapping those two is worth 5.1%. Per-document work outside the pages - the
+flatten, the save, the verification, the moves - is another 2.2%. So the whole of the original idea
+buys about 7%.
+
+The lever is that **the GPU is only 40% busy**. Sampling the card during a real run:
+
+```
+GPU utilisation  mean 40.2%  median 39%  p10 1%  p90 89%
+below 50% util   60.4% of samples
+at 0% util        8.3% of samples
+VRAM peak        7,694 MiB of 8,192
+```
+
+Every page alternates CPU phases - decode, deskew, crop, CTC - with GPU phases, and one page in
+flight leaves those gaps empty. Feeding the engine more than one page at a time fills them.
+
+### What it buys, measured end to end
+
+The same five manuals, 378 pages, from the same starting state each time:
+
+| | wall clock | pages/min | |
+|---|---|---|---|
+| Phase 2, serial | 428.8 s | 55.9 | |
+| Pipeline, one page on the GPU | 316.6 s | 72.1 | **1.35x** from overlap alone |
+| Pipeline, two pages on the GPU | **219.9 s** | **104.1** | **1.95x** |
+
+Identical output at every setting: 84,489 words, worst alignment deviation 0.001 pt. On the ~30
+hours the full library took, this is about fourteen hours.
+
+### VRAM is a cliff, not a slope
+
+This is why sizing against free VRAM is load-bearing rather than tidy. Under what the card holds,
+more pages is faster - 54.9, 78.1 and 83.3 pages a minute at one, two and three. **Over it,
+throughput does not degrade, it collapses:** the driver spills to system memory over PCIe and the
+same work runs at **7.6 pages a minute**, an order of magnitude slower than serial, with no
+exception raised to say why.
+
+So concurrency is chosen from what `nvidia-smi` reports free, less half a gigabyte of headroom for
+a desktop that grows, and capped at two. Three was the fastest setting measured and also the one
+that tipped an 8 GB card over; 6% of upside against a factor of ten of downside belongs behind an
+explicit `--gpu-concurrency 3`.
+
+```
+GPU memory : NVIDIA GeForce RTX 3060 Ti: 6,786 MiB free of 8,192
+Pipeline   : 2 page(s) on the GPU at once, 2 rasteriser(s)
+```
+
+### What it deliberately does not do
+
+The pipeline fills the page cache. It does not open a file in the library, write a PDF, verify one,
+or move anything. The replace-in-place sequence that follows is exactly the one phase 2 shipped and
+tested - still one document at a time, still refusing to touch the original until the replacement
+is verified. **Parallelism was kept away from the code that can lose a manual.**
+
+The overlap that remains is between recognising one document and assembling another. A document is
+announced on a channel as its last page is cached, and the assembler consumes that channel, so
+writing the text layer and verifying a 639-page manual - a minute and a half of CPU that used to
+leave the GPU idle - now happens while the next document is being recognised.
+
+Documents that need flattening or stripping first are excluded from the pre-pass and take the
+serial path. Pre-rasterising the original would be assuming the rebuilt copy renders identically to
+it; that is true as far as anything can tell, and the flatten is verified structurally, but assuming
+it costs every word box on the page if it is ever wrong. Eleven of the 156 originals here are
+affected.
+
 ## Safety
 
 The order of operations is the guarantee:
@@ -390,6 +461,8 @@ src/ManualForge.Core/
   Pdf/TextLayerStripper.cs        removes an existing text layer for strip-and-redo
   State/JobStore.cs               SQLite per-file and per-page progress
   Pipeline/LibraryProcessor.cs    classify, flatten, OCR, verify, replace
+  Pipeline/RecognitionPipeline.cs Channels: rasterise and recognise ahead of assembly
+  Ocr/GpuMemory.cs                free VRAM, and how many pages it will hold
   Geometry/PageGeometry.cs        image pixels ↔ PDF user space; rotation, crop origin
   Text/GlyphlessTrueTypeFont.cs   generates the blank font program
   Text/InvisibleFont.cs           Type0/CIDFontType2 objects, subsetting, ToUnicode
@@ -400,7 +473,7 @@ src/ManualForge.Core/
   Pipeline/SearchablePdfBuilder.cs end-to-end for one file
   Diagnostics/RunLog.cs           Serilog: JSON lines, rolled daily, shared
 src/ManualForge.Cli/              the prototype's command line
-tests/ManualForge.Core.Tests/     170 tests, no GPU or network needed
+tests/ManualForge.Core.Tests/     197 tests, no GPU or network needed
 ```
 
 ## Tests
@@ -409,7 +482,7 @@ tests/ManualForge.Core.Tests/     170 tests, no GPU or network needed
 dotnet test
 ```
 
-170 tests, a few seconds, no models and no network required:
+197 tests, a few seconds, no models and no network required:
 
 - **`PageGeometryTests`** — the corner mapping for all four rotations, non-zero crop origins,
   text-matrix direction, points-per-pixel, rotation normalisation.
@@ -426,6 +499,12 @@ dotnet test
   modifiable with page count, geometry, rotation and every image stream unchanged. Stripping
   removes text and leaves images alone.
 - **`JobStoreTests`** - resume, idempotency, and a changed source resetting its own progress.
+- **`RecognitionPipelineTests`** - the invariants rather than the plumbing: every page reaches the
+  cache, cached pages are not redone, a document is announced only once its last page is genuinely
+  there, one page at a time means one, the rasteriser cannot run ahead of a bounded queue, and
+  cancelling does not leave a consumer waiting on a channel nobody will complete. Every wait is
+  bounded, because a pipeline defect that hangs the suite is worse than one that fails it.
+- **`GpuMemoryTests`** - the arithmetic that decides concurrency, which errs downwards on purpose.
 - **`LibraryProcessorTests`** - the replace-in-place sequence end to end, against a fake OCR
   engine. Everything downstream of recognition is real: PDFium rasterises, PDFsharp writes, PdfPig
   reads back. Most of these assert what happened to the bytes on disk rather than what the code
@@ -484,12 +563,13 @@ documents in flight rather than the library.
 
 ## Known gaps
 
-### Throughput estimates use a library-wide average
+### Throughput estimates still quote the serial rate
 
-`status` and `survey` estimate remaining time at the measured 55.9 pages/min. Work is ordered
-smallest-first, so the tail of every run is the densest material — the HP 8340B service manuals
-sustain about 51 pages/min — and the estimate is optimistic by roughly 10% by the end of a run. Good
-enough for planning, wrong enough to mention.
+`status` and `survey` estimate remaining time at 55.9 pages/min, which was the measured serial rate
+before the pipeline. With two pages on the GPU the real figure is 104, so those estimates are now
+pessimistic by about half. They are also a library-wide average over work ordered smallest-first, so
+the tail of a run is the densest material. Both want fixing together, against a fresh full-library
+run rather than a five-manual sample.
 
 ## Open questions for phase 2
 

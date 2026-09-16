@@ -303,6 +303,7 @@ internal static class RunCommand
         Console.WriteLine();
 
         var runWatch = System.Diagnostics.Stopwatch.StartNew();
+        var donePages = 0L;
 
         var done = 0;
         var progress = new Progress<FileOutcome>(outcome =>
@@ -317,9 +318,16 @@ internal static class RunCommand
             var succeeded = outcome.Status == FileStatus.Completed
                 || (options.DryRun && outcome.Error is null);
 
+            // Pages and a running rate rather than a per-file duration. With the pipeline
+            // recognising ahead, a file's own elapsed time is only what assembly took - a fraction
+            // of a second for a manual whose pages were already recognised - and printing that
+            // reads as though the whole document took it.
+            donePages += outcome.PageCount;
+            var rate = runWatch.Elapsed.TotalMinutes > 0 ? donePages / runWatch.Elapsed.TotalMinutes : 0;
+
             Console.WriteLine(succeeded
-                ? $"  {done,4}  {name,-44} {outcome.WordsWritten,7:N0} words  {outcome.Duration.TotalSeconds,6:F1}s{flag}" +
-                  (options.DryRun ? "  (dry run)" : "")
+                ? $"  {done,4}  {name,-44} {outcome.PageCount,5:N0} pp {outcome.WordsWritten,7:N0} words  " +
+                  $"{rate,6:F1} pp/min{flag}" + (options.DryRun ? "  (dry run)" : "")
                 : $"  {done,4}  {name,-44} {outcome.Status}: {outcome.Error}");
         });
 
@@ -338,12 +346,12 @@ internal static class RunCommand
         var worst = outcomes.Where(o => o.Status == FileStatus.Completed).Select(o => o.WorstDeviationPt).DefaultIfEmpty(0).Max();
         Console.WriteLine($"Worst alignment deviation: {worst:F3} pt");
 
-        var donePages = outcomes.Where(o => o.Status == FileStatus.Completed).Sum(o => (long)o.PageCount);
-        if (donePages > 0 && runWatch.Elapsed.TotalMinutes > 0)
+        var completedPages = outcomes.Where(o => o.Status == FileStatus.Completed).Sum(o => (long)o.PageCount);
+        if (completedPages > 0 && runWatch.Elapsed.TotalMinutes > 0)
         {
             Console.WriteLine(
-                $"Throughput: {donePages:N0} pages in {runWatch.Elapsed.TotalMinutes:F1} min, " +
-                $"{donePages / runWatch.Elapsed.TotalMinutes:F1} pages/min");
+                $"Throughput: {completedPages:N0} pages in {runWatch.Elapsed.TotalMinutes:F1} min, " +
+                $"{completedPages / runWatch.Elapsed.TotalMinutes:F1} pages/min");
         }
 
         // Signatures are invalidated by default, but never quietly.
