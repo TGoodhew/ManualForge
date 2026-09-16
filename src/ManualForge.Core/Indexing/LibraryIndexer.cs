@@ -11,7 +11,7 @@ public sealed class IndexOptions
     public string? IndexPath { get; init; }
 
     /// <summary>Folders excluded from indexing, matching the processor's own exclusions.</summary>
-    public IReadOnlyList<string> ExcludedFolderNames { get; init; } = ["BASELINE", "_Originals"];
+    public IReadOnlyList<string> ExcludedFolderNames { get; init; } = ["BASELINE", "_Originals", "_GroundTruth"];
 
     /// <summary>Re-index every document even if its content has not changed.</summary>
     public bool Force { get; init; }

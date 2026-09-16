@@ -25,8 +25,12 @@ public sealed class LibraryOptions
     /// BASELINE holds reference copies kept deliberately as they are — another engine's output,
     /// retained so its quality can be measured against ours. Processing those would overwrite the
     /// very thing they exist to compare against, so they are never candidates for work.
+    ///
+    /// _GroundTruth holds hand-corrected pages for the benchmark. Its contents are text files, so
+    /// discovery would pass over them anyway, but a PDF copied in there for reference would be
+    /// processed and that would be a nasty surprise for a folder full of irreplaceable work.
     /// </summary>
-    public IReadOnlyList<string> ExcludedFolderNames { get; init; } = ["BASELINE"];
+    public IReadOnlyList<string> ExcludedFolderNames { get; init; } = ["BASELINE", "_GroundTruth"];
 
     /// <summary>State database. Defaults to one inside the originals folder.</summary>
     public string? StatePath { get; init; }

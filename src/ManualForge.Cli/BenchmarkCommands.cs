@@ -36,11 +36,24 @@ internal static class TruthCommand
 
         var seeds = new List<(string, int, PageKind, string)>();
 
+        // Which file the seed text is taken from, when it is not the one being recorded.
+        //
+        // The manifest has to name the file whose text layer you want scored - point it at another
+        // engine's copy and `benchmark --score-existing` reports that engine. But its text may be
+        // the worse starting point to correct from, and the two copies are the same scan, so the
+        // seed can come from whichever reads better without changing what is measured.
+        var seedFrom = arguments.Get("seed-from") ?? pdf;
+        if (!File.Exists(seedFrom))
+            throw new FileNotFoundException($"No such file: {seedFrom}");
+
+        if (!string.Equals(seedFrom, pdf, StringComparison.OrdinalIgnoreCase))
+            Console.WriteLine($"Seed text taken from {Path.GetFileName(seedFrom)}; the manifest records {Path.GetFileName(pdf)}.");
+
         if (arguments.Has("from-text-layer"))
         {
             // Seed from whatever text the PDF already carries. Right when the file has a text layer
             // already - another engine's OCR, or born-digital - and much faster than recognising.
-            var extracted = LibraryIndexer.ExtractPages(pdf, cancellationToken);
+            var extracted = LibraryIndexer.ExtractPages(seedFrom, cancellationToken);
             foreach (var page in pages)
             {
                 var text = page >= 1 && page <= extracted.Count ? extracted[page - 1].Text : string.Empty;
@@ -60,7 +73,7 @@ internal static class TruthCommand
             Console.WriteLine($"ready on {engine.Runtime.ExecutionProvider}.");
 
             var rasteriser = new PageRasteriser(new RasterOptions { Dpi = arguments.GetInt("dpi") ?? 300 });
-            var bytes = await File.ReadAllBytesAsync(pdf, cancellationToken).ConfigureAwait(false);
+            var bytes = await File.ReadAllBytesAsync(seedFrom, cancellationToken).ConfigureAwait(false);
 
             foreach (var page in pages)
             {

@@ -103,7 +103,15 @@ public sealed class GroundTruthSet
 
     /// <summary>
     /// Writes a manifest and one text file per page, seeded with text for a human to correct.
-    /// Existing text files are never overwritten — corrections are the expensive thing here.
+    ///
+    /// <para>
+    /// Nothing already here is lost. Existing text files are never overwritten, because corrections
+    /// are the expensive thing; and rows already in the manifest are kept, because a set is built up
+    /// over several calls - one per kind of page, since a kind applies to a whole call - and a
+    /// manifest written fresh each time would quietly deregister everything seeded before it. The
+    /// text files would still be sitting there, which is the worst version of the bug: the work
+    /// looks present and is simply never measured.
+    /// </para>
     /// </summary>
     public static int Seed(
         string root,
@@ -113,7 +121,30 @@ public sealed class GroundTruthSet
         var full = Path.GetFullPath(root);
         Directory.CreateDirectory(full);
 
-        var rows = new List<string> { "manual,page,kind,textFile" };
+        // Existing rows, keyed so a page seeded again replaces its own row rather than duplicating.
+        var rowsByPage = new Dictionary<(string Manual, int Page), string>();
+        var order = new List<(string Manual, int Page)>();
+
+        var manifestPath = Path.Combine(full, ManifestName);
+        if (File.Exists(manifestPath))
+        {
+            foreach (var line in File.ReadAllLines(manifestPath).Skip(1))
+            {
+                if (string.IsNullOrWhiteSpace(line))
+                    continue;
+
+                var fields = ParseCsvLine(line);
+                if (fields.Count < 4 || !int.TryParse(fields[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var existingPage))
+                    continue;
+
+                var key = (fields[0], existingPage);
+                if (!rowsByPage.ContainsKey(key))
+                    order.Add(key);
+
+                rowsByPage[key] = line;
+            }
+        }
+
         var written = 0;
 
         foreach (var (manualPath, pageNumber, kind, seed) in pages)
@@ -131,10 +162,17 @@ public sealed class GroundTruthSet
                 written++;
             }
 
-            rows.Add(string.Join(',', Quote(relativeManual), pageNumber, kind, Quote(textFile)));
+            var key = (relativeManual, pageNumber);
+            if (!rowsByPage.ContainsKey(key))
+                order.Add(key);
+
+            rowsByPage[key] = string.Join(',', Quote(relativeManual), pageNumber, kind, Quote(textFile));
         }
 
-        File.WriteAllLines(Path.Combine(full, ManifestName), rows, new UTF8Encoding(false));
+        var rows = new List<string> { "manual,page,kind,textFile" };
+        rows.AddRange(order.Select(k => rowsByPage[k]));
+
+        File.WriteAllLines(manifestPath, rows, new UTF8Encoding(false));
         return written;
     }
 

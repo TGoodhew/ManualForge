@@ -165,6 +165,9 @@ internal sealed class CommandLine
                                       because one average hides the case that is actually bad.
               --library <folder>      Root the manifest's relative paths resolve against.
               --from-text-layer       Seed from the text already in the PDF rather than by OCR.
+              --seed-from <file>      Take the seed text from this copy instead, while the manifest
+                                      still records the file given. For two copies of one scan with
+                                      different text layers: measure one, correct from the other.
               --sweep                 Measure deskew, denoise and resolution against each other.
               --score-existing        Also score the text already in the files - point the truth
                                       set at another engine's output to compare against it.

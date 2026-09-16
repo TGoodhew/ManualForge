@@ -67,6 +67,42 @@ public class GroundTruthTests : IDisposable
     }
 
     [Fact]
+    public void SeedingASecondKindKeepsTheFirstOnesRows()
+    {
+        // The documented workflow is one call per kind, because a kind applies to the whole call.
+        // A manifest written fresh each time deregisters everything seeded before it - and the text
+        // files stay on disk, so the work looks present and is simply never measured. Found by
+        // walking the instructions rather than by reading them.
+        GroundTruthSet.Seed(Truth, Library,
+        [
+            (@"a.pdf", 35, PageKind.Prose, "prose page"),
+            (@"a.pdf", 161, PageKind.Prose, "another prose page"),
+        ]);
+
+        GroundTruthSet.Seed(Truth, Library,
+        [
+            (@"a.pdf", 148, PageKind.Table, "table page"),
+        ]);
+
+        var set = GroundTruthSet.Load(Truth, Library);
+
+        Assert.Equal(3, set.Pages.Count);
+        Assert.Equal([35, 148, 161], set.Pages.Select(p => p.PageNumber).Order());
+        Assert.Equal(2, set.Pages.Count(p => p.Kind == PageKind.Prose));
+        Assert.Single(set.Pages, p => p.Kind == PageKind.Table);
+    }
+
+    [Fact]
+    public void SeedingTheSamePageAgainUpdatesItsRowRatherThanDuplicatingIt()
+    {
+        GroundTruthSet.Seed(Truth, Library, [(@"a.pdf", 7, PageKind.Prose, "text")]);
+        GroundTruthSet.Seed(Truth, Library, [(@"a.pdf", 7, PageKind.Table, "text")]);
+
+        var page = Assert.Single(GroundTruthSet.Load(Truth, Library).Pages);
+        Assert.Equal(PageKind.Table, page.Kind);
+    }
+
+    [Fact]
     public void ARowWhoseTextFileHasGoneIsSkippedRatherThanThrowing()
     {
         GroundTruthSet.Seed(Truth, Library,

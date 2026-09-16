@@ -651,6 +651,29 @@ trap.
 Expand the variables to real paths; Claude Desktop does not.
 
 
+## Measuring the OCR
+
+`benchmark` reports character and word error rates against hand-corrected pages, per kind of page —
+prose, table, schematic — because an engine that reads prose at 1% error and parts tables at 15% is
+not a 3% engine.
+
+```
+manualforge truth <pdf> --pages 148,149 --kind table --out <folder>
+manualforge benchmark --truth <folder> --sweep --csv report.csv
+```
+
+The hand-correcting is the one part that cannot be automated, and it has its own guide:
+**[docs/GROUND-TRUTH.md](docs/GROUND-TRUTH.md)** — how to find the pair of files being compared,
+choose pages worth measuring, what to correct and what to ignore, and how to read the result.
+
+Two things it is worth knowing before reading any number this produces:
+
+* **Look at the unordered word rate first.** Ordered edit distance cannot tell "read the wrong
+  characters" from "read them in a different sequence", and those want opposite fixes. On a trial
+  comparison of two prose pages, 93% of the word error turned out to be reading order alone.
+* **A run against another engine's text measures disagreement, not accuracy.** Only hand-corrected
+  pages turn it into accuracy.
+
 ## Safety
 
 The order of operations is the guarantee:
