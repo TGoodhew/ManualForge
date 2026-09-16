@@ -4,6 +4,14 @@
     <OutputType>Exe</OutputType>
     <AssemblyName>manualforge</AssemblyName>
     <RootNamespace>ManualForge.Cli</RootNamespace>
+  
+    <!--
+      Precompiled for Release. This executable is invoked once per search by anything using it as a
+      query channel rather than taking a dependency on the index file, so its startup is somebody
+      else's latency. Measured on a 100,830-page index: 134 ms a call plain, 110 ms ReadyToRun,
+      against a 52 ms floor that is .NET host startup and not ours to remove.
+    -->
+    <PublishReadyToRun Condition="'$(Configuration)' == 'Release'">true</PublishReadyToRun>
   </PropertyGroup>
 
   <ItemGroup>
