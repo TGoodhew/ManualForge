@@ -50,6 +50,14 @@
     <PackageVersion Include="CommunityToolkit.Mvvm" Version="8.4.2" />
   </ItemGroup>
 
+  <ItemGroup Label="MCP">
+    <!-- Anthropic's own C# SDK for the Model Context Protocol, approved separately. It carries the
+         handshake, capability negotiation and tool schema generation, which a hand-rolled server
+         would have to keep in step with the protocol by itself. -->
+    <PackageVersion Include="ModelContextProtocol" Version="2.2.0" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.0" />
+  </ItemGroup>
+
   <ItemGroup Label="Test">
     <PackageVersion Include="coverlet.collector" Version="6.0.4" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />

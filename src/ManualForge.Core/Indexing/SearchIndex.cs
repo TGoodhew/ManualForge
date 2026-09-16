@@ -210,6 +210,12 @@ public sealed class SearchIndex : IDisposable
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(query);
 
+        // What arrives here is what somebody typed, and MATCH takes a query language rather than a
+        // phrase. See SearchQuery for why a hyphen is enough to break it.
+        var prepared = SearchQuery.Prepare(query);
+        if (prepared is null)
+            return [];
+
         using var command = _connection.CreateCommand();
         command.CommandText = """
             SELECT d.path, d.title, p.page_number, d.content_hash,
@@ -221,7 +227,7 @@ public sealed class SearchIndex : IDisposable
             ORDER BY rank
             LIMIT $limit
             """;
-        command.Parameters.AddWithValue("$q", query);
+        command.Parameters.AddWithValue("$q", prepared);
 
         // Folding happens after the fact, so the limit has to allow for copies being dropped.
         command.Parameters.AddWithValue("$limit", foldDuplicates ? limit * 6 : limit);
