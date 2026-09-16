@@ -243,6 +243,26 @@ public sealed class LibraryProcessor(
                     "The output carried no text layer.");
             }
 
+            // Adding a text layer must change nothing else about the document. Compare the output's
+            // structure against the input's: page count, per-page geometry and rotation, and the
+            // dimensions and compression of every image.
+            //
+            // This check exists because its absence let a real defect through. Reading page.CropBox
+            // to work out the geometry silently wrote /CropBox [0 0 0 0] into every page that had
+            // none, and it reached 148 files before anything noticed — the alignment measurement
+            // only caught it on rotated pages, where the error happened not to cancel.
+            var structuralChanges = PdfFlattener.Compare(
+                PdfFlattener.Fingerprint(source), PdfFlattener.Fingerprint(outputPath));
+
+            if (structuralChanges.Count > 0)
+            {
+                var detail = "The output is not structurally identical to the source: "
+                    + string.Join(" ", structuralChanges.Take(3));
+                store.SetStatus(path, FileStatus.Failed, detail);
+                return Outcome(record, FileStatus.Failed, report.TotalWordsWritten, worstDeviation, flattened,
+                    stopwatch.Elapsed, detail);
+            }
+
             if (options.DryRun)
             {
                 store.SetStatus(path, FileStatus.Classified, null);

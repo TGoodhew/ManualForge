@@ -362,6 +362,41 @@ public class TextLayerRoundTripTests : IDisposable
     }
 
     [Fact]
+    public void AddingATextLayerLeavesTheDocumentStructurallyIdentical()
+    {
+        // The generalisation of the crop-box defect: adding a text layer must change page count,
+        // page geometry, rotation and every image stream not at all. Structural comparison is now
+        // part of the run's verification, so it is worth asserting directly too.
+        const double w = 612, h = 792;
+        var source = CreateSyntheticPage("structural.pdf", w, h, 90);
+        var before = ManualForge.Core.Pdf.PdfFlattener.Fingerprint(source);
+
+        var geometry = GeometryFor(w, h, 90, 0, 0);
+        var output = WriteLayer(source, geometry, SampleWords());
+
+        var after = ManualForge.Core.Pdf.PdfFlattener.Fingerprint(output);
+        var differences = ManualForge.Core.Pdf.PdfFlattener.Compare(before, after);
+
+        Assert.Empty(differences);
+    }
+
+    [Fact]
+    public void StructuralComparisonNoticesAPageThatLostItsSize()
+    {
+        // What the check is there to catch: a page reporting zero size, which is exactly what a
+        // degenerate /CropBox [0 0 0 0] makes an extractor report.
+        const double w = 612, h = 792;
+        var source = CreateSyntheticPage("structural2.pdf", w, h, 0);
+        var before = ManualForge.Core.Pdf.PdfFlattener.Fingerprint(source);
+        var broken = before.Select(p => p with { WidthPt = 0, HeightPt = 0 }).ToArray();
+
+        var differences = ManualForge.Core.Pdf.PdfFlattener.Compare(before, broken);
+
+        Assert.NotEmpty(differences);
+        Assert.Contains(differences, d => d.Contains("changed size", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void ThePageKeepsItsOriginalContent()
     {
         const double w = 612, h = 792;
