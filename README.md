@@ -405,6 +405,25 @@ The full account, every threshold and where it came from, is in
 [docs/UNDER-EXTRACTION.md](docs/UNDER-EXTRACTION.md); the ground truth it was measured against is in
 [docs/GROUND-TRUTH-54845A.md](docs/GROUND-TRUTH-54845A.md).
 
+### Measured on the whole library, where it scores lower
+
+The first repair over the real corpus ran on 18 September 2026: 20 documents, 1,498 pages, 128,310
+words recovered at 83.7% mean confidence, in 33 minutes. Merging it meant re-indexing 29 documents
+and 15,146 pages, which took **7.5 hours** — the indexer skips unchanged documents, but the ones a
+repair touches are the large ones.
+
+Against the 33 hand-read ground-truth strings, the correct page went from **2 to 27 of 33**, 21 of
+them in the first ten. The ground-truth document records 33 of 33, and that figure was measured on a
+smaller development library; on 584 documents it does not reproduce.
+
+The gap is entirely **ranking, not retrieval** — asked for more than ten results, five of the six
+come back at ranks 39 to 108, and the sixth beyond 200. The recovered text is indexed and it
+matches; bm25 prefers a prose page that uses the query's words often over the syntax diagram that
+defines the command, and a bigger library holds more such prose. Single-token queries like
+`ATTenuation` suffer worst, for the obvious reason.
+
+So the repair solved the problem it was built for, and exposed the next one.
+
 ## Recognising each document once
 
 A collection assembled over years accumulates copies: a manual filed under two model numbers, a

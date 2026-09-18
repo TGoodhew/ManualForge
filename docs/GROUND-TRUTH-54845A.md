@@ -16,10 +16,46 @@ chapter 2, confirmed against the printed folio on each page.
 | | Ground-truth strings returning the correct page |
 |---|---|
 | Before the repair | **2 of 33** — and only because command syntax is now read as notation, which lets `:CHANnel<N>:RANGe` match the typeset heading `CHANnel Commands`. The diagrams themselves matched nothing. |
-| After the repair | **33 of 33** |
+| After the repair, development library | **33 of 33** |
+| After the repair, **full 584-document library** | **27 of 33**, 21 of them in the first ten |
 
-31 of the 33 come back at rank 5 or better. The two that do not are ranking, not retrieval, and are
-listed with their ranks below.
+### The two figures differ because the corpus does, and the smaller one flatters
+
+The 33 of 33 was measured on the library this was developed against. Repeated on the full
+584-document, 104,468-page library on 18 September 2026 — same code, same repair, same queries —
+the score is **27 of 33** at `--limit 25`.
+
+Nothing regressed. Every one of the six that drop out is **ranking, not retrieval**: the recovered
+text is in the index and it matches. Asked for more results, the correct page comes back for five of
+them, and the sixth is the one this document already singles out.
+
+| Query | Physical page | Rank in the full library |
+|---|---|---|
+| `:CHANnel<N>:DISPlay` | 40 | 39 |
+| `:CHANnel<N>:INPut` | 40 | 40 |
+| `ATTenuation` | 41 | 41 |
+| `:CHANnel<N>:PROBe` | 40 | 47 |
+| `PROTection` | 42 | 108 |
+| `:WAVeform:SOURce` | 106 | beyond 200 |
+
+The mechanism is the one described under "The two that rank low" below, and corpus size is what
+sharpens it: bm25 prefers a prose page that uses the query's words many times over the syntax
+diagram that *defines* the command, and a larger library simply holds more such prose pages. The
+single-token queries — `ATTenuation`, `PROTection` — are worst hit, because a bare instrument term
+appears in hundreds of manuals.
+
+**So quote 27 of 33 for this library.** The honest summary is that the repair solved retrieval and
+did not solve ranking, and that any score from this table is a property of the corpus it was
+measured on as much as of the code.
+
+### Measuring it yourself
+
+`search` prints ten results by default, so a correct answer at rank 16 — which this table documents
+— scores as a miss unless `--limit` is raised. Use `--limit 25` to reproduce the figure above.
+
+`--no-repairs` cannot be used for a before/after here: it applies when the index is **built**, not
+when it is queried, so passing it to `search` changes nothing. The "before" figure above comes from
+running the queries against the index as it stood before the repair was merged.
 
 ## The table
 
@@ -64,6 +100,10 @@ query matched both the PDF's own text and the recovered text.
 
 ## The two that rank low, and why
 
+These are the two that ranked low on the development library. On the full library six do, for the
+same reason at greater strength — see "The two figures differ" above. The analysis below is the
+mechanism; the larger corpus only supplies more of what it describes.
+
 **`The EXTernal command is only available on the 54810/20` — rank 12.** The note is printed
 verbatim on every continuation page of the TRIGger syntax diagram, so pages 88 and 100–103 are
 equally correct answers and bm25 prefers them. Page 86 is returned, twelfth.
@@ -85,9 +125,14 @@ measurement is recorded here so the next person does not spend the afternoon red
 ```
 manualforge doctor  <library>      # flags 75 of the 110 pages
 manualforge repair  <library>      # OCRs those 75 and keeps what the text layer missed
-manualforge index   <library>      # merges the result in
-manualforge search  ":WAVeform:BYTeorder {MSBFirst|LSBFirst}" --library <library>
+manualforge index   <library>      # merges the result in - hours, not minutes, on a large library
+manualforge search  ":WAVeform:BYTeorder {MSBFirst|LSBFirst}" --library <library> --limit 25
 ```
+
+The index step is the slow one and it is easy to underestimate. Merging a 20-document repair meant
+re-extracting 29 documents and 15,146 pages at 34 pages/min: **7.5 hours**. The indexer skips
+documents whose content and supplement hashes are unchanged, so only the repaired ones are redone —
+but repaired documents tend to be the large ones, which is exactly why the total is not small.
 
 To see what the audit saw on any one page:
 
