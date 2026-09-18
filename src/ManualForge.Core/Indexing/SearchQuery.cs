@@ -19,10 +19,24 @@ namespace ManualForge.Core.Indexing;
 /// query language can still have it: a query already containing an FTS5 operator is passed through
 /// untouched.
 /// </para>
+///
+/// <para>
+/// One class of query gets more than that. Command syntax is routinely copied out of a manual and
+/// pasted straight into a search box — <c>:TRIGger:MODE {EDGE|GLITch|ADVanced}</c> — and as a
+/// phrase it matches nothing at all, because a syntax diagram draws <c>TRIGger</c>, <c>MODE</c> and
+/// each alternative in separate boxes that are nowhere near each other in reading order. Read as
+/// the notation it is, the same string is a perfectly good query: the colons separate levels that
+/// must all appear, the braces offer alternatives of which one will do, and
+/// <c>&lt;N&gt;</c> is a placeholder standing for nothing in particular. See
+/// <see cref="ExpandNotation"/>.
+/// </para>
 /// </summary>
 public static class SearchQuery
 {
     private static readonly string[] Operators = ["AND", "OR", "NOT", "NEAR("];
+
+    /// <summary>The characters that make a term command-syntax notation rather than a word.</summary>
+    private static readonly char[] NotationCharacters = [':', '{', '}', '[', ']', '<', '>', '|'];
 
     /// <summary>
     /// Whether the text is already an FTS5 expression the user meant literally.
@@ -31,9 +45,25 @@ public static class SearchQuery
     {
         ArgumentNullException.ThrowIfNull(query);
 
-        // Uppercase, because FTS5's operators are case-sensitive and "and" in a sentence is not one.
-        return Operators.Any(op => query.Contains(op, StringComparison.Ordinal))
-               || query.Contains('*', StringComparison.Ordinal);
+        if (query.Contains('*', StringComparison.Ordinal))
+            return true;
+
+        // Whole words, not substrings. FTS5's operators are case-sensitive, so uppercase is the
+        // right test — but an uppercase substring is not: WORD contains OR, COMMAND contains AND
+        // and NOTE contains NOT. Matching on the substring handed ":WAVeform:FORMat
+        // {ASCii|BYTE|WORD|LONG}" to FTS5 as a raw expression, which is a syntax error, and did the
+        // same to any query with COMMAND in it.
+        foreach (var token in query.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (Operators.Any(op => op.EndsWith('(')
+                ? token.StartsWith(op, StringComparison.Ordinal)
+                : string.Equals(token, op, StringComparison.Ordinal)))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -51,7 +81,184 @@ public static class SearchQuery
         if (terms.Count == 0)
             return null;
 
-        return string.Join(' ', terms.Select(Quote));
+        var parts = new List<string>(terms.Count);
+        foreach (var term in terms)
+        {
+            var expanded = ExpandNotation(term);
+            if (expanded is not null)
+                parts.Add(expanded);
+        }
+
+        // Explicit AND throughout. Juxtaposition means AND in FTS5 only between phrases; put a
+        // parenthesised group next to a phrase and the query silently matches nothing. Writing the
+        // operator makes every combination behave the same way.
+        return parts.Count == 0 ? null : string.Join(" AND ", parts);
+    }
+
+    /// <summary>
+    /// Reads one whitespace-separated term as command-syntax notation, and returns the FTS5
+    /// expression for it — or null when it carries nothing searchable.
+    ///
+    /// <para>
+    /// The notation is the one every SCPI manual in this corpus uses on its syntax pages:
+    /// </para>
+    /// <list type="bullet">
+    /// <item><description>
+    /// <c>:</c> separates levels of a command, each of which must appear. They are joined by AND
+    /// rather than kept as a phrase because a syntax diagram draws each level in its own box, and
+    /// the recovered text for that page holds them in whatever order the boxes were drawn.
+    /// </description></item>
+    /// <item><description>
+    /// <c>{a|b|c}</c> and <c>[a|b|c]</c> offer alternatives, so any one of them will do.
+    /// </description></item>
+    /// <item><description>
+    /// <c>&lt;anything&gt;</c> is a placeholder — <c>&lt;N&gt;</c>, <c>&lt;NR3&gt;</c>,
+    /// <c>&lt;value&gt;</c> — and stands for text that is not on the page. It is dropped.
+    /// </description></item>
+    /// </list>
+    ///
+    /// <para>
+    /// A term with none of that in it comes back as a quoted phrase exactly as before, so ordinary
+    /// searching is untouched. In particular a hyphen is not a separator here: <c>HP-IB</c> and
+    /// <c>08340-60019</c> are single things, and splitting them would lose the only precision they
+    /// have.
+    /// </para>
+    /// </summary>
+    public static string? ExpandNotation(string term)
+    {
+        ArgumentNullException.ThrowIfNull(term);
+
+        if (term.IndexOfAny(NotationCharacters) < 0)
+            return term.Any(char.IsLetterOrDigit) ? Quote(term) : null;
+
+        // Each element of 'conjuncts' must appear; each inner list is a set of alternatives of
+        // which one will do.
+        var conjuncts = new List<List<string>>();
+        var alternatives = new List<string>();
+        var current = new StringBuilder();
+        var inGroup = false;
+
+        void FlushWord()
+        {
+            var word = current.ToString().Trim();
+            current.Clear();
+            if (word.Any(char.IsLetterOrDigit))
+                alternatives.Add(word);
+        }
+
+        void FlushConjunct()
+        {
+            FlushWord();
+            if (alternatives.Count > 0)
+                conjuncts.Add([.. alternatives]);
+            alternatives.Clear();
+        }
+
+        for (var i = 0; i < term.Length; i++)
+        {
+            var c = term[i];
+
+            switch (c)
+            {
+                case '<':
+                    // A placeholder. Skip to its close, or to the end if it never closes.
+                    var close = term.IndexOf('>', i + 1);
+                    i = close < 0 ? term.Length : close;
+                    continue;
+
+                case '{':
+                case '[':
+                    FlushConjunct();
+                    inGroup = true;
+                    continue;
+
+                case '}':
+                case ']':
+                    FlushConjunct();
+                    inGroup = false;
+                    continue;
+
+                case '|':
+                    // An alternative, inside a group or not: DC50|DCFifty is written bare.
+                    FlushWord();
+                    continue;
+
+                case ',':
+                    // A separator inside a group is another alternative; outside one it is just
+                    // punctuation in a phrase.
+                    if (inGroup)
+                    {
+                        FlushWord();
+                        continue;
+                    }
+
+                    current.Append(c);
+                    continue;
+
+                case ':':
+                    FlushConjunct();
+                    continue;
+
+                default:
+                    current.Append(c);
+                    continue;
+            }
+        }
+
+        FlushConjunct();
+
+        if (conjuncts.Count == 0)
+            return null;
+
+        var parts = conjuncts.Select(group => group.Count == 1
+            ? Quote(group[0])
+            : "(" + string.Join(" OR ", group.Select(Quote)) + ")");
+
+        // Explicit AND, not the implicit one that juxtaposition gives. FTS5's implicit AND joins
+        // phrases into a phrase list and does not reach across a parenthesised group, so
+        // `"TRIGger" "EDGE" ("CHANnel" OR "AUX")` silently matches nothing at all. Spelling the
+        // operator out is the difference between a query that works and one that answers "no".
+        return string.Join(" AND ", parts);
+    }
+
+    /// <summary>
+    /// The literal words a query is looking for, used to work out whether a hit matched text that
+    /// was extracted or text that was recognised. Runs of letters and digits only, because that is
+    /// what the tokeniser indexes.
+    /// </summary>
+    public static IReadOnlyList<string> Terms(string? query)
+    {
+        if (string.IsNullOrWhiteSpace(query))
+            return [];
+
+        var terms = new List<string>();
+        var current = new StringBuilder();
+
+        foreach (var c in query)
+        {
+            if (char.IsLetterOrDigit(c))
+            {
+                current.Append(c);
+                continue;
+            }
+
+            Take(terms, current);
+        }
+
+        Take(terms, current);
+        return terms;
+
+        static void Take(List<string> into, StringBuilder buffer)
+        {
+            var word = buffer.ToString();
+            buffer.Clear();
+
+            // One-character runs are noise: the 'N' of a <N> placeholder, the '2' of a page
+            // reference. They would match almost anything and tell us nothing about where a hit
+            // came from.
+            if (word.Length >= 2 && !Operators.Contains(word, StringComparer.Ordinal))
+                into.Add(word);
+        }
     }
 
     /// <summary>

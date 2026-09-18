@@ -22,6 +22,8 @@ public partial class App : Application
 
     public static SearchViewModel Search { get; private set; } = null!;
 
+    public static DoctorViewModel Doctor { get; private set; } = null!;
+
     private static RunLog? _log;
     private static LibraryService? _service;
 
@@ -70,7 +72,6 @@ public partial class App : Application
 
     private void Start()
     {
-        Window = new MainWindow();
         DispatcherQueue = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
 
         // The same rolling JSON-lines log the command line writes, so a run started from either
@@ -83,12 +84,20 @@ public partial class App : Application
         var dispatcher = new DispatcherQueueAdapter(DispatcherQueue);
         Library = new LibraryViewModel(_service, dispatcher: dispatcher);
         Search = new SearchViewModel(new SearchService(_log.Factory), dispatcher);
+        Doctor = new DoctorViewModel(new DoctorService(_log.Factory), dispatcher);
 
         // A folder given on the command line, so the application can be started on one and so this
         // window can be driven by something other than a person with a mouse.
         var folder = Environment.GetCommandLineArgs().Skip(1).FirstOrDefault(Directory.Exists);
         if (folder is not null)
             Library.Folder = folder;
+
+        // The window last, and that ordering is load bearing rather than tidy. MainWindow navigates
+        // its frame to MainPage inside its own constructor, so MainPage's constructor runs before
+        // this method's next statement does. Building the window first left every view model null
+        // at that moment, and the page subscribes to them there — which crashed the application on
+        // launch with nothing but 0xC000027B to show for it.
+        Window = new MainWindow();
 
         Window.Closed += async (_, _) =>
         {

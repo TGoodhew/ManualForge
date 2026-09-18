@@ -30,6 +30,19 @@ public sealed partial class MainPage : Page
             // The search tab needs to know whether an index exists for whatever folder is set.
             Search.Folder = ViewModel.Folder;
             await Search.RefreshAsync();
+
+            Doctor.Folder = ViewModel.Folder;
+            if (Doctor.RefreshCommand.CanExecute(null))
+                await Doctor.RefreshAsync();
+        };
+
+        // The diagnostic picture arrives as PNG bytes, because the view model has no business
+        // knowing what a BitmapImage is. Turning those into one is a view concern, and this is
+        // the view.
+        Doctor.PropertyChanged += async (_, e) =>
+        {
+            if (e.PropertyName == nameof(DoctorViewModel.Diagnostic))
+                await ShowDiagnosticAsync();
         };
 
         // Choosing a folder in the library tab is choosing which index to search.
@@ -40,6 +53,10 @@ public sealed partial class MainPage : Page
 
             Search.Folder = ViewModel.Folder;
             await Search.RefreshAsync();
+
+            Doctor.Folder = ViewModel.Folder;
+            if (Doctor.RefreshCommand.CanExecute(null))
+                await Doctor.RefreshAsync();
         };
         Unloaded += (_, _) => _gpuTimer.Stop();
     }
@@ -47,6 +64,35 @@ public sealed partial class MainPage : Page
     public LibraryViewModel ViewModel => App.Library;
 
     public SearchViewModel Search => App.Search;
+
+    public DoctorViewModel Doctor => App.Doctor;
+
+    /// <summary>
+    /// Puts the doctor's diagnostic picture on screen. The bytes come from the view model; a
+    /// <c>BitmapImage</c> is a XAML type and stays here.
+    /// </summary>
+    private async Task ShowDiagnosticAsync()
+    {
+        if (Doctor.Diagnostic is not { Length: > 0 } bytes)
+        {
+            DiagnosticImage.Source = null;
+            return;
+        }
+
+        var image = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage();
+        using (var stream = new Windows.Storage.Streams.InMemoryRandomAccessStream())
+        {
+            using (var writer = new Windows.Storage.Streams.DataWriter(stream.GetOutputStreamAt(0)))
+            {
+                writer.WriteBytes(bytes);
+                await writer.StoreAsync();
+            }
+
+            await image.SetSourceAsync(stream);
+        }
+
+        DiagnosticImage.Source = image;
+    }
 
     /// <summary>Enter searches. A keystroke is a view concern; what it does is not.</summary>
     private void SearchKeyDown(object sender, Microsoft.UI.Xaml.Input.KeyRoutedEventArgs e)

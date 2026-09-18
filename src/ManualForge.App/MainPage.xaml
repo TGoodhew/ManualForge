@@ -218,6 +218,206 @@
                 </Grid>
             </TabViewItem>
 
+            <TabViewItem Header="Doctor" IsClosable="False">
+                <Grid RowSpacing="8" Padding="0,8,0,0">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <!-- What to do. Reading the audit is free; auditing is minutes; recovering is
+                         GPU time, so it is the one with the accent on it and a count beside it. -->
+                    <Grid Grid.Row="0" ColumnSpacing="8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <Button
+                            Grid.Column="0"
+                            Content="Read audit"
+                            Command="{x:Bind Doctor.RefreshCommand}"
+                            ToolTipService.ToolTip="Show what an earlier audit found. Changes nothing." />
+
+                        <Button
+                            Grid.Column="1"
+                            Content="Audit folder"
+                            Command="{x:Bind Doctor.AuditCommand}"
+                            ToolTipService.ToolTip="Find pages whose text layer is incomplete. Changes nothing. Over a whole library this takes hours — run `manualforge doctor` for that." />
+
+                        <Button
+                            Grid.Column="2"
+                            Style="{StaticResource AccentButtonStyle}"
+                            Command="{x:Bind Doctor.RepairCommand}"
+                            ToolTipService.ToolTip="OCR the flagged pages of the ticked documents. No PDF is written to.">
+                            <TextBlock>
+                                <Run Text="Recover text" />
+                                <Run Text="(" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                <Run Text="{x:Bind Doctor.SelectedCount, Mode=OneWay}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                <Run Text=")" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                            </TextBlock>
+                        </Button>
+
+                        <Button
+                            Grid.Column="3"
+                            Content="Stop"
+                            Command="{x:Bind Doctor.CancelCommand}" />
+
+                        <!-- Over a whole library the list runs to several hundred rows, and the
+                             difference between "repair what you suggested" and "repair these three"
+                             should not be three hundred clicks. -->
+                        <StackPanel Grid.Column="4" Orientation="Horizontal" Spacing="4" Margin="16,0,0,0">
+                            <Button Content="All" Command="{x:Bind Doctor.SelectEverythingCommand}" />
+                            <Button Content="None" Command="{x:Bind Doctor.SelectNothingCommand}" />
+                        </StackPanel>
+
+                        <CheckBox
+                            Grid.Column="5"
+                            Content="Include scanned pages"
+                            IsChecked="{x:Bind Doctor.IncludeScannedPages, Mode=TwoWay}"
+                            IsEnabled="{x:Bind Doctor.IsIdle, Mode=OneWay}"
+                            ToolTipService.ToolTip="Also redo scanned pages whose earlier OCR missed lettering. A different problem, and on a large library, hours of work." />
+                    </Grid>
+
+                    <TextBlock
+                        Grid.Row="1"
+                        Text="{x:Bind Doctor.Headline, Mode=OneWay}"
+                        TextWrapping="Wrap"
+                        Style="{StaticResource CaptionTextBlockStyle}" />
+
+                    <StackPanel Grid.Row="2" Spacing="4">
+                        <TextBlock
+                            Text="{x:Bind Doctor.Status, Mode=OneWay}"
+                            TextWrapping="Wrap"
+                            Opacity="0.8"
+                            Style="{StaticResource CaptionTextBlockStyle}" />
+                        <ProgressBar
+                            Value="{x:Bind Doctor.PageProgress, Mode=OneWay}"
+                            Maximum="100"
+                            Visibility="{x:Bind Doctor.IsBusy, Mode=OneWay}" />
+                    </StackPanel>
+
+                    <!-- The findings on the left, and on the right the page the detector was
+                         looking at, so nobody has to take its word for it before spending GPU
+                         time on what it said. -->
+                    <Grid Grid.Row="3" ColumnSpacing="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="3*" />
+                            <ColumnDefinition Width="2*" />
+                        </Grid.ColumnDefinitions>
+
+                        <Grid Grid.Column="0" RowSpacing="4">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+
+                            <Grid Grid.Row="0" ColumnSpacing="12" Padding="12,4">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="32" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="110" />
+                                    <ColumnDefinition Width="70" />
+                                    <ColumnDefinition Width="70" />
+                                    <ColumnDefinition Width="80" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="1" Text="Document" Style="{StaticResource CaptionTextBlockStyle}" />
+                                <TextBlock Grid.Column="2" Text="Why" Style="{StaticResource CaptionTextBlockStyle}" />
+                                <TextBlock Grid.Column="3" Text="Flagged" Style="{StaticResource CaptionTextBlockStyle}" />
+                                <TextBlock Grid.Column="4" Text="Drawn" Style="{StaticResource CaptionTextBlockStyle}" />
+                                <TextBlock Grid.Column="5" Text="Recovered" Style="{StaticResource CaptionTextBlockStyle}" />
+                            </Grid>
+
+                            <ListView
+                                Grid.Row="1"
+                                ItemsSource="{x:Bind Doctor.Documents, Mode=OneWay}"
+                                SelectedItem="{x:Bind Doctor.SelectedDocument, Mode=TwoWay}"
+                                SelectionMode="Single">
+                                <ListView.ItemTemplate>
+                                    <DataTemplate x:DataType="vm:DoctorRow">
+                                        <Grid ColumnSpacing="12" MinHeight="40">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="32" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="110" />
+                                                <ColumnDefinition Width="70" />
+                                                <ColumnDefinition Width="70" />
+                                                <ColumnDefinition Width="80" />
+                                            </Grid.ColumnDefinitions>
+
+                                            <CheckBox
+                                                Grid.Column="0"
+                                                MinWidth="0"
+                                                IsChecked="{x:Bind Selected, Mode=TwoWay}" />
+
+                                            <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                                <TextBlock Text="{x:Bind Title}" TextTrimming="CharacterEllipsis" />
+                                                <TextBlock
+                                                    Text="{x:Bind PageRanges}"
+                                                    Style="{StaticResource CaptionTextBlockStyle}"
+                                                    Opacity="0.6"
+                                                    TextTrimming="CharacterEllipsis" />
+                                            </StackPanel>
+
+                                            <TextBlock Grid.Column="2" Text="{x:Bind Kind}" VerticalAlignment="Center" Opacity="0.8" />
+                                            <TextBlock Grid.Column="3" Text="{x:Bind FlaggedPages}" VerticalAlignment="Center" />
+                                            <TextBlock Grid.Column="4" Text="{x:Bind DrawnPages}" VerticalAlignment="Center" />
+                                            <TextBlock Grid.Column="5" Text="{x:Bind Progress, Mode=OneWay}" VerticalAlignment="Center" />
+                                        </Grid>
+                                    </DataTemplate>
+                                </ListView.ItemTemplate>
+                            </ListView>
+
+                            <ListView
+                                Grid.Row="2"
+                                MaxHeight="120"
+                                ItemsSource="{x:Bind Doctor.Recovered, Mode=OneWay}"
+                                SelectionMode="None" />
+                        </Grid>
+
+                        <Grid Grid.Column="1" RowSpacing="8">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+
+                            <Grid Grid.Row="0" ColumnSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="Show page" VerticalAlignment="Center" />
+                                <NumberBox
+                                    Grid.Column="1"
+                                    Minimum="1"
+                                    SpinButtonPlacementMode="Compact"
+                                    Value="{x:Bind Doctor.ExplainPage, Mode=TwoWay}" />
+                                <Button Grid.Column="2" Content="Show" Command="{x:Bind Doctor.ExplainCommand}" />
+                            </Grid>
+
+                            <Border
+                                Grid.Row="1"
+                                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                BorderThickness="1"
+                                CornerRadius="4"
+                                Background="{ThemeResource LayerFillColorDefaultBrush}">
+                                <ScrollViewer ZoomMode="Enabled" HorizontalScrollMode="Auto" HorizontalScrollBarVisibility="Auto">
+                                    <Image x:Name="DiagnosticImage" Stretch="Uniform" />
+                                </ScrollViewer>
+                            </Border>
+                        </Grid>
+                    </Grid>
+                </Grid>
+            </TabViewItem>
+
             <TabViewItem Header="Search" IsClosable="False">
                 <Grid RowSpacing="8" Padding="0,8,0,0">
                     <Grid.RowDefinitions>
@@ -267,6 +467,11 @@
                                         <Run Text="{x:Bind Title}" FontWeight="SemiBold" />
                                         <Run Text="  page " Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                         <Run Text="{x:Bind PageNumber}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                        <!-- Empty for an ordinary hit, so this draws nothing. A hit on
+                                             text the repair recovered says so, because the string may be
+                                             a command somebody is about to send to an instrument. -->
+                                        <Run Text="  " />
+                                        <Run Text="{x:Bind SourceLabel}" Foreground="{ThemeResource SystemFillColorCautionBrush}" />
                                     </TextBlock>
                                     <TextBlock Text="{x:Bind Snippet}" TextWrapping="Wrap" />
                                     <TextBlock

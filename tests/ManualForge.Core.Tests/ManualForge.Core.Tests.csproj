@@ -18,6 +18,9 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\ManualForge.Core\ManualForge.Core.csproj" />
     <ProjectReference Include="..\..\src\ManualForge.Shell\ManualForge.Shell.csproj" />
+    <!-- The MCP tools are the surface Claude actually sees, and most of what they do is decide
+         what to say. That is worth testing directly rather than through a stdio transport. -->
+    <ProjectReference Include="..\..\src\ManualForge.Mcp\ManualForge.Mcp.csproj" />
   </ItemGroup>
 
   <ItemGroup>

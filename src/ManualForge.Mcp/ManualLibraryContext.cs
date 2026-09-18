@@ -1,3 +1,4 @@
+using ManualForge.Core.Auditing;
 using ManualForge.Core.Indexing;
 
 namespace ManualForge.Mcp;
@@ -18,6 +19,34 @@ public sealed class ManualLibraryContext
     public string IndexPath => LibraryIndexer.DefaultIndexPath(Root);
 
     public bool HasIndex => File.Exists(IndexPath);
+
+    /// <summary>Where `manualforge doctor` keeps what it found, and what the repair recovered.</summary>
+    public string DoctorPath => DoctorStore.DefaultPathFor(Root);
+
+    public bool HasAudit => File.Exists(DoctorPath);
+
+    public DoctorStore OpenAudit() => new(DoctorPath, readOnly: true);
+
+    /// <summary>
+    /// The audit's standing, or null when there is none. Kept separate from the index because a
+    /// search result has to be able to say "this library has never been checked for pages whose
+    /// text layer is incomplete" — which is a different, and more honest, answer than silence.
+    /// </summary>
+    public AuditSummary? AuditSummary()
+    {
+        if (!HasAudit)
+            return null;
+
+        try
+        {
+            using var store = OpenAudit();
+            return store.Summary();
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
 
     /// <summary>The configured library, or null when the variable is unset or points nowhere.</summary>
     public static ManualLibraryContext? FromEnvironment()

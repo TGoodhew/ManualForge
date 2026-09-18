@@ -21,8 +21,11 @@ manualforge survey <folder>                classify a library; changes nothing
 manualforge run <folder>                   classify, flatten, OCR and replace, resumably
 manualforge ocr <input.pdf> [options]      rasterise → recognise → overlay → verify
 manualforge inspect <input.pdf>            page count, sizes, landscape pages, existing text
+manualforge doctor <folder>                find pages whose text layer is incomplete
+manualforge repair <folder>                OCR just those pages; merge, never replace
 manualforge index <folder>                 build the full-text index over a library
 manualforge search <query> --library <f>   ask it: manual, page and snippet
+manualforge reconcile <folder>             which PDFs are not in the index, and why
 manualforge gpu                            which execution provider is actually active
 ```
 
@@ -293,6 +296,115 @@ of perfectly good text back through OCR:
    programming manual looked like bad OCR. Colons, hyphens, underscores, dots and slashes are now
    treated as structure.
 
+## The text layer that is present and incomplete
+
+Everything above asks whether a document has a text layer and whether that text is any good. There
+is a third failure, and it is the one that actually cost somebody an afternoon: a text layer that is
+**present, correct, and missing most of the content**.
+
+A manual typeset in FrameMaker and distilled to PDF carries perfect text for its prose and draws its
+syntax diagrams, pin-outs, schematic labels and some tables as vector graphics. Those extract as
+nothing. The prose passing every check is exactly what stops anybody looking at the figures — and
+the figures are disproportionately what anybody searches a service manual for.
+
+`54845A Programmer.pdf`, the Infiniium programmer's guide, is the case that found it: 110 pages, no
+images anywhere in the file, 458 extractable characters a page against a normal 1,500–3,000, and
+chapter 2 — the entire command reference — drawn. Searching this library for its commands returned
+nothing, and the library said that absence was real.
+
+```
+manualforge doctor <folder>                find pages whose text layer is incomplete
+manualforge repair <folder>                OCR just those pages, keeping what they missed
+manualforge reconcile <folder>             which PDFs are not in the index, and why
+```
+
+### Render the page and see what is not accounted for
+
+The audit works per page, because affected documents are mixed — good prose, empty figures — and a
+per-document verdict either re-OCRs text that was already right or skips the pages that were wrong.
+
+The deciding measurement is to render the page, count the pixels carrying a mark, and subtract the
+ones an extracted glyph accounts for. A sparse page has little ink and does not fire; a page whose
+content did not extract has plenty. Ink alone would be far too blunt — a schematic is mostly ink and
+mostly has nothing to recover — so the residue is then sorted by shape, and only clusters the size,
+aspect and density of lettering count. A page is flagged only when both agree.
+
+Rendering is the expensive part, so it sits behind a cheap gate: a page is rendered only if it
+extracts unusually little text, or if its content stream paints enough paths to be drawing something.
+That keeps a hundred-thousand-page audit to minutes.
+
+Every flagged page is then sorted by *where* its missing content lives. **Drawn** means vector
+graphics on the page — content that never had a text layer and that no amount of re-OCRing the
+document would have found. **Raster** means lettering inside an image: a scan whose OCR missed it, or
+a pasted screenshot. Both are real; they are not the same problem. The first corpus-wide run flagged
+220 of the first 241 documents, and almost all of them were scanned service manuals whose 1990s OCR
+had missed the lettering on their schematics — a true finding, and the wrong one to put at the top of
+a report that exists to surface the handful of documents whose content was never text at all.
+`repair` does the drawn pages by default and the scanned ones only when asked.
+
+Two threshold corrections came from looking at the diagnostic image rather than from reasoning, and
+both were firing on hundreds of good pages:
+
+- **Glyph boxes are built from the baseline and point size, not the font's metrics.** The bold
+  headings in the negative control report a box that stops below their own ascenders, so the top of
+  every heading counted as unexplained ink. 43 false positives became 6.
+- **Glyph boxes are padded 0.6 em sideways.** This library's *own* OCR'd scans place their invisible
+  text on the box the recogniser detected, and a CRNN's per-character timesteps start about one
+  character late — so the first letter of every word had nothing over it. That would have fired on
+  every OCR'd scan in the corpus.
+
+You can look at what it saw:
+
+```
+manualforge doctor "54845A Programmer.pdf" --explain 40 --dump page40.png
+```
+
+Pale grey is ink an extracted glyph accounts for, black is ink nothing accounts for, red boxes are
+what was counted as lettering.
+
+### Merge, never replace, and never touch the PDF
+
+Repair renders only the flagged pages, at a resolution chosen per page from the size of the
+lettering that was missed, and drops any recognised word that lands under the existing text layer —
+that text is already there and already right. Deskew and despeckle are off: these pages are rendered
+from vector drawing instructions and are already straight, and despeckling erodes the 4 pt
+annotation that is the whole point.
+
+Nothing is written to any PDF. The recovered text goes into the audit database and is merged at
+index time, because a page that already carries a text layer must never be given a second one.
+
+Proven by diffing rather than asserted: 35 of 110 pages of the 54845A guide and 411 of 418 pages of
+the negative control come out **byte-identical**, and every page that did change begins with exactly
+the bytes it had before.
+
+Case survives intact, which matters more here than it sounds: SCPI documents its accepted
+abbreviations by capitalisation, so `BYTeorder` says `BYT` is accepted and `byteorder` says nothing.
+Searching is case-insensitive; storage is not.
+
+### A search result that will not overclaim
+
+A miss used to answer that the absence was "real rather than a truncated search". That caveat
+anticipated the *detectable* failure — a scan nobody OCR'd — and not this one. It now depends on
+what has been checked: if the audit has never run, the result says so and explains why a miss is
+unproven; if pages are flagged and unrepaired, it gives the number and names the worst documents;
+only once everything flagged has been repaired does the claim get made.
+
+Hits that matched recovered text are marked `[OCR]` with the recogniser's confidence, because the
+string may be a command somebody is about to send to an instrument, and `0`/`O`, `1`/`l`/`I`, `5`/`S`
+and `8`/`B` land directly in model numbers.
+
+Two bugs in query preparation turned up while testing this, both of which silently returned nothing:
+operators were matched as substrings, so `WORD`, `COMMAND` and `NOTE` were handed to FTS5 as raw
+expressions; and FTS5's implicit AND does not reach across a parenthesised group, so
+`"TRIGger" "EDGE" ("CHANnel" OR "AUX")` matched nothing at all. Command syntax pasted straight from a
+manual is now read as the notation it is — `:` means all of these, `{a|b}` means any of these,
+`<N>` is a placeholder — which is what makes `:WAVeform:BYTeorder {MSBFirst|LSBFirst}` find the
+diagram that defines it.
+
+The full account, every threshold and where it came from, is in
+[docs/UNDER-EXTRACTION.md](docs/UNDER-EXTRACTION.md); the ground truth it was measured against is in
+[docs/GROUND-TRUTH-54845A.md](docs/GROUND-TRUTH-54845A.md).
+
 ## Recognising each document once
 
 A collection assembled over years accumulates copies: a manual filed under two model numbers, a
@@ -488,9 +600,31 @@ policy the run obeys, a failure landing in the error list, an invalidated signat
 though the file succeeded, cancel offered only while something is running, and the report exporting
 as CSV or JSON. Twenty tests, no window, no GPU.
 
-What is left in code-behind is a file picker, which needs the native window handle, and a
-two-second timer that asks the card how it is doing. Both belong to a window rather than to a view
-model.
+What is left in code-behind is a file picker, which needs the native window handle, a two-second
+timer that asks the card how it is doing, and turning the doctor tab's PNG bytes into a
+`BitmapImage`. All three belong to a window rather than to a view model.
+
+### The Doctor tab
+
+Reading an audit costs nothing and running one over a hundred thousand pages takes hours, so the
+tab reads what `manualforge doctor` wrote rather than insisting on producing it. Recovering the text
+is the other way round: it is the part that wants somebody watching, choosing which manual is worth
+twenty minutes of GPU time, seeing the words come back, and being able to stop.
+
+So the tab lists what the audit found — flagged pages, how many of them are drawn rather than
+photographed, how many have been recovered — with a tick box per document. Drawn documents arrive
+ticked because they are the finding; scanned ones with OCR gaps do not, because that is ten thousand
+pages of a different problem and should be an explicit choice. Stopping mid-run keeps every page
+already recovered, and pressing it again carries on from there.
+
+It will also draw the picture the detector worked from for any page, which is the point of having it
+in a window at all: nobody should have to take a detector's word for it before spending GPU time on
+what it said.
+
+One bug found by running it: the application crashed on launch with nothing but `0xC000027B`, and
+had done since before this work. `MainWindow` navigates its frame to `MainPage` inside its own
+constructor, so `MainPage`'s constructor — which subscribes to the view models — ran before
+`App.Start` had built any of them. The window is now built last.
 
 The window shows the folder, a class summary to review before committing to anything, live per-file
 and per-page state, throughput, GPU utilisation and VRAM, a running list of problems, and the
@@ -558,12 +692,18 @@ business going over a network.
 
 Three tools:
 
-* **`library_search`** — full text of every page, ranked. The manual, the page and a snippet.
+* **`library_search`** — full text of every page, ranked. The manual, the page and a snippet. A hit
+  that matched text recovered by the repair is marked `[OCR]` with the recogniser's confidence,
+  because the caller may be about to send that string to an instrument. A miss no longer claims the
+  absence is real unless the library has been audited and everything it flagged has been repaired;
+  short of that it says what has not been checked and names the suspect documents.
 * **`read_manual_page`** — the text of one page, optionally with its neighbours. A snippet is enough
   to choose a page and never enough to answer from, so this is the second half rather than a
-  convenience.
-* **`library_status`** — what is indexed and how old it is. An index built before a manual was added
-  will answer "not found", and a tool that cannot tell that from a real absence is not trustworthy.
+  convenience. Recovered text is included under its own heading, never silently mixed in.
+* **`library_status`** — what is indexed, how old it is, which PDFs in the folder are *not* in the
+  index and why each one, and whether the library has been audited for pages whose text layer is
+  incomplete. An index built before a manual was added will answer "not found", and a tool that
+  cannot tell that from a real absence is not trustworthy.
 
 Register it with Claude Desktop in `claude_desktop_config.json`, or with Claude Code:
 
@@ -841,13 +981,23 @@ src/ManualForge.Core/
   Pipeline/SearchablePdfBuilder.cs end-to-end for one file
   Diagnostics/RunLog.cs           Serilog: JSON lines, rolled daily, shared
   Indexing/SearchIndex.cs         SQLite FTS5 over every page; the shared contract
+  Indexing/SearchQuery.cs         typing → FTS5, and command syntax read as notation
   Indexing/Dehyphenator.cs        rejoins words broken across line ends, for the index only
-  Indexing/LibraryIndexer.cs      walks the library, extracts, indexes, writes sidecars
+  Indexing/LibraryIndexer.cs      walks the library, extracts, merges repairs, indexes
+  Indexing/LibraryReconciler.cs   which PDFs are not in the index, and why
+  Auditing/DoctorOptions.cs       every threshold, and what it was measured against
+  Auditing/InkAnalysis.cs         rendered ink against extracted glyph boxes; blob shape
+  Auditing/UnderExtractionDetector.cs  per-page signals and the verdict they add up to
+  Auditing/DoctorRunner.cs        the audit over a whole library
+  Auditing/DoctorStore.cs         findings and recovered text; outlives any re-index
+  Auditing/PageRepairer.cs        OCR for flagged pages only; merge, never replace
 src/ManualForge.Cli/              the command line
 src/ManualForge.Shell/            view models and the services behind them - no XAML, so testable
+  IDoctorService.cs               the audit and the repair, behind one seam
+  ViewModels/DoctorViewModel.cs   what the doctor tab does, with no window attached
 src/ManualForge.App/              WinUI 3: XAML, a file picker, a GPU timer, nothing else
 src/ManualForge.Mcp/              MCP server: library_search, read_manual_page, library_status
-tests/ManualForge.Core.Tests/     294 tests, no GPU or network needed
+tests/ManualForge.Core.Tests/     357 tests, no GPU or network needed
 ```
 
 ## Tests
@@ -856,7 +1006,7 @@ tests/ManualForge.Core.Tests/     294 tests, no GPU or network needed
 dotnet test
 ```
 
-294 tests, a few seconds, no models and no network required:
+357 tests, a few seconds, no models and no network required:
 
 - **`PageGeometryTests`** — the corner mapping for all four rotations, non-zero crop origins,
   text-matrix direction, points-per-pixel, rotation normalisation.
@@ -885,6 +1035,19 @@ dotnet test
   running them is read - which matters, since no test machine has CUDA on it.
 - **`LibraryViewModelTests`** - the shell driven with no window: survey, policy edits reaching the
   run, the error list, cancel and resume, and the exported report.
+- **`UnderExtractionTests`** - both halves of the detector, against synthetic pages. It has to
+  flag a page whose figure is drawn as vector graphics while its heading extracts, and it has to
+  leave alone a page that is nothing but ruled lines - which carries far *more* ink than the
+  flagged one and has nothing on it to recover. A detector with no recall misses the failure it
+  exists for; one with no precision triggers a re-OCR nobody has time for.
+- **`SearchQueryNotationTests`** - command syntax read as notation, and the two bugs found while
+  writing it: operators matched as substrings, so `WORD` and `COMMAND` were handed to FTS5 raw, and
+  FTS5's implicit AND not reaching across a parenthesised group, which matched nothing at all.
+- **`RepairAndProvenanceTests`** - that a merge keeps the existing text byte for byte and only adds
+  to it, that recovered text is stored against the file it came from and refused against any other,
+  that a repair changes the supplement hash so the document is indexed again, that a hit says
+  whether it matched extracted or recognised text, and that the reconciler tells a file that needs a
+  command apart from one that needs a person.
 - **`LibraryProcessorTests`** - the replace-in-place sequence end to end, against a fake OCR
   engine. Everything downstream of recognition is real: PDFium rasterises, PDFsharp writes, PdfPig
   reads back. Most of these assert what happened to the bytes on disk rather than what the code

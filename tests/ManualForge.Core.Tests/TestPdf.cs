@@ -162,8 +162,14 @@ internal static class TestPdf
         return document;
     }
 
+    /// <summary>
+    /// A greyscale PNG that is uniformly pale enough to count as blank. Stands in for the paper of
+    /// a scan: it makes the page a raster without putting any ink on it.
+    /// </summary>
+    public static byte[] PalePng(int width, int height) => GreyscalePng(width, height, level: 250);
+
     /// <summary>A minimal valid greyscale PNG, written by hand to avoid a drawing dependency.</summary>
-    public static byte[] GreyscalePng(int width, int height)
+    public static byte[] GreyscalePng(int width, int height, int? level = null)
     {
         using var ms = new MemoryStream();
         using var writer = new BinaryWriter(ms);
@@ -182,7 +188,7 @@ internal static class TestPdf
         {
             raw[y * (width + 1)] = 0;
             for (var x = 0; x < width; x++)
-                raw[y * (width + 1) + 1 + x] = (byte)((x * 7 + y * 13) % 256);
+                raw[y * (width + 1) + 1 + x] = (byte)(level ?? ((x * 7 + y * 13) % 256));
         }
 
         using var deflated = new MemoryStream();
@@ -232,5 +238,110 @@ internal static class TestPdf
                 crc = (crc & 1) != 0 ? (crc >> 1) ^ 0xEDB88320 : crc >> 1;
         }
         return ~crc;
+    }
+    /// <summary>
+    /// A page of the kind this whole exercise is about: a real heading in a real font, and a
+    /// "figure" below it drawn as vector graphics — small filled rectangles standing in for the
+    /// lettering on a syntax diagram. The heading extracts; the figure extracts as nothing at all.
+    /// </summary>
+    /// <param name="labels">
+    /// How many glyph-sized marks the drawn figure carries. Above the detector's threshold this is
+    /// a page worth flagging; below it, a figure number and not worth anybody's time.
+    /// </param>
+    /// <param name="behindAnImage">
+    /// Put a near-white image across the page first, so the same marks are "inside an image" as far
+    /// as the audit is concerned. A scanned page and a drawn page can carry identical ink; what
+    /// tells them apart is whether there is a raster underneath, and that is worth a test.
+    /// </param>
+    public static string DrawnFigure(
+        string path, string heading, int labels = 120, int pages = 1, bool behindAnImage = false)
+    {
+        using (var document = NewDocument(path, pages, rotation: 0, out var directory))
+        {
+            for (var i = 0; i < pages; i++)
+            {
+                using var gfx = XGraphics.FromPdfPage(document.Pages[i]);
+                var brush = XBrushes.Black;
+
+                if (behindAnImage)
+                {
+                    var imagePath = Path.Combine(directory, "pale.png");
+                    if (!File.Exists(imagePath))
+                        File.WriteAllBytes(imagePath, PalePng(120, 160));
+
+                    using var image = XImage.FromFile(imagePath);
+                    gfx.DrawImage(image, 20, 20, WidthPt - 40, HeightPt - 40);
+                }
+
+                // Glyph-shaped: about 4 pt by 6 pt, solid, laid out in rows the way a caption is.
+                for (var n = 0; n < labels; n++)
+                {
+                    var column = n % 20;
+                    var row = n / 20;
+                    gfx.DrawRectangle(brush, 72 + column * 9, 200 + row * 14, 4, 6);
+                }
+            }
+
+            document.Save(path);
+        }
+
+        using var toEdit = PdfSharp.Pdf.IO.PdfReader.Open(path, PdfSharp.Pdf.IO.PdfDocumentOpenMode.Modify);
+        for (var i = 0; i < toEdit.PageCount; i++)
+            AddTextLayer(toEdit.Pages[i], heading);
+
+        var temporary = path + ".tmp";
+        toEdit.Save(temporary);
+        toEdit.Dispose();
+        File.Move(temporary, path, overwrite: true);
+        return path;
+    }
+
+    /// <summary>
+    /// A page carrying nothing but ruled lines and a heading — an empty table, a border, a plot
+    /// frame. Plenty of ink, no lettering in it, and nothing for OCR to recover. The detector must
+    /// leave this alone, because a detector that flags every schematic in a service manual is one
+    /// everybody learns to ignore.
+    /// </summary>
+    public static string RuledPage(string path, string heading, int rules = 40)
+    {
+        using (var document = NewDocument(path, pages: 1, rotation: 0, out _))
+        {
+            using var gfx = XGraphics.FromPdfPage(document.Pages[0]);
+            var pen = new XPen(XColors.Black, 1.5);
+
+            for (var n = 0; n < rules; n++)
+            {
+                gfx.DrawLine(pen, 72, 150 + n * 14, 540, 150 + n * 14);
+                gfx.DrawLine(pen, 72 + n * 11, 150, 72 + n * 11, 150 + rules * 14);
+            }
+
+            document.Save(path);
+        }
+
+        using var toEdit = PdfSharp.Pdf.IO.PdfReader.Open(path, PdfSharp.Pdf.IO.PdfDocumentOpenMode.Modify);
+        AddTextLayer(toEdit.Pages[0], heading);
+
+        var temporary = path + ".tmp";
+        toEdit.Save(temporary);
+        toEdit.Dispose();
+        File.Move(temporary, path, overwrite: true);
+        return path;
+    }
+
+    /// <summary>A page with a text layer and nothing else. Nothing here is under-extracted.</summary>
+    public static string TypesetOnly(string path, string text, int pages = 1)
+    {
+        using (var document = NewDocument(path, pages, rotation: 0, out _))
+            document.Save(path);
+
+        using var toEdit = PdfSharp.Pdf.IO.PdfReader.Open(path, PdfSharp.Pdf.IO.PdfDocumentOpenMode.Modify);
+        for (var i = 0; i < toEdit.PageCount; i++)
+            AddTextLayer(toEdit.Pages[i], text);
+
+        var temporary = path + ".tmp";
+        toEdit.Save(temporary);
+        toEdit.Dispose();
+        File.Move(temporary, path, overwrite: true);
+        return path;
     }
 }

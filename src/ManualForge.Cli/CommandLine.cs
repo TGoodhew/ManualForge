@@ -107,8 +107,11 @@ internal sealed class CommandLine
               manualforge status <folder>                Show the work queue on disk; changes nothing
               manualforge survey <folder>                Classify a library; changes nothing
               manualforge run <folder>                   Classify, flatten, OCR and replace, resumably
+              manualforge doctor <folder>                Find pages whose text layer is incomplete
+              manualforge repair <folder>                OCR just those pages and keep what they missed
               manualforge index <folder>                 Build the full-text index over a library
               manualforge search <query> --library <f>    Query it: manual, page and snippet
+              manualforge reconcile <folder>             Which PDFs are not in the index, and why
               manualforge truth <input.pdf> --pages …     Seed hand-correctable ground-truth pages
               manualforge benchmark --truth <folder>      Measure character and word error rates
               manualforge gpu                            Report which execution provider is active
@@ -149,11 +152,52 @@ internal sealed class CommandLine
                                       is every core, which is right for a CPU-only run and rude if
                                       you want to use the machine while it works.
 
+            doctor options (also: audit):
+              --detail                Per-page numbers for every flagged page, not just a count.
+              --explain <page>        Audit one page of one PDF and print every signal.
+              --dump <path.png>       With --explain, draw what the ink comparison saw: grey for
+                                      ink an extracted glyph accounts for, black for ink nothing
+                                      accounts for, red boxes round clusters counted as lettering.
+              --json <path>           Machine-readable findings, which `repair` does not need but
+                                      anything else looking at this does.
+              --recheck               Re-audit files that have not changed since the last run.
+              --report                Print what an earlier audit found; audit nothing.
+              --reading-order <page>  Print one page's own text in the reading order the repair
+                                      uses. For checking on a real page that a close-set table is
+                                      read along its rows rather than down its columns.
+              --review <n>            Draw n flagged and n unflagged pages at random and write the
+                                      picture the detector worked from for each, so its error rate
+                                      can be measured by eye. --seed <n> and --into <folder> make
+                                      the sample reproducible; --kind drawn|raster narrows it.
+              --uncovered-ink <x>     Flag above this share of the page being unaccounted-for ink.
+                                      Default 0.002. See docs/UNDER-EXTRACTION.md for why.
+              --min-blobs <n>         And at least this many glyph-shaped clusters of it. Default
+                                      40. Both must hold: ink alone flags every schematic.
+              --audit-dpi <n>         Resolution for the audit render. Default 150.
+              --render-below-chars <n>  Render a page with fewer than this many characters. 900.
+              --render-above-paths <n>  Render a page painting at least this many paths. 40.
+              --sample <n>            Audit n pages per document instead of all of them.
+              --workers <n>           Documents at once. Default half the cores.
+              --doctor-db <path>      Findings database. Default <root>/_Originals/manualforge-doctor.db.
+
+            repair options:
+              --dpi <n>               Override the per-page resolution the audit suggested.
+              --max-dpi <n>           Ceiling on that suggestion. Default 600.
+              --min-confidence <x>    Drop words recognised below this score. Default 0.30.
+              --redo                  Re-recognise pages an earlier run already did.
+              --limit <n>             Stop after n documents, worst first.
+              --worst-only            Skip documents the audit called merely figure-heavy.
+              --include-scans         Also redo scanned pages whose existing OCR missed lettering.
+                                      A different problem from the one the audit was built to find,
+                                      and on a corpus this size, hours of work. Off by default.
+
             index / search options:
               --index <path>          Index database. Default <root>/_Originals/manualforge-index.db.
               --library <folder>      Which library to search, when --index is not given.
               --reindex               Re-read every document, not just the ones that changed.
               --sidecars <folder>     Also write one plain-text file per document.
+              --no-repairs            Ignore text the repair recovered. For proving, by diffing,
+                                      exactly what the merge changed and what it left alone.
               --limit <n>             Results to show. Default 10.
               --show-duplicates       List identical copies separately instead of folding them.
 

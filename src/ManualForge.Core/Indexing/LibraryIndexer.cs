@@ -23,6 +23,22 @@ public sealed class IndexOptions
     /// different tool, a future me — work over the same text without this application.
     /// </summary>
     public string? SidecarDirectory { get; init; }
+
+    /// <summary>
+    /// The audit database holding text the repair recovered from under-extracted pages. Null takes
+    /// the one beside the index; a path that does not exist simply means nothing to merge.
+    ///
+    /// <para>
+    /// This is how recovered text reaches search. It is merged here, at index time, rather than
+    /// written back into the PDFs, because a page that already carries a text layer must never be
+    /// given a second one: an extractor sorts the two together by position and returns them
+    /// interleaved character by character, leaving the document less searchable than it was.
+    /// </para>
+    /// </summary>
+    public string? DoctorStorePath { get; init; }
+
+    /// <summary>Ignore recovered text even when there is some. For proving what the merge changed.</summary>
+    public bool WithoutRepairs { get; init; }
 }
 
 public sealed record IndexProgress(string Path, int DocumentsDone, int DocumentsTotal, int PagesIndexed);
@@ -36,6 +52,12 @@ public sealed record IndexReport(
     TimeSpan Elapsed)
 {
     public double PagesPerMinute => Elapsed.TotalMinutes <= 0 ? 0 : PagesIndexed / Elapsed.TotalMinutes;
+
+    /// <summary>Documents into which text recovered by the repair was merged.</summary>
+    public int DocumentsWithRecoveredText { get; init; }
+
+    /// <summary>Pages that now carry some recognised text alongside the PDF's own.</summary>
+    public long PagesWithRecoveredText { get; init; }
 }
 
 /// <summary>
@@ -67,11 +89,21 @@ public sealed class LibraryIndexer(ILogger<LibraryIndexer>? logger = null)
 
         using var index = new SearchIndex(indexPath);
 
+        var doctorPath = options.DoctorStorePath ?? Auditing.DoctorStore.DefaultPathFor(root);
+        using var doctor = !options.WithoutRepairs && File.Exists(doctorPath)
+            ? new Auditing.DoctorStore(doctorPath, readOnly: true)
+            : null;
+
+        if (doctor is not null)
+            _logger.LogInformation("Merging recovered text from {Path}", doctorPath);
+
         var files = Discover(root, options).ToArray();
         var indexed = 0;
         var unchanged = 0;
         var failed = 0;
         var withoutText = 0;
+        var repairedDocuments = 0;
+        long repairedPages = 0;
         long pages = 0;
 
         foreach (var path in files)
@@ -82,14 +114,21 @@ public sealed class LibraryIndexer(ILogger<LibraryIndexer>? logger = null)
             {
                 var hash = await HashAsync(path, cancellationToken).ConfigureAwait(false);
 
-                if (!options.Force && index.ContentHashOf(path) == hash)
+                var repairs = doctor?.Repairs(path, hash) ?? new Dictionary<int, Auditing.PageRepair>();
+                var supplement = SupplementHash(repairs);
+
+                // Both hashes, because a repair changes what should be indexed without changing the
+                // file. Skipping on the content hash alone would mean recovered text never arrived.
+                if (!options.Force
+                    && index.ContentHashOf(path) == hash
+                    && index.SupplementHashOf(path) == supplement)
                 {
                     unchanged++;
                     continue;
                 }
 
-                var text = ExtractPages(path, cancellationToken);
-                if (text.Count == 0 || text.All(t => t.IsEmpty))
+                var embedded = ExtractPages(path, cancellationToken);
+                if (embedded.Count == 0 || embedded.All(t => t.IsEmpty))
                 {
                     // An image-only document that was never OCR'd has nothing to index. Recording
                     // it anyway means a later run can tell "indexed, no text" from "never seen",
@@ -97,9 +136,17 @@ public sealed class LibraryIndexer(ILogger<LibraryIndexer>? logger = null)
                     withoutText++;
                 }
 
-                index.AddDocument(path, Title(root, path), hash, text);
+                var (text, provenance) = Merge(embedded, repairs);
+
+                index.AddDocument(path, Title(root, path), hash, text, provenance, supplement);
                 indexed++;
                 pages += text.Count(t => !t.IsEmpty);
+
+                if (provenance.Count > 0)
+                {
+                    repairedDocuments++;
+                    repairedPages += provenance.Count;
+                }
 
                 if (options.SidecarDirectory is not null)
                     await WriteSidecarAsync(root, path, text, options.SidecarDirectory, cancellationToken)
@@ -117,7 +164,11 @@ public sealed class LibraryIndexer(ILogger<LibraryIndexer>? logger = null)
         index.Optimise();
         stopwatch.Stop();
 
-        var report = new IndexReport(indexed, unchanged, failed, withoutText, pages, stopwatch.Elapsed);
+        var report = new IndexReport(indexed, unchanged, failed, withoutText, pages, stopwatch.Elapsed)
+        {
+            DocumentsWithRecoveredText = repairedDocuments,
+            PagesWithRecoveredText = repairedPages,
+        };
 
         _logger.LogInformation(
             "Indexed {Indexed} document(s) ({Unchanged} unchanged, {Failed} failed, {Empty} with no text), " +
@@ -126,6 +177,80 @@ public sealed class LibraryIndexer(ILogger<LibraryIndexer>? logger = null)
             report.DocumentsWithoutText, report.PagesIndexed, stopwatch.Elapsed.TotalSeconds);
 
         return report;
+    }
+
+    /// <summary>
+    /// Folds recovered text into the extracted text, page by page, and says where each page's text
+    /// came from.
+    ///
+    /// <para>
+    /// The embedded text comes first and is passed through untouched — byte for byte what it was
+    /// before any of this existed, which is the property the whole design turns on. Recovered text
+    /// is appended after it, separated by a blank line, and is only ever present for pages the
+    /// audit flagged and the repair reached.
+    /// </para>
+    /// </summary>
+    public static (IReadOnlyList<IndexedPageText> Text, IReadOnlyDictionary<int, PageProvenance> Provenance)
+        Merge(IReadOnlyList<IndexedPageText> embedded, IReadOnlyDictionary<int, Auditing.PageRepair> repairs)
+    {
+        if (repairs.Count == 0)
+            return (embedded, new Dictionary<int, PageProvenance>());
+
+        var merged = new List<IndexedPageText>(embedded.Count);
+        var provenance = new Dictionary<int, PageProvenance>();
+
+        for (var i = 0; i < embedded.Count; i++)
+        {
+            var pageNumber = i + 1;
+
+            if (!repairs.TryGetValue(pageNumber, out var repair) || repair.OcrText.Length == 0)
+            {
+                merged.Add(embedded[i]);
+                continue;
+            }
+
+            // The recovered text goes through the same de-hyphenation as everything else, so a
+            // label broken across two lines of a diagram is searchable as one word.
+            var recovered = Dehyphenator.Prepare(repair.OcrText);
+
+            var text = embedded[i].IsEmpty
+                ? recovered.Text
+                : embedded[i].Text + "\n\n" + recovered.Text;
+
+            var alternates = string.Join(
+                ' ',
+                new[] { embedded[i].Alternates, recovered.Alternates }.Where(a => a.Length > 0));
+
+            merged.Add(new IndexedPageText(text, alternates));
+
+            provenance[pageNumber] = new PageProvenance(
+                embedded[i].Text.Length, recovered.Text.Length, repair.MeanConfidence, recovered.Text);
+        }
+
+        return (merged, provenance);
+    }
+
+    /// <summary>
+    /// Identifies the recovered text folded into one document, so that a repair which leaves the
+    /// file untouched still forces a re-index.
+    /// </summary>
+    public static string SupplementHash(IReadOnlyDictionary<int, Auditing.PageRepair> repairs)
+    {
+        if (repairs.Count == 0)
+            return string.Empty;
+
+        var builder = new System.Text.StringBuilder();
+        foreach (var pageNumber in repairs.Keys.Order())
+        {
+            var repair = repairs[pageNumber];
+            builder.Append(pageNumber).Append(':')
+                   .Append(repair.OcrText.Length).Append(':')
+                   .Append(repair.RepairedUtc.ToUnixTimeSeconds()).Append(';');
+        }
+
+        return Convert.ToHexString(
+            System.Security.Cryptography.SHA256.HashData(
+                System.Text.Encoding.UTF8.GetBytes(builder.ToString())))[..16];
     }
 
     /// <summary>Extracts and prepares every page of one document.</summary>
