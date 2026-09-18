@@ -79,7 +79,23 @@
   <PropertyGroup>
     <PublishReadyToRun Condition="'$(Configuration)' == 'Debug'">False</PublishReadyToRun>
     <PublishReadyToRun Condition="'$(Configuration)' != 'Debug'">True</PublishReadyToRun>
-    <PublishTrimmed Condition="'$(Configuration)' == 'Debug'">False</PublishTrimmed>
-    <PublishTrimmed Condition="'$(Configuration)' != 'Debug'">True</PublishTrimmed>
+
+    <!--
+      Self-contained, overriding Directory.Build.props. This is the window: it is started by
+      double-clicking rather than from a developer's shell, so it cannot assume a .NET runtime is
+      installed, and the README promises it needs no install. The command line and the MCP server
+      are framework-dependent as before, because whoever runs those has a shell.
+    -->
+    <SelfContained>true</SelfContained>
+
+    <!--
+      Not trimmed, although the template turns it on for Release and a self-contained publish now
+      permits it. WinUI resolves XAML types by name at run time, so the trimmer cannot see who uses
+      what, and the failure mode is not a build error - it is the window dying at startup with
+      0xC000027B and nothing else. This project has already lost an afternoon to exactly that
+      exception from a missing converter. The download is larger; the alternative is a class of bug
+      that only ever appears in the published build.
+    -->
+    <PublishTrimmed>false</PublishTrimmed>
   </PropertyGroup>
 </Project>

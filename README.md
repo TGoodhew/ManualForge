@@ -63,8 +63,26 @@ dotnet build
 dotnet test
 ```
 
-The solution is a classic `.sln` with three projects and central package management
+The solution is `ManualForge.slnx` with five projects and central package management
 (`Directory.Packages.props`), so VS 2026 opens it directly.
+
+### Installing it
+
+There is no installer yet — [#2](https://github.com/TGoodhew/ManualForge/issues/2) tracks the script
+that will set a machine up from nothing. Until then, publishing into place is two commands:
+
+```powershell
+$target = "$env:LOCALAPPDATA\Programs\ManualForge"
+dotnet publish src/ManualForge.Cli/ManualForge.Cli.csproj -c Release -o $target
+dotnet publish src/ManualForge.Mcp/ManualForge.Mcp.csproj -c Release -o $target
+dotnet publish src/ManualForge.App/ManualForge.App.csproj -c Release -o "$target\app"
+```
+
+The command line and the MCP server are framework-dependent and share one folder, which is where
+the MCP registration below expects `ManualForge.Mcp.exe`. The application publishes to its own
+folder because it is self-contained — about 560 MB, since it carries the .NET runtime, the Windows
+App SDK, ONNX Runtime and PDFium — and mixing that with the framework-dependent output would put
+two answers in one directory.
 
 ## First run
 
@@ -503,6 +521,14 @@ PaddleOcrNet pulls in both the CPU and the GPU builds of ONNX Runtime, and each 
 `onnxruntime.dll` — the same collision that kept DirectML out. So the app is unpackaged and
 self-contained on the Windows App SDK, which needs no install and matches how the command line is
 already run.
+
+It is self-contained on the .NET runtime too, because it is started by double-clicking and so
+cannot assume one is installed — the command line and the MCP server stay framework-dependent,
+since whoever runs those has a shell. It is deliberately **not** trimmed, although the project
+template turns trimming on for Release and a self-contained publish permits it: WinUI resolves XAML
+types by name at run time, so the trimmer cannot see who uses what, and the failure is not a build
+error but the window dying at startup with `0xC000027B`. That is the same exception the missing
+converter produced, and it is not worth risking twice to save a download.
 
 ### Two defects the view-model tests found
 
