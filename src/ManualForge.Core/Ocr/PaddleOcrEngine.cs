@@ -39,6 +39,12 @@ public sealed class PaddleOcrEngine : IOcrEngine
 
         Directory.CreateDirectory(options.ModelCachePath);
 
+        // Before the service is constructed, because constructing it is what loads the CUDA
+        // provider, and a DLL the loader has already failed to find is not looked for again.
+        var cudaLibraries = options.Accelerator == OcrAccelerator.Cpu
+            ? null
+            : CudaLibraries.Ensure(_logger).Describe();
+
         var serviceOptions = new PaddleOcrServiceOptions
         {
             ModelCachePath = options.ModelCachePath,
@@ -72,7 +78,8 @@ public sealed class PaddleOcrEngine : IOcrEngine
             _service.ActiveExecutionProvider.ToString(),
             _service.UseGpu,
             _service.GpuAccelerationHint,
-            options.ModelCachePath);
+            options.ModelCachePath,
+            cudaLibraries);
 
         _logger.LogInformation(
             "OCR engine ready: provider {Provider}, GPU {UsingGpu}, models in {ModelCache}",

@@ -73,8 +73,14 @@ public sealed class OcrEngineOptions
 }
 
 /// <summary>What the engine actually resolved to at runtime, for logging and the UI.</summary>
+/// <param name="CudaLibraries">
+/// What the search for the CUDA and cuDNN DLLs found, or null on a CPU run where it was not asked.
+/// Reported next to the provider because the two answer different questions: the provider says
+/// what was used, and this says whether there was anything to use.
+/// </param>
 public sealed record OcrRuntimeSummary(
     string ExecutionProvider,
     bool UsingGpu,
     string? AccelerationHint,
-    string ModelCachePath);
+    string ModelCachePath,
+    string? CudaLibraries = null);

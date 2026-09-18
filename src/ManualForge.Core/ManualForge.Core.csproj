@@ -17,4 +17,10 @@
     <PackageReference Include="Serilog.Sinks.File" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- So a test can discard CudaLibraries' once-per-process cache without that reset becoming
+         part of the API every caller sees. -->
+    <InternalsVisibleTo Include="ManualForge.Core.Tests" />
+  </ItemGroup>
+
 </Project>

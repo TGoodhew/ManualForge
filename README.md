@@ -108,15 +108,26 @@ A 3.7x speedup, before phase 3 overlaps rasterisation and PDF assembly with infe
 
 ### What is installed
 
-- **CUDA Toolkit 13.4** at `C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.4`.
+- **CUDA Toolkit 13.4**, whose DLLs are at
+  `C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.4\bin\x64`.
   ONNX Runtime 1.30 hard-imports `cublas64_13.dll` and `cublasLt64_13.dll`, so CUDA **13** is
   required — a CUDA 12 install will not load.
 - **cuDNN 9.26.0.51 for CUDA 13** at
   `C:\Tools\cudnn-9.26.0.51\cudnn-windows-x86_64-9.26.0.51_cuda13-archive\bin\x64`.
 
-Note the trap: the cuDNN zip extracts into a nested folder, so the directory holding the DLLs sits
-three levels below where the zip lands. Putting the extract root on `PATH` instead of the inner
-`bin\x64` silently falls back to CPU.
+Note the trap, which both of them share: **the directory holding the DLLs is not the one you land
+in.** CUDA 13 moved its Windows binaries down into `bin\x64` — 12.x had them directly in `bin`, and
+there is now an `arm64` sibling — while the cuDNN zip extracts into a nested folder three levels
+below where it lands. Putting either parent on `PATH` instead of the inner `bin\x64` silently falls
+back to CPU: the directory exists, it simply holds no DLLs, so nothing raises an error and the run
+is merely an order of magnitude slower.
+
+Locate the directory rather than assuming it, on either:
+
+```powershell
+Get-ChildItem "<install root>" -Recurse -Filter cublasLt64_13.dll | Select-Object -First 1 Directory
+Get-ChildItem "C:\Tools" -Recurse -Filter cudnn64_9.dll | Select-Object -First 1 Directory
+```
 
 To check the whole chain at once:
 
@@ -126,6 +137,37 @@ manualforge gpu     ->   Active provider : Cuda
 ```
 
 If it reports `Cpu`, the hint line names the exact DLL that failed to load.
+
+### It does not depend on `PATH` being right
+
+The two directories above have to be on `PATH` before ONNX Runtime asks for them, and relying on
+that is fragile for a tool launched by double-clicking, which inherits whatever environment
+Explorer had. So the engine looks for them itself at startup and prepends what it finds to the
+process `PATH`, reporting which of the two it had to go and find:
+
+```
+CUDA libraries : already on PATH
+CUDA libraries : located CUDA at ...\CUDA\v13.4\bin\x64, cuDNN at ...\bin\x64
+CUDA libraries : located CUDA at ...\CUDA\v13.4\bin\x64; missing cudnn64_9.dll, cudnn_graph64_9.dll
+```
+
+Those three lines are different situations and it is worth being able to tell them apart: the
+first says the machine is set up correctly, the second that it was not and we recovered, the third
+which download is missing. A run that reports the third and falls back to CPU now says so before
+it starts rather than simply taking ten times as long.
+
+**It searches for the files rather than assuming where they sit**, which is the part that earns its
+keep. The directory holding the DLLs is not the one you land in, on either dependency and for
+different reasons — CUDA 13 moved its binaries into `bin\x64`, and the cuDNN zip nests three
+folders deep — and both mistakes look identical from outside: a directory that exists and holds no
+DLLs. A hard-coded path is a liability even when it is written down carefully, and it was not. The
+path this README carried was a CUDA 12 layout, and it was wrong the first time it was used against
+a CUDA 13 install.
+
+Order of preference: `CUDA_PATH` and the per-version variables the installer sets, then the
+standard toolkit directory, newest version first; `CUDNN_PATH`, then `Program Files\NVIDIA\CUDNN`,
+then `C:\Tools`. The walk is bounded to four levels so a root given by mistake costs a moment
+rather than a scan of the volume.
 
 ### VRAM is the binding constraint, not compute
 
@@ -762,6 +804,7 @@ src/ManualForge.Core/
   Pipeline/LibraryProcessor.cs    classify, flatten, OCR, verify, replace
   Pipeline/RecognitionPipeline.cs Channels: rasterise and recognise ahead of assembly
   Ocr/GpuMemory.cs                free VRAM, and how many pages it will hold
+  Ocr/CudaLibraries.cs            finds the CUDA and cuDNN DLLs, so PATH need not be right
   Geometry/PageGeometry.cs        image pixels ↔ PDF user space; rotation, crop origin
   Text/GlyphlessTrueTypeFont.cs   generates the blank font program
   Text/InvisibleFont.cs           Type0/CIDFontType2 objects, subsetting, ToUnicode
@@ -778,7 +821,7 @@ src/ManualForge.Cli/              the command line
 src/ManualForge.Shell/            view models and the services behind them - no XAML, so testable
 src/ManualForge.App/              WinUI 3: XAML, a file picker, a GPU timer, nothing else
 src/ManualForge.Mcp/              MCP server: library_search, read_manual_page, library_status
-tests/ManualForge.Core.Tests/     250 tests, no GPU or network needed
+tests/ManualForge.Core.Tests/     294 tests, no GPU or network needed
 ```
 
 ## Tests
@@ -787,7 +830,7 @@ tests/ManualForge.Core.Tests/     250 tests, no GPU or network needed
 dotnet test
 ```
 
-250 tests, a few seconds, no models and no network required:
+294 tests, a few seconds, no models and no network required:
 
 - **`PageGeometryTests`** — the corner mapping for all four rotations, non-zero crop origins,
   text-matrix direction, points-per-pixel, rotation normalisation.
@@ -810,6 +853,10 @@ dotnet test
   cancelling does not leave a consumer waiting on a channel nobody will complete. Every wait is
   bounded, because a pipeline defect that hangs the suite is worse than one that fails it.
 - **`GpuMemoryTests`** - the arithmetic that decides concurrency, which errs downwards on purpose.
+- **`CudaLibraryTests`** - the wrong-looking installs rather than the correct one, because the
+  correct one is the easy case: a CUDA 12 layout, an unextracted cuDNN, two toolkit versions side
+  by side, and half an installation. Fake directory trees throughout, so nothing on the machine
+  running them is read - which matters, since no test machine has CUDA on it.
 - **`LibraryViewModelTests`** - the shell driven with no window: survey, policy edits reaching the
   run, the error list, cancel and resume, and the exported report.
 - **`LibraryProcessorTests`** - the replace-in-place sequence end to end, against a fake OCR
@@ -886,9 +933,8 @@ run rather than a five-manual sample.
    `Serilog.Extensions.Logging` and `Serilog.Sinks.File`; the JSON formatter is in Serilog itself,
    so writing JSON lines needed no formatting package on top.
 4. ~~**xunit**~~ — resolved: kept.
-5. **Locating CUDA without `PATH`** — the app relies on the user's `PATH` to find the CUDA and
-   cuDNN DLLs, which is fragile for something launched by double-clicking. Phase 3 should locate
-   them at startup and add them to the process DLL search path, reporting clearly when it cannot.
+5. ~~**Locating CUDA without `PATH`**~~ — resolved: `Ocr/CudaLibraries.cs` finds them at startup.
+   See "It does not depend on `PATH` being right" above.
 6. **Baseline offset** — `TextLayerOptions.BaselineOffsetFraction` currently defaults to 0, putting
    the baseline on the bottom edge of the detected ink box. Worth tuning against ground truth in
    phase 7 rather than guessing now.

@@ -95,6 +95,11 @@ namespace ManualForge.Cli
 
             await using var engine = new PaddleOcrEngine(options, loggerFactory.CreateLogger<PaddleOcrEngine>());
 
+            // Before the provider, because it is the upstream question: the provider can only be
+            // Cuda if these loaded, so a surprising provider is explained by the line above it.
+            if (!string.IsNullOrWhiteSpace(engine.Runtime.CudaLibraries))
+                Console.WriteLine($"CUDA libraries        : {engine.Runtime.CudaLibraries}");
+
             Console.WriteLine($"Active provider       : {engine.Runtime.ExecutionProvider}");
             Console.WriteLine($"Using GPU             : {engine.Runtime.UsingGpu}");
             if (!string.IsNullOrWhiteSpace(engine.Runtime.AccelerationHint))
