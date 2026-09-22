@@ -50,8 +50,25 @@ measured on as much as of the code.
 
 ### Measuring it yourself
 
-`search` prints ten results by default, so a correct answer at rank 16 — which this table documents
-— scores as a miss unless `--limit` is raised. Use `--limit 25` to reproduce the figure above.
+```
+./tools/measure-ground-truth.ps1 -Label "<what changed>" -Out docs/measurements/<name>.md
+```
+
+That runs all 33 strings, scores where the correct page ranked, and writes a report. The strings
+live in `tools/ground-truth-54845A.tsv`; the reports are in [`docs/measurements/`](measurements/),
+one per run, dated, and not hand-edited. Run against the index as it stands on 2026-09-22 it
+reproduces the table below exactly — 27 of 33 at 25, 21 in the first ten — which is the only reason
+to trust it with an "after".
+
+Two things to know before reading any number it prints:
+
+* `search` prints ten results by default, so a correct answer at rank 16 — which this table
+  documents — scores as a miss unless `--limit` is raised. The harness asks at 200 and scores the
+  first ten, the first 25 and found-at-all separately, because those three answer different
+  questions: what a user sees, what the docs quote, and whether retrieval worked at all.
+* An index rebuild overwrites the control. Copy `_Originals/manualforge-index.db` aside before a
+  repair and pass `-Index <that copy>` afterwards, and the "before" is still measurable when the
+  argument starts.
 
 `--no-repairs` cannot be used for a before/after here: it applies when the index is **built**, not
 when it is queried, so passing it to `search` changes nothing. The "before" figure above comes from

@@ -7,12 +7,23 @@ bitonal, where roughly a quarter of files have no text layer and many of the res
 2000s-era OCR. The figures throughout are measured on a corpus of that shape: about 576 documents
 and 100,000 pages.
 
-**Status: phase 5 - the full-text index and search.** It OCRs a PDF end to end with an invisible
-text layer whose alignment is measured rather than assumed, classifies a whole library to decide
-what is worth re-OCRing, rebuilds files that refuse modification, processes a library resumably
-without ever overwriting a source at 104 pages/min, has a desktop application over all of it, and
-indexes every page so a question returns a manual, a page and a snippet - from the command line, the
-application, or Claude through MCP. A VLM sidecar and benchmark mode are phases 6-7.
+**Status: phase 7 - benchmark mode, whose code is written and whose yardstick is not.** It OCRs a
+PDF end to end with an invisible text layer whose alignment is measured rather than assumed,
+classifies a whole library to decide what is worth re-OCRing, rebuilds files that refuse
+modification, processes a library resumably without ever overwriting a source at 104 pages/min, has
+a desktop application over all of it, and indexes every page so a question returns a manual, a page
+and a snippet - from the command line, the application, or Claude through MCP. Since phase 5 it also
+finds pages whose text layer is present but incomplete and re-OCRs only those, which is what
+`doctor` and `repair` do.
+
+What each of the last two phases is actually waiting on:
+
+* **Phase 6, a VLM sidecar** - not started.
+* **Phase 7, benchmark mode** - `truth`, `benchmark` and the error-rate scorer are written and
+  committed. What is missing is 9-12 hand-corrected pages to score against, which is manual work no
+  machine can do; until they exist every accuracy figure here is either a confidence score, which is
+  the recogniser's opinion of itself, or a ranking measurement against hand-read strings, which is
+  not the same thing as character accuracy. Issue #6.
 
 ## What it does
 
@@ -422,7 +433,29 @@ matches; bm25 prefers a prose page that uses the query's words often over the sy
 defines the command, and a bigger library holds more such prose. Single-token queries like
 `ATTenuation` suffer worst, for the obvious reason.
 
-So the repair solved the problem it was built for, and exposed the next one.
+So the repair solved the problem it was built for, and exposed the next one. What to do about the
+ranking is issue #3, which records the measured ranks and the one re-ranking idea already tried and
+rejected.
+
+#### Reproducing it, and measuring the next change against it
+
+```
+./tools/measure-ground-truth.ps1 -Label "before the full repair" \
+    -Out docs/measurements/ground-truth-before-full-repair.md
+```
+
+Every string is asked at `--limit 200`, far past the ten results `search` prints, because a correct
+answer at rank 39 is a ranking result and not a miss — and scoring it as a miss hides the
+difference between "the text is not in the index" and "the text is in the index and bm25 buried
+it". The report scores all three: found at all, found in the first 25, found in the first ten.
+
+Two habits that make a before-and-after mean anything here:
+
+* **Measure before the change, not from memory.** An index rebuild writes over the thing that would
+  have been the control. `-Index <path>` points the harness at a copied database, so a snapshot
+  taken beforehand stays measurable afterwards.
+* **Measure on the full library.** The same code scores 33 of 33 on the development library and 27
+  of 33 here. A figure from the smaller corpus will flatter a change by about six queries.
 
 ## Recognising each document once
 
@@ -1017,6 +1050,9 @@ src/ManualForge.Shell/            view models and the services behind them - no 
 src/ManualForge.App/              WinUI 3: XAML, a file picker, a GPU timer, nothing else
 src/ManualForge.Mcp/              MCP server: library_search, read_manual_page, library_status
 tests/ManualForge.Core.Tests/     357 tests, no GPU or network needed
+tools/measure-ground-truth.ps1    runs the 33 hand-read strings, scores where each one ranked
+tools/ground-truth-54845A.tsv     those strings, and the page each should return
+docs/measurements/                what that produced: one dated file per run, not hand-edited
 ```
 
 ## Tests
@@ -1125,6 +1161,19 @@ documents in flight rather than the library.
 
 ## Known gaps
 
+### Merging a repair costs more than making one
+
+The repair is the cheap half. Recovering text runs at 32-46 pages/min on the GPU; merging it into
+the index runs at **34 pages/min over every page of every document touched**, because a document
+whose recovered text changed is re-extracted in full. Forty recovered pages of an 1,140-page
+calibration guide cost 1,140 pages of re-extraction.
+
+On this library the 511 flagged documents hold 95,632 of 104,468 pages, so a repair pass over the
+whole backlog projects at **roughly 47 hours to re-index** against about five and a half hours to
+repair. Extraction is serial and the machine has 24 threads, so this is a fixable number rather
+than a fact of nature — issue #8. Until it is fixed, plan a corpus-wide repair around the index
+build, not around the OCR.
+
 ### Throughput estimates still quote the serial rate
 
 `status` and `survey` estimate remaining time at 55.9 pages/min, which was the measured serial rate
@@ -1145,4 +1194,7 @@ run rather than a five-manual sample.
    See "It does not depend on `PATH` being right" above.
 6. **Baseline offset** — `TextLayerOptions.BaselineOffsetFraction` currently defaults to 0, putting
    the baseline on the bottom edge of the detected ink box. Worth tuning against ground truth in
-   phase 7 rather than guessing now.
+   phase 7 rather than guessing now, which makes it one of the three things waiting on issue #6.
+7. **Ranking** — the repair put the right page in the index; bm25 does not always put it near the
+   top. Eleven of the 33 ground-truth strings retrieve the correct page and bury it, five of them
+   past rank 39. Issue #3 has the measurements and the one idea already tried and rejected.

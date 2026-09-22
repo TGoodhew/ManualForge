@@ -122,8 +122,9 @@ The fix is to add a third limb: render a page that carries an image covering a m
 it, whatever its character count. That is a small change and it would probably move recall
 substantially.
 
-It is **not done**, deliberately. It changes what the audit looks at, so it invalidates the corpus
-run above and the 2.5 hours that produced it, and it needs its own precision measurement afterwards
+It is **not done**, deliberately, and is tracked as issue #5. It changes what the audit looks at, so
+it invalidates the corpus run above and the 2.5 hours that produced it, and it needs its own
+precision measurement afterwards
 — adding a limb that renders every illustrated page could easily flag thousands more. Shipping the
 measured detector with a known, named, diagnosed gap is more useful than shipping an unmeasured one
 that might be better.

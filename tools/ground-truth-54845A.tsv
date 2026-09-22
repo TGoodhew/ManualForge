@@ -1,0 +1,38 @@
+# The 33 ground-truth strings from docs/GROUND-TRUTH-54845A.md, each read off a rendered page
+# by eye. Columns: expected physical page, the document the page belongs to, the query.
+# Lines beginning with # are ignored. The separator is a tab.
+#
+# page	document	query
+40	54845A Programmer	:CHANnel<N>:INPut
+40	54845A Programmer	:CHANnel<N>:INPut AC DC LFR1 LFR2
+40	54845A Programmer	DC50|DCFifty
+40	54845A Programmer	BWLimit is not available on 54846A, 54845A, and 54835A
+40	54845A Programmer	:CHANnel<N>:DISPlay
+40	54845A Programmer	:CHANnel<N>:OFFSet
+40	54845A Programmer	:CHANnel<N>:PROBe
+41	54845A Programmer	EADapter
+41	54845A Programmer	ECoupling
+41	54845A Programmer	EGAin
+41	54845A Programmer	EOFFset
+41	54845A Programmer	ATTenuation
+41	54845A Programmer	SKEW
+42	54845A Programmer	:CHANnel<N>:RANGe
+42	54845A Programmer	:CHANnel<N>:SCALe
+42	54845A Programmer	:CHANnel<N>:UNITs
+42	54845A Programmer	PROTection
+83	54845A Programmer	:TIMebase:SCALe
+83	54845A Programmer	:TIMebase:RANGe
+83	54845A Programmer	:TIMebase:REFerence {LEFT|CENTer|RIGHt}
+85	54845A Programmer	:TRIGger:MODE {EDGE|GLITch|ADVanced}
+86	54845A Programmer	:TRIGger:EDGE:SOURce {CHANnel|AUX|LINE|EXTernal}
+86	54845A Programmer	The AUX command is only available on the 54815/25/35/45/46
+86	54845A Programmer	The EXTernal command is only available on the 54810/20
+105	54845A Programmer	:WAVeform:FORMat {ASCii|BYTE|WORD|LONG}
+105	54845A Programmer	:WAVeform:BYTeorder {MSBFirst|LSBFirst}
+106	54845A Programmer	:WAVeform:SOURce
+106	54845A Programmer	XINCrement?
+106	54845A Programmer	XORigin?
+106	54845A Programmer	XREFerence?
+106	54845A Programmer	YINCrement?
+106	54845A Programmer	YORigin?
+106	54845A Programmer	YREFerence?

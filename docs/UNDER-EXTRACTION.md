@@ -442,7 +442,7 @@ The recall gap has a named, diagnosed cause and an undone fix: the render gate f
 *few characters* or *many paths*, and a page with plenty of prose plus a raster figure whose labels
 are unextracted satisfies neither. Adding a third limb for image coverage would probably move recall
 a long way; it is not done because it invalidates the corpus run and needs its own precision
-measurement afterwards.
+measurement afterwards. Tracked as issue #5, which records what doing it properly would cost.
 
 The full table — every page, what it turned out to be, the arithmetic, and two blind spots found
 while looking — is in `docs/UNDER-EXTRACTION-SAMPLE.md`. The sample is seeded, so anybody can
