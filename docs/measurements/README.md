@@ -8,12 +8,25 @@ Nothing in here is hand-edited. If a number looks wrong, re-run the harness and 
 | File | What it measures |
 |---|---|
 | `ground-truth-before-full-repair.md` | The index as it stood on 2026-09-22, after the first 20-document repair and before the corpus-wide one. 27 of 33 at rank 25, 21 in the first ten. |
+| `ground-truth-after-full-repair.md` | The same 33 strings after the whole library was repaired and re-indexed. Also 27 of 33, 21 in the first ten — the 54845A was already repaired, so these queries are blind to that pass. |
+| `recovered-text-reaches-search.md` | The pass those 33 strings cannot see: 25 repaired pages across 25 other documents, asked for a phrase that exists only in recovered text. 21 newly findable, 4 already findable, 0 missing. |
 
 ## Adding one
 
 ```
 ./tools/measure-ground-truth.ps1 -Label "after the full repair" \
     -Out docs/measurements/ground-truth-after-full-repair.md
+```
+
+The second harness needs the library dumped to text twice, which `index --sidecars` does and which
+takes a few minutes each way:
+
+```
+manualforge index <library> --index <tmp>\with.db    --sidecars <tmp>\after
+manualforge index <library> --index <tmp>\without.db --sidecars <tmp>\before --no-repairs
+
+./tools/measure-recovered-text.ps1 -After <tmp>\after -Before <tmp>\before \
+    -BeforeIndex <snapshot of the old index> -Out docs/measurements/<name>.md
 ```
 
 Each report records the index file it read, when that index was written, its size and the repo

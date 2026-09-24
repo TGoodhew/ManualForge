@@ -27,12 +27,15 @@ internal static class IndexCommand
             SidecarDirectory = arguments.Get("sidecars"),
             DoctorStorePath = arguments.Get("doctor-db"),
             WithoutRepairs = arguments.Has("no-repairs"),
+            Workers = arguments.GetInt("workers") ?? new IndexOptions().Workers,
         };
 
         var indexPath = options.IndexPath ?? LibraryIndexer.DefaultIndexPath(root);
 
         Console.WriteLine($"Library : {root}");
         Console.WriteLine($"Index   : {indexPath}");
+        Console.WriteLine(
+            $"Workers : {options.Workers} extracting at once, one writing - --workers changes it");
         if (options.SidecarDirectory is not null)
             Console.WriteLine($"Sidecars: {options.SidecarDirectory}");
         Console.WriteLine();

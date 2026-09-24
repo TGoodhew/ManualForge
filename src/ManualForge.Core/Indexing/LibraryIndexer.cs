@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using UglyToad.PdfPig;
@@ -39,6 +40,22 @@ public sealed class IndexOptions
 
     /// <summary>Ignore recovered text even when there is some. For proving what the merge changed.</summary>
     public bool WithoutRepairs { get; init; }
+
+    /// <summary>
+    /// How many documents to extract text from at once.
+    ///
+    /// <para>
+    /// Extraction is the whole cost of indexing and it is per-document work that shares nothing, so
+    /// it parallelises almost perfectly. Writing does not: one SQLite connection, one thread, in the
+    /// order results arrive. That asymmetry is the design — workers extract, a single reader writes.
+    /// </para>
+    /// <para>
+    /// The default is deliberately not the core count. These are large scanned documents and each
+    /// worker holds one in memory while it reads it, so the useful degree of parallelism is bounded
+    /// by memory and by the disk the library sits on rather than by cores.
+    /// </para>
+    /// </summary>
+    public int Workers { get; init; } = Math.Clamp(Environment.ProcessorCount / 3, 1, 8);
 }
 
 public sealed record IndexProgress(string Path, int DocumentsDone, int DocumentsTotal, int PagesIndexed);
@@ -106,6 +123,11 @@ public sealed class LibraryIndexer(ILogger<LibraryIndexer>? logger = null)
         long repairedPages = 0;
         long pages = 0;
 
+        // Deciding what to skip touches both databases, so it happens here, on one thread, before
+        // any worker starts. It is cheap next to extraction — a hash of the file and two lookups —
+        // and doing it first means the parallel half never touches SQLite at all.
+        var pending = new List<PendingDocument>();
+
         foreach (var path in files)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -124,11 +146,43 @@ public sealed class LibraryIndexer(ILogger<LibraryIndexer>? logger = null)
                     && index.SupplementHashOf(path) == supplement)
                 {
                     unchanged++;
+                    progress?.Report(new IndexProgress(
+                        path, indexed + unchanged + failed, files.Length, (int)pages));
                     continue;
                 }
 
-                var embedded = ExtractPages(path, cancellationToken);
-                if (embedded.Count == 0 || embedded.All(t => t.IsEmpty))
+                pending.Add(new PendingDocument(path, hash, supplement, repairs));
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                failed++;
+                _logger.LogWarning(ex, "Could not read {Path}", path);
+            }
+        }
+
+        var workers = Math.Max(1, options.Workers);
+        _logger.LogInformation(
+            "{Pending} document(s) to extract, {Unchanged} unchanged, {Workers} worker(s)",
+            pending.Count, unchanged, workers);
+
+        // Bounded, so that fast workers cannot run ahead of the writer and hold a queue of whole
+        // extracted documents in memory. One slot each plus one in hand is enough to keep the
+        // writer fed without letting the backlog grow.
+        var channel = Channel.CreateBounded<ExtractedDocument>(
+            new BoundedChannelOptions(workers + 1) { SingleReader = true });
+
+        var writing = Task.Run(async () =>
+        {
+            await foreach (var done in channel.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+            {
+                index.AddDocument(
+                    done.Path, Title(root, done.Path), done.ContentHash,
+                    done.Text, done.Provenance, done.SupplementHash);
+
+                indexed++;
+                pages += done.PagesWithText;
+
+                if (done.HasNoText)
                 {
                     // An image-only document that was never OCR'd has nothing to index. Recording
                     // it anyway means a later run can tell "indexed, no text" from "never seen",
@@ -136,30 +190,51 @@ public sealed class LibraryIndexer(ILogger<LibraryIndexer>? logger = null)
                     withoutText++;
                 }
 
-                var (text, provenance) = Merge(embedded, repairs);
-
-                index.AddDocument(path, Title(root, path), hash, text, provenance, supplement);
-                indexed++;
-                pages += text.Count(t => !t.IsEmpty);
-
-                if (provenance.Count > 0)
+                if (done.Provenance.Count > 0)
                 {
                     repairedDocuments++;
-                    repairedPages += provenance.Count;
+                    repairedPages += done.Provenance.Count;
                 }
 
                 if (options.SidecarDirectory is not null)
-                    await WriteSidecarAsync(root, path, text, options.SidecarDirectory, cancellationToken)
+                    await WriteSidecarAsync(
+                        root, done.Path, done.Text, options.SidecarDirectory, cancellationToken)
                         .ConfigureAwait(false);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                failed++;
-                _logger.LogWarning(ex, "Could not index {Path}", path);
-            }
 
-            progress?.Report(new IndexProgress(path, indexed + unchanged + failed, files.Length, (int)pages));
-        }
+                progress?.Report(new IndexProgress(
+                    done.Path, indexed + unchanged + failed, files.Length, (int)pages));
+            }
+        }, cancellationToken);
+
+        await Parallel.ForEachAsync(
+            pending,
+            new ParallelOptions { MaxDegreeOfParallelism = workers, CancellationToken = cancellationToken },
+            async (document, token) =>
+            {
+                try
+                {
+                    var embedded = ExtractPages(document.Path, token);
+                    var (text, provenance) = Merge(embedded, document.Repairs);
+
+                    await channel.Writer.WriteAsync(
+                        new ExtractedDocument(
+                            document.Path, document.ContentHash, document.SupplementHash,
+                            text, provenance,
+                            text.Count(t => !t.IsEmpty),
+                            embedded.Count == 0 || embedded.All(t => t.IsEmpty)),
+                        token).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    // One document that will not open must not cost the other five hundred, and a
+                    // worker that throws must not take the writer down with it.
+                    Interlocked.Increment(ref failed);
+                    _logger.LogWarning(ex, "Could not index {Path}", document.Path);
+                }
+            }).ConfigureAwait(false);
+
+        channel.Writer.Complete();
+        await writing.ConfigureAwait(false);
 
         index.Optimise();
         stopwatch.Stop();
@@ -178,6 +253,26 @@ public sealed class LibraryIndexer(ILogger<LibraryIndexer>? logger = null)
 
         return report;
     }
+
+    /// <summary>A document that needs extracting, and everything about it the databases already know.</summary>
+    private sealed record PendingDocument(
+        string Path,
+        string ContentHash,
+        string SupplementHash,
+        IReadOnlyDictionary<int, Auditing.PageRepair> Repairs);
+
+    /// <summary>
+    /// One extracted document on its way from a worker to the writer. Everything the write needs
+    /// travels with it, so the writer never has to go back to a file or to a database.
+    /// </summary>
+    private sealed record ExtractedDocument(
+        string Path,
+        string ContentHash,
+        string SupplementHash,
+        IReadOnlyList<IndexedPageText> Text,
+        IReadOnlyDictionary<int, PageProvenance> Provenance,
+        int PagesWithText,
+        bool HasNoText);
 
     /// <summary>
     /// Folds recovered text into the extracted text, page by page, and says where each page's text

@@ -18,6 +18,13 @@ chapter 2, confirmed against the printed folio on each page.
 | Before the repair | **2 of 33** — and only because command syntax is now read as notation, which lets `:CHANnel<N>:RANGe` match the typeset heading `CHANnel Commands`. The diagrams themselves matched nothing. |
 | After the repair, development library | **33 of 33** |
 | After the repair, **full 584-document library** | **27 of 33**, 21 of them in the first ten |
+| After the whole library was repaired, 24 Sep 2026 | **27 of 33**, 21 in the first ten — unchanged |
+
+The last row is not a disappointment, it is a category error corrected. This document measures one
+manual, and that manual was repaired on 18 September; the pass that followed repaired the other 510
+and could not have moved these numbers. Six queries shifted by a rank or two, all of them downwards
+by one or two places, which is 868,303 newly indexed words competing. What that pass did buy is
+measured in `docs/measurements/recovered-text-reaches-search.md` instead.
 
 ### The two figures differ because the corpus does, and the smaller one flatters
 

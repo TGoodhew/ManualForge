@@ -211,6 +211,22 @@ correctly-spaced typesetting with a machine's reading of a picture of it. `--inc
 redoes the raster pages, which on this corpus is hours of GPU time for a different problem — worth
 doing, and worth choosing to do.
 
+### What it cost, on the whole corpus
+
+Both passes have now run. `--include-scans` over the whole outstanding backlog on 24 September 2026:
+**9,510 pages across 500 documents in 172 minutes at 55 pages/min**, recovering 868,303 words at
+80.4% mean confidence, with nothing failed and nothing stale. The audit reads 11,008 flagged and
+11,008 repaired.
+
+Merging it into the index took **4.7 minutes**. That is worth saying plainly because the first
+repair's re-index took 7.5 hours and the two numbers describe the same operation: the cost is the
+handful of genuinely text-heavy documents, not the page count, because extracting an image-only
+scan costs almost nothing. Indexing now extracts several documents at once, which measured 2.1× on
+this library.
+
+Of the 9,510 pages, 167 recovered no text at all — 1.8%, against 3.7% in the first pass, where 40 of
+the 56 were consecutive pages of one calibration guide (issue #4).
+
 ### Merge, never replace
 
 Recognised words whose box lands under the embedded text layer are dropped — that text is already
@@ -414,7 +430,14 @@ lettering inside its screenshots genuinely does not, and OCR recovers it.
 ### The ground truth
 
 Every string in the specification's ground-truth table, searched against the repaired index. See
-`docs/GROUND-TRUTH-54845A.md` for the full table and the exact queries.
+`docs/GROUND-TRUTH-54845A.md` for the full table and the exact queries, and `tools/` for the script
+that runs them, so that a claim about search quality is a measurement somebody else can repeat.
+
+Those 33 strings measure one document. They cannot see a repair of the other 510, which is what
+`tools/measure-recovered-text.ps1` is for: it dumps the library's text with and without recovered
+text merged, quotes a phrase from the difference, and asks both indexes for it. On 25 repaired pages
+across 25 documents, 21 phrases are findable only after this repair, 4 were already findable from
+the earlier pass, and none are unfindable. Reports are in `docs/measurements/`.
 
 ### The corpus, in full
 

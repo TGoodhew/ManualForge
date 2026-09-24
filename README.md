@@ -437,6 +437,47 @@ So the repair solved the problem it was built for, and exposed the next one. Wha
 ranking is issue #3, which records the measured ranks and the one re-ranking idea already tried and
 rejected.
 
+### Then the rest of the library, and what indexing actually costs
+
+The second pass, on 24 September 2026, cleared the remaining backlog including the scanned pages:
+**9,510 pages across 500 documents, 868,303 words and 3.9 M characters recovered at 80.4% mean
+confidence, in 172 minutes at 55 pages/min.** The audit now reads 11,008 flagged, 11,008 repaired,
+nothing outstanding, and **10,841 pages in 510 documents carry text the repair read off a rendered
+page**.
+
+Merging that took **4.7 minutes**, not the many hours the first repair suggested. The figure that
+misled was the 18 September run's overall 34 pages/min: it is an average over a library whose pages
+are mostly image-only scans, where extraction costs nearly nothing because there are no words to
+pull out, and a handful of genuinely text-heavy documents that took almost all of the time. Averages
+over a corpus this uneven should not be extrapolated, and one that is quoted as a rate should be
+checked against the shape of the work before it is used to plan anything.
+
+Indexing now extracts several documents at once and writes them from a single thread, which
+measured **2.1×** on this library — 104,504 pages in 2.7 minutes against 4.7 serial, while also
+writing a text sidecar for every document. The gain is bounded by how little work an image-only page
+is; on a text-heavy library it would be larger. `--workers` sets the count.
+
+### Proving the recovered text is actually searchable
+
+The 33 hand-read strings measure one document, and it had already been repaired, so they see none of
+this. They scored 27 of 33 before the second pass and 27 of 33 after it, which is the correct
+answer to a question about a different document.
+
+What measures this pass is `tools/measure-recovered-text.ps1`. The library is dumped to text twice,
+once with recovered text merged and once with `--no-repairs`; the difference on a page is exactly
+what the repair added, so a phrase quoted from it is a question only the repair can answer. Of 25
+repaired pages sampled across 25 documents:
+
+| | of 25 |
+|---|---|
+| Phrase findable only after this repair | **21** |
+| Already findable, from the 18 September pass | 4 |
+| Not findable at all | **0** |
+
+Twenty of the 21 come back at rank 1 to 4. This says the recovered text is present, matchable and
+attached to the right page; it says nothing about whether the recogniser read it *correctly*, which
+is character error rate and needs the hand-corrected pages of issue #6.
+
 #### Reproducing it, and measuring the next change against it
 
 ```
@@ -1035,7 +1076,7 @@ src/ManualForge.Core/
   Indexing/SearchIndex.cs         SQLite FTS5 over every page; the shared contract
   Indexing/SearchQuery.cs         typing → FTS5, and command syntax read as notation
   Indexing/Dehyphenator.cs        rejoins words broken across line ends, for the index only
-  Indexing/LibraryIndexer.cs      walks the library, extracts, merges repairs, indexes
+  Indexing/LibraryIndexer.cs      walks the library, extracts in parallel, merges repairs, indexes
   Indexing/LibraryReconciler.cs   which PDFs are not in the index, and why
   Auditing/DoctorOptions.cs       every threshold, and what it was measured against
   Auditing/InkAnalysis.cs         rendered ink against extracted glyph boxes; blob shape
@@ -1052,7 +1093,8 @@ src/ManualForge.Mcp/              MCP server: library_search, read_manual_page, 
 tests/ManualForge.Core.Tests/     357 tests, no GPU or network needed
 tools/measure-ground-truth.ps1    runs the 33 hand-read strings, scores where each one ranked
 tools/ground-truth-54845A.tsv     those strings, and the page each should return
-docs/measurements/                what that produced: one dated file per run, not hand-edited
+tools/measure-recovered-text.ps1  samples repaired pages; did the recovered text reach search?
+docs/measurements/                what those produced: one dated file per run, not hand-edited
 ```
 
 ## Tests
@@ -1160,19 +1202,6 @@ end-to-end test caught it. The cache for a document is released once it complete
 documents in flight rather than the library.
 
 ## Known gaps
-
-### Merging a repair costs more than making one
-
-The repair is the cheap half. Recovering text runs at 32-46 pages/min on the GPU; merging it into
-the index runs at **34 pages/min over every page of every document touched**, because a document
-whose recovered text changed is re-extracted in full. Forty recovered pages of an 1,140-page
-calibration guide cost 1,140 pages of re-extraction.
-
-On this library the 511 flagged documents hold 95,632 of 104,468 pages, so a repair pass over the
-whole backlog projects at **roughly 47 hours to re-index** against about five and a half hours to
-repair. Extraction is serial and the machine has 24 threads, so this is a fixable number rather
-than a fact of nature — issue #8. Until it is fixed, plan a corpus-wide repair around the index
-build, not around the OCR.
 
 ### Throughput estimates still quote the serial rate
 
