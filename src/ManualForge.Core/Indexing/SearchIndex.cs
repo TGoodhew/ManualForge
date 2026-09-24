@@ -368,7 +368,19 @@ public sealed class SearchIndex : IDisposable
     /// other paths alongside. Without this a library with four copies of one manual answers every
     /// question about it four times, which is the part that is actually annoying to live with.
     /// </param>
-    public IReadOnlyList<SearchHit> Search(string query, int limit = 20, bool foldDuplicates = true)
+    /// <param name="note">
+    /// Told when the query had to be re-read as ordinary words because FTS5 rejected it as an
+    /// expression. A search that quietly changes the question is worse than one that says so.
+    /// </param>
+    /// <remarks>
+    /// The fallback exists because the query language and ordinary typing overlap. Somebody who
+    /// writes <c>power NOT supply</c> means the operator; somebody who pastes a line off a page
+    /// that happens to contain one does not, and cannot be expected to know FTS5 exists. When the
+    /// guess is wrong the query is re-run with every term quoted rather than failed, since an
+    /// error message in place of results is the worst of the three possible answers.
+    /// </remarks>
+    public IReadOnlyList<SearchHit> Search(
+        string query, int limit = 20, bool foldDuplicates = true, Action<string>? note = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(query);
 
@@ -417,7 +429,7 @@ public sealed class SearchIndex : IDisposable
         // cannot silently shorten the result list.
         var candidates = new List<(SearchHit Hit, string Hash, double Score)>();
 
-        using (var reader = command.ExecuteReader())
+        using (var reader = Execute(command, query, prepared, note))
         {
             while (reader.Read())
             {
@@ -524,6 +536,34 @@ public sealed class SearchIndex : IDisposable
             return TextSource.Mixed;
 
         return inOcr ? TextSource.Ocr : TextSource.Embedded;
+    }
+
+    /// <summary>
+    /// Runs the MATCH, and if FTS5 rejects the expression, runs it again with every term quoted.
+    /// </summary>
+    private static SqliteDataReader Execute(
+        SqliteCommand command, string query, string prepared, Action<string>? note)
+    {
+        try
+        {
+            return command.ExecuteReader();
+        }
+        catch (SqliteException)
+        {
+            var literal = SearchQuery.PrepareLiteral(query);
+
+            // Nothing to fall back to: either it was already being read literally, or there is no
+            // literal reading of it either, and then the error is the honest answer.
+            if (literal is null || string.Equals(literal, prepared, StringComparison.Ordinal))
+                throw;
+
+            command.Parameters["$q"].Value = literal;
+            note?.Invoke(
+                "That is not a valid search expression, so it was read as ordinary words instead. " +
+                "AND, OR and NOT act as operators only with something on both sides of them.");
+
+            return command.ExecuteReader();
+        }
     }
 
     private static int Occurrences(string text, string term)

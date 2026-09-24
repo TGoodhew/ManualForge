@@ -33,6 +33,7 @@ manualforge run <folder>                   classify, flatten, OCR and replace, r
 manualforge ocr <input.pdf> [options]      rasterise → recognise → overlay → verify
 manualforge inspect <input.pdf>            page count, sizes, landscape pages, existing text
 manualforge doctor <folder>                find pages whose text layer is incomplete
+manualforge doctor <file.pdf> --report     one document, page by page, and what repair got back
 manualforge repair <folder>                OCR just those pages; merge, never replace
 manualforge index <folder>                 build the full-text index over a library
 manualforge search <query> --library <f>   ask it: manual, page and snippet

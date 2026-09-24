@@ -60,10 +60,19 @@ numbers.
 | 19 | 8902A Service p261 | TP | Block-diagram labels `LF VCXO`, `SAMPLER`, `TRACK LOOP AMPLIFIER` |
 | 20 | 5440A-SM p194 | TP | Component-locator PCA, most designators unextracted |
 
-**Every false positive has the same cause**: drawn hardware — resistor bodies, capacitor plates,
-screws, connector outlines, front-panel buttons, halftone dots — is the size, aspect and density of
-lettering, and the shape filter cannot tell it from a character. Three of the four sit close to the
-40-blob threshold.
+**Every false positive in this sample has the same cause**: drawn hardware — resistor bodies,
+capacitor plates, screws, connector outlines, front-panel buttons, halftone dots — is the size,
+aspect and density of lettering, and the shape filter cannot tell it from a character. Three of the
+four sit close to the 40-blob threshold.
+
+**A second cause, found later and probably commoner: ruled tables.** Where a row line crosses a
+column line it cuts the rule into short segments, and a segment of rule between two closely spaced
+rows is the size, aspect and fill of a character. It did not appear in these twenty pages; it
+appeared when `8591e Calibration Guide.pdf` was examined page by page, where 40 of 141 flagged pages
+are performance-test record forms whose text extracts perfectly and whose only unaccounted ink is
+the table borders. This corpus is full of such forms. Issue #11, which also proposes the
+discriminator: rule fragments sit in perfect vertical columns at one x, repeated down the page at
+the row pitch, and lettering does not.
 
 The mitigation that already exists is that these pages are cheap to repair and the repair is
 harmless: OCR of a page with no recoverable text returns almost nothing, and the merge adds nothing

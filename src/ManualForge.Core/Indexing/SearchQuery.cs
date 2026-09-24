@@ -53,28 +53,47 @@ public static class SearchQuery
         // and NOTE contains NOT. Matching on the substring handed ":WAVeform:FORMat
         // {ASCii|BYTE|WORD|LONG}" to FTS5 as a raw expression, which is a syntax error, and did the
         // same to any query with COMMAND in it.
-        foreach (var token in query.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries))
+        var tokens = query.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+
+        for (var i = 0; i < tokens.Length; i++)
         {
-            if (Operators.Any(op => op.EndsWith('(')
-                ? token.StartsWith(op, StringComparison.Ordinal)
-                : string.Equals(token, op, StringComparison.Ordinal)))
-            {
+            var token = tokens[i];
+
+            if (Operators.Any(op => op.EndsWith('(') && token.StartsWith(op, StringComparison.Ordinal)))
                 return true;
-            }
+
+            if (!Operators.Any(op => !op.EndsWith('(') && string.Equals(token, op, StringComparison.Ordinal)))
+                continue;
+
+            // An operator needs something on both sides of it. A phrase that merely ends in one —
+            // "FIT BOTTOM EDGE UNDER LUGS AND", copied off a page — was being handed to FTS5 as an
+            // expression and came back as a syntax error rather than as results. These manuals are
+            // written in capitals, so AND, OR and NOT are ordinary words in them far more often
+            // than they are operators.
+            if (i > 0 && i < tokens.Length - 1)
+                return true;
         }
 
         return false;
     }
 
     /// <summary>
+    /// Prepares a query as ordinary typing, whatever it looks like: every term quoted, nothing read
+    /// as an operator. The fallback for an expression FTS5 will not accept.
+    /// </summary>
+    public static string? PrepareLiteral(string? query) => Prepare(query, literal: true);
+
+    /// <summary>
     /// Prepares a query for <c>MATCH</c>. Returns null when there is nothing to search for.
     /// </summary>
-    public static string? Prepare(string? query)
+    public static string? Prepare(string? query) => Prepare(query, literal: false);
+
+    private static string? Prepare(string? query, bool literal)
     {
         if (string.IsNullOrWhiteSpace(query))
             return null;
 
-        if (LooksLikeExpression(query))
+        if (!literal && LooksLikeExpression(query))
             return query;
 
         var terms = Split(query);

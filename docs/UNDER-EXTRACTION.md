@@ -224,8 +224,24 @@ handful of genuinely text-heavy documents, not the page count, because extractin
 scan costs almost nothing. Indexing now extracts several documents at once, which measured 2.1× on
 this library.
 
-Of the 9,510 pages, 167 recovered no text at all — 1.8%, against 3.7% in the first pass, where 40 of
-the 56 were consecutive pages of one calibration guide (issue #4).
+Of the 9,510 pages, 167 recovered no text at all — 1.8%, against 3.7% in the first pass.
+
+### Asking what happened to one document
+
+```
+manualforge doctor "<file.pdf>" --report      every flagged page, and what the repair got back
+```
+
+The library report answers "what should I repair next". This answers "what happened to this one",
+which is the question a page that recovered nothing leaves behind — and the counts cannot tell a
+page that was rendered, recognised and came back empty from one that was never looked at.
+
+It found what the 40 empty pages of `8591e Calibration Guide.pdf` really are. They are not
+consecutive, as had been assumed: singles and runs of four from page 394 to 860. `--explain --dump`
+on two of them shows ruled performance-test record forms whose every word extracts correctly, where
+the only ink nothing accounts for is the table borders, chopped into glyph-sized pieces by their own
+intersections. **The repair recovering nothing there is the right answer**, and the flag is the
+false positive — issue #11.
 
 ### Merge, never replace
 
@@ -409,6 +425,18 @@ returned nothing:
 - **Juxtaposition is not a general AND in FTS5.** It joins phrases into a phrase list and does not
   reach across a parenthesised group, so `"TRIGger" "EDGE" ("CHANnel" OR "AUX")` matched nothing at
   all. The operator is now written out.
+
+A third was found later, by a script quoting phrases off repaired pages:
+
+- **An operator needs something on both sides of it.** Matching whole tokens fixed `COMMAND` and
+  `NOTE`, but not a phrase that genuinely ends in one. `FIT BOTTOM EDGE UNDER LUGS AND`, copied off
+  a page of the E4418B CLIP, went to FTS5 as an expression with nothing to the right of the `AND`
+  and came back as `fts5: syntax error near ""` — an error message where the page should have been.
+  These manuals are lettered in capitals, so `AND`, `OR` and `NOT` are ordinary words in them far
+  more often than they are operators. An operator is now only an operator with a term on each side,
+  and if FTS5 rejects an expression anyway the query is re-read as ordinary words rather than
+  failed — and says so, because a search that silently changes the question is worse than one that
+  explains itself.
 
 ---
 

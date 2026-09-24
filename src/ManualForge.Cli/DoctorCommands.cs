@@ -163,6 +163,13 @@ internal static class DoctorCommand
         }
 
         using var store = new DoctorStore(storePath, readOnly: true);
+
+        // A single file asks a different question from a library: not "what should I repair next"
+        // but "what happened to this one", page by page. That is the question a repair which
+        // recovered nothing leaves behind, and nothing else here could answer it.
+        if (File.Exists(target))
+            return ReportDocument(store, target, arguments.GetInt("limit") ?? 25);
+
         var summary = store.Summary();
         var flagged = store.Flagged();
 
@@ -196,6 +203,107 @@ internal static class DoctorCommand
             scans, limit);
 
         return 0;
+    }
+
+    /// <summary>
+    /// Every flagged page of one document and what the repair got back for it, including the pages
+    /// it got nothing back for.
+    ///
+    /// <para>
+    /// A page that was rendered, recognised and returned no text is not the same as a page that was
+    /// never looked at, and the summary counts cannot tell them apart. Seeing where those pages sit
+    /// is most of the diagnosis: scattered, they are hard pages; consecutive, they are a property of
+    /// the file.
+    /// </para>
+    /// </summary>
+    private static int ReportDocument(DoctorStore store, string path, int limit)
+    {
+        var full = Path.GetFullPath(path);
+        var document = store.Flagged(int.MaxValue)
+            .FirstOrDefault(d => string.Equals(d.Path, full, StringComparison.OrdinalIgnoreCase));
+
+        if (document is null)
+        {
+            Console.WriteLine($"{Path.GetFileName(full)} is not in the audit as a flagged document.");
+            Console.WriteLine("Either it was sound, or it has not been audited. `doctor <folder>` audits.");
+            return 0;
+        }
+
+        var findings = store.Findings(full, PageVerdict.UnderExtracted);
+        var repairs = store.Repairs(full, document.ContentHash);
+
+        var empty = findings
+            .Where(f => repairs.TryGetValue(f.PageNumber, out var r) && r.OcrText.Length == 0)
+            .Select(f => f.PageNumber)
+            .ToArray();
+
+        var unrepaired = findings.Where(f => !repairs.ContainsKey(f.PageNumber))
+            .Select(f => f.PageNumber).ToArray();
+
+        Console.WriteLine($"Document : {document.Title}");
+        Console.WriteLine($"Verdict  : {document.Verdict}, {document.PageCount:N0} page(s)");
+        Console.WriteLine(
+            $"Flagged  : {document.FlaggedPages:N0} page(s), {document.DrawnPages:N0} drawn; " +
+            $"{document.RepairedPages:N0} repaired, {unrepaired.Length:N0} not yet");
+        Console.WriteLine(
+            $"Recovered nothing : {empty.Length:N0} page(s)" +
+            (empty.Length == 0 ? string.Empty : $" — {Ranges(empty)}"));
+        Console.WriteLine();
+
+        Console.WriteLine(
+            $"  {"Page",6}{"Kind",10}{"Uncovered ink",15}{"Blobs",7}{"Expected",10}{"Recovered",11}  confidence");
+        Console.WriteLine("  " + new string('-', 78));
+
+        foreach (var finding in findings.Take(limit))
+        {
+            repairs.TryGetValue(finding.PageNumber, out var repair);
+
+            var recovered = repair is null
+                ? "not repaired"
+                : repair.OcrText.Length == 0 ? "nothing" : $"{repair.OcrText.Length:N0} chars";
+
+            Console.WriteLine(string.Create(CultureInfo.InvariantCulture,
+                $"  {finding.PageNumber,6:N0}{finding.Kind,10}{finding.UncoveredInkFraction,15:P2}" +
+                $"{finding.GlyphLikeBlobs,7:N0}{finding.RecoverableCharacters,10:N0}{recovered,11}  " +
+                $"{(repair is null || repair.OcrText.Length == 0 ? string.Empty : repair.MeanConfidence.ToString("P0", CultureInfo.InvariantCulture))}"));
+        }
+
+        if (findings.Count > limit)
+            Console.WriteLine($"  ... and {findings.Count - limit:N0} more flagged page(s)");
+
+        Console.WriteLine();
+
+        if (empty.Length > 0)
+        {
+            Console.WriteLine("To see what the detector saw on a page that recovered nothing:");
+            Console.WriteLine(
+                $"  manualforge doctor \"{path}\" --explain {empty[0]} --dump page{empty[0]}.png");
+            Console.WriteLine();
+        }
+
+        return 0;
+    }
+
+    /// <summary>Page numbers as ranges, because forty consecutive pages should read as forty.</summary>
+    private static string Ranges(IReadOnlyList<int> pages)
+    {
+        var parts = new List<string>();
+        var start = pages[0];
+        var previous = pages[0];
+
+        foreach (var page in pages.Skip(1).Append(int.MinValue))
+        {
+            if (page == previous + 1)
+            {
+                previous = page;
+                continue;
+            }
+
+            parts.Add(start == previous ? $"{start}" : $"{start}-{previous}");
+            start = previous = page;
+        }
+
+        return string.Join(", ", parts);
     }
 
     private static void PrintStoredTable(string heading, IReadOnlyList<AuditedDocument> documents, int limit)

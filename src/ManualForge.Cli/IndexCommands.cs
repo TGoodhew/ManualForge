@@ -143,7 +143,14 @@ internal static class SearchCommand
         using var index = new SearchIndex(indexPath, readOnly: true);
 
         var limit = arguments.GetInt("limit") ?? 10;
-        var hits = index.Search(query, limit, foldDuplicates: !arguments.Has("show-duplicates"));
+        var hits = index.Search(
+            query, limit,
+            foldDuplicates: !arguments.Has("show-duplicates"),
+            note: message =>
+            {
+                Console.WriteLine(message);
+                Console.WriteLine();
+            });
 
         if (hits.Count == 0)
         {
