@@ -1,3 +1,4 @@
+using System.Globalization;
 using ManualForge.Core.Benchmarking;
 using ManualForge.Core.Indexing;
 using ManualForge.Core.Ocr;
@@ -18,6 +19,10 @@ internal static class TruthCommand
     public static async Task<int> RunAsync(
         CommandLine arguments, ILoggerFactory loggerFactory, CancellationToken cancellationToken)
     {
+        // A set nobody has to transcribe: pages whose text layer is the publisher's own typesetting.
+        if (arguments.Has("publisher"))
+            return Publisher(arguments, loggerFactory, cancellationToken);
+
         var pdf = arguments.Positional(0) ?? throw new ArgumentException("Give a PDF to take pages from.");
         if (!File.Exists(pdf))
             throw new FileNotFoundException($"No such file: {pdf}");
@@ -98,6 +103,66 @@ internal static class TruthCommand
 
         return 0;
     }
+
+    /// <summary>
+    /// Seeds a truth set from born-digital pages, where the publisher's own typesetting is already
+    /// a correct transcription and nobody has to write anything down.
+    /// </summary>
+    private static int Publisher(
+        CommandLine arguments, ILoggerFactory loggerFactory, CancellationToken cancellationToken)
+    {
+        var library = arguments.Get("library")
+            ?? arguments.Positional(0)
+            ?? throw new ArgumentException("Give --library <folder> to take pages from.");
+
+        if (!Directory.Exists(library))
+            throw new DirectoryNotFoundException($"No such folder: {library}");
+
+        var output = arguments.Get("out") ?? throw new ArgumentException("Give --out <folder> for the truth set.");
+        var count = arguments.GetInt("count") ?? 12;
+
+        var finder = new PublisherTruth(loggerFactory.CreateLogger<PublisherTruth>())
+        {
+            MinimumCharacters = arguments.GetInt("min-chars") ?? new PublisherTruth().MinimumCharacters,
+            PagesPerDocument = arguments.GetInt("per-document") ?? new PublisherTruth().PagesPerDocument,
+        };
+
+        Console.WriteLine($"Library : {library}");
+        Console.WriteLine($"Looking for {count} page(s) whose text layer is the publisher's own:");
+        Console.WriteLine($"  at least {finder.MinimumCharacters:N0} characters, {finder.MinimumDecodedShare:P0} of glyphs decoding,");
+        Console.WriteLine($"  no more than {finder.MaximumImageCoverage:P0} of the page under an image, nothing the audit flags.");
+        Console.WriteLine();
+
+        var pages = finder.Select(library, count, arguments.GetInt("seed") ?? 1, cancellationToken);
+
+        if (pages.Count == 0)
+        {
+            Console.Error.WriteLine("No page in this library qualifies. Every one is a scan, or its fonts do not decode.");
+            return 1;
+        }
+
+        var written = GroundTruthSet.Seed(
+            output, library,
+            pages.Select(p => (p.ManualPath, p.PageNumber, p.Kind, p.Text)),
+            TruthSource.PublisherText);
+
+        foreach (var page in pages)
+        {
+            Console.WriteLine(string.Create(CultureInfo.InvariantCulture,
+                $"  {Path.GetFileNameWithoutExtension(page.ManualPath),-46} p{page.PageNumber,-5} {page.Kind,-9} {page.Characters,6:N0} chars"));
+        }
+
+        Console.WriteLine();
+        Console.WriteLine($"Wrote {written} text file(s) to {Path.GetFullPath(output)}, marked PublisherText.");
+        Console.WriteLine();
+        Console.WriteLine("Nothing here needs correcting, and that is also the catch. A clean render of");
+        Console.WriteLine("digital type is an easier read than a 1965 photocopy, so a score against these");
+        Console.WriteLine("is the recogniser's floor rather than its accuracy on this library. It measures");
+        Console.WriteLine("geometry properly - the glyph positions are exact - and cannot measure deskew or");
+        Console.WriteLine("denoise at all, because there is nothing here to straighten or clean.");
+
+        return 0;
+    }
 }
 
 /// <summary>Measures configurations against a ground-truth set.</summary>
@@ -122,6 +187,21 @@ internal static class BenchmarkCommand
         Console.WriteLine($"Ground truth: {truth.Pages.Count} page(s) across {truth.Kinds.Count()} kind(s)");
         foreach (var kind in truth.Kinds)
             Console.WriteLine($"  {kind,-12}{truth.Pages.Count(p => p.Kind == kind),4} page(s)");
+
+        // Said every time, because the two kinds of truth answer different questions and a number
+        // quoted from the wrong one is worse than no number.
+        var publisher = truth.Pages.Count(p => p.Source == TruthSource.PublisherText);
+        if (publisher > 0)
+        {
+            Console.WriteLine();
+            Console.WriteLine(
+                $"  {publisher} of these are the publisher's own typesetting rather than hand-corrected.");
+            Console.WriteLine(
+                "  Clean digital type is an easier read than a scan, so what they measure is this");
+            Console.WriteLine(
+                "  engine's floor and anything geometric - not its accuracy on this library.");
+        }
+
         Console.WriteLine();
 
         var configurations = Configurations(arguments).ToArray();

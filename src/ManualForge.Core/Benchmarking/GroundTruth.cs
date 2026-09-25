@@ -22,10 +22,35 @@ public enum PageKind
     Mixed,
 }
 
-/// <summary>One page of hand-corrected text to measure against.</summary>
+/// <summary>Where a page's truth text came from, which decides what a score from it may be called.</summary>
+public enum TruthSource
+{
+    /// <summary>
+    /// Read off the page by a person and corrected by hand. The only kind that measures accuracy on
+    /// the material this application exists for: a scan, with its halftones, bleed-through and skew.
+    /// </summary>
+    HandCorrected,
+
+    /// <summary>
+    /// The publisher's own typesetting, taken from a born-digital page's text layer.
+    ///
+    /// <para>
+    /// Free, exact, and easier than the real thing. A clean render of digital type is not a 1965
+    /// photocopy, so a score against these is the recogniser's <b>floor</b> rather than its accuracy
+    /// — and geometric questions, where the page's glyph positions are exact, are the ones it
+    /// answers properly.
+    /// </para>
+    /// </summary>
+    PublisherText,
+}
+
+/// <summary>One page of known-correct text to measure against.</summary>
 public sealed record TruthPage(string ManualPath, int PageNumber, PageKind Kind, string Text)
 {
     public string Label => $"{Path.GetFileNameWithoutExtension(ManualPath)} p{PageNumber}";
+
+    /// <summary>Where this page's text came from. Defaults to hand-corrected, as older sets are.</summary>
+    public TruthSource Source { get; init; } = TruthSource.HandCorrected;
 }
 
 /// <summary>
@@ -95,7 +120,16 @@ public sealed class GroundTruthSet
             if (libraryRoot is not null && !Path.IsPathRooted(manualPath))
                 manualPath = Path.Combine(Path.GetFullPath(libraryRoot), manualPath);
 
-            pages.Add(new TruthPage(manualPath, pageNumber, kind, File.ReadAllText(textPath)));
+            // A set written before the column existed is hand-corrected by definition: nothing else
+            // could produce one at the time.
+            var source = fields.Count > 4 && Enum.TryParse<TruthSource>(fields[4], ignoreCase: true, out var parsed)
+                ? parsed
+                : TruthSource.HandCorrected;
+
+            pages.Add(new TruthPage(manualPath, pageNumber, kind, File.ReadAllText(textPath))
+            {
+                Source = source,
+            });
         }
 
         return new GroundTruthSet(full, pages);
@@ -116,7 +150,8 @@ public sealed class GroundTruthSet
     public static int Seed(
         string root,
         string libraryRoot,
-        IEnumerable<(string ManualPath, int PageNumber, PageKind Kind, string Seed)> pages)
+        IEnumerable<(string ManualPath, int PageNumber, PageKind Kind, string Seed)> pages,
+        TruthSource source = TruthSource.HandCorrected)
     {
         var full = Path.GetFullPath(root);
         Directory.CreateDirectory(full);
@@ -166,10 +201,11 @@ public sealed class GroundTruthSet
             if (!rowsByPage.ContainsKey(key))
                 order.Add(key);
 
-            rowsByPage[key] = string.Join(',', Quote(relativeManual), pageNumber, kind, Quote(textFile));
+            rowsByPage[key] = string.Join(
+                ',', Quote(relativeManual), pageNumber, kind, Quote(textFile), source);
         }
 
-        var rows = new List<string> { "manual,page,kind,textFile" };
+        var rows = new List<string> { "manual,page,kind,textFile,source" };
         rows.AddRange(order.Select(k => rowsByPage[k]));
 
         File.WriteAllLines(manifestPath, rows, new UTF8Encoding(false));

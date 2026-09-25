@@ -20,10 +20,14 @@ What each of the last two phases is actually waiting on:
 
 * **Phase 6, a VLM sidecar** - not started.
 * **Phase 7, benchmark mode** - `truth`, `benchmark` and the error-rate scorer are written and
-  committed. What is missing is 9-12 hand-corrected pages to score against, which is manual work no
-  machine can do; until they exist every accuracy figure here is either a confidence score, which is
-  the recogniser's opinion of itself, or a ranking measurement against hand-read strings, which is
-  not the same thing as character accuracy. Issue #6.
+  committed, and there are now real error rates: `truth --publisher` builds a yardstick out of
+  born-digital pages, whose own text layer is the publisher's typesetting and therefore a correct
+  transcription nobody had to write. **6.3% CER and 2.8% unordered WER on clean type**, with
+  deskew and denoise earning nothing there while costing a fifth of the throughput, and 200 dpi
+  matching 300 at 48% more pages a minute.
+  <br>That is the recogniser's **floor**, not its accuracy on a 1965 photocopy, and the difference
+  matters: hand-corrected scanned pages are still the only thing that measures the material this
+  application exists for. Issue #6 stays open for those. `docs/measurements/publisher-truth-benchmark.md`.
 
 ## What it does
 
@@ -1059,6 +1063,28 @@ manualforge benchmark --truth <folder> --sweep --csv report.csv
 The hand-correcting is the one part that cannot be automated, and it has its own guide:
 **[docs/GROUND-TRUTH.md](docs/GROUND-TRUTH.md)** — how to find the pair of files being compared,
 choose pages worth measuring, what to correct and what to ignore, and how to read the result.
+
+### A yardstick nobody has to cut
+
+There is one class of page whose correct transcription already exists: a born-digital one, where the
+characters in the content stream are what the typesetter put there rather than a machine's reading
+of a picture.
+
+```
+manualforge truth --publisher --library <folder> --out <truth> --count 12
+```
+
+It takes pages from documents whose page sizes do not wander — a scanner's crop does, a
+typesetter's does not, and that is what catches a scan whose image was dropped after OCR, whose
+"text" is another engine's mistakes. Then it wants no image over 2% of the page, no vector figure
+whose drawn labels would be read and marked wrong, and a pass from the audit's ink comparison, which
+is the only test that proves nothing on the page is missing from its text.
+
+Every page it produces is marked `PublisherText` in the manifest, and `benchmark` says so on every
+run, because **these measure the recogniser's floor rather than its accuracy on this library**. A
+clean render of digital type is not a 1965 photocopy. What they settle, they settle well:
+preprocessing and resolution, above, and anything geometric, because the glyph positions are exact.
+What they cannot settle is how the engine reads a scan.
 
 Two things it is worth knowing before reading any number this produces:
 
