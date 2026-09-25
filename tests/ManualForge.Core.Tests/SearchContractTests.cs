@@ -118,8 +118,61 @@ public sealed class SearchContractTests : IDisposable
             @"C:\Manuals\54845A Programmer.pdf", "54845A Programmer", "hash-b",
             Pages("WAVeform SOURce"));
 
-        Assert.Equal("TDS3014B Programming", index.Search("waveform source")[0].Title);
-        Assert.Equal("54845A Programmer", index.Search("waveform source", model: "54845A")[0].Title);
+        // bm25 alone puts the prose page first. Asked without a bias, because the default one
+        // promotes the 54845A page on its own here — its text is the two words on a line of their
+        // own, which is exactly the shape RankingBias.Label exists to recognise. Worth pinning both
+        // behaviours separately rather than letting one hide the other.
+        Assert.Equal(
+            "TDS3014B Programming",
+            index.Search("waveform source", ranking: new RankingBias())[0].Title);
+
+        Assert.Equal(
+            "54845A Programmer",
+            index.Search("waveform source", ranking: new RankingBias(), model: "54845A")[0].Title);
+
+        Assert.Equal("54845A Programmer", index.Search("waveform source")[0].Title);
+    }
+
+    [Fact]
+    public void ATermOnALineOfItsOwnBeatsAPageThatMerelyDiscussesIt()
+    {
+        using var index = new SearchIndex(Path_("index.db"));
+
+        // The whole ranking problem in four lines. One page defines the command in a syntax
+        // diagram, where the word appears once, alone. The other talks about attenuation at
+        // length, which is what bm25 rewards.
+        index.AddDocument(
+            @"C:\Manuals\Prose.pdf", "Prose", "hash-a",
+            Pages("attenuation is set by the attenuator whose attenuation range covers attenuation "
+                + "in 10 dB steps, and attenuation accuracy depends on the attenuator"));
+
+        index.AddDocument(
+            @"C:\Manuals\Reference.pdf", "Reference", "hash-b",
+            Pages("CHANnel Commands\nATTenuation\nrange 0 to 60 dB\nsee also PROBe"));
+
+        Assert.Equal("Prose", index.Search("attenuation", ranking: new RankingBias())[0].Title);
+        Assert.Equal("Reference", index.Search("attenuation")[0].Title);
+    }
+
+    [Fact]
+    public void ALabelBoostDoesNotReachAPageThatOnlyMentionsTheWord()
+    {
+        using var index = new SearchIndex(Path_("index.db"));
+
+        // Nothing here stands alone on a line, so the boost must not fire and the ordering must be
+        // bm25's. A bias that applied to everything would be a no-op dressed up as an improvement.
+        index.AddDocument(
+            @"C:\Manuals\A.pdf", "A", "hash-a",
+            Pages("the attenuator is described here and the attenuator is discussed at length"));
+
+        index.AddDocument(
+            @"C:\Manuals\B.pdf", "B", "hash-b",
+            Pages("one passing mention of the attenuator in a long sentence about something else"));
+
+        var withBias = index.Search("attenuator").Select(h => h.Title).ToArray();
+        var without = index.Search("attenuator", ranking: new RankingBias()).Select(h => h.Title).ToArray();
+
+        Assert.Equal(without, withBias);
     }
 
     [Fact]

@@ -444,14 +444,37 @@ them in the first ten. The ground-truth document records 33 of 33, and that figu
 smaller development library; on 584 documents it does not reproduce.
 
 The gap is entirely **ranking, not retrieval** — asked for more than ten results, five of the six
-come back at ranks 39 to 108, and the sixth beyond 200. The recovered text is indexed and it
-matches; bm25 prefers a prose page that uses the query's words often over the syntax diagram that
-defines the command, and a bigger library holds more such prose. Single-token queries like
-`ATTenuation` suffer worst, for the obvious reason.
+came back at ranks 39 to 108 and the sixth beyond 200. The recovered text is indexed and it matches;
+bm25 prefers a prose page that uses the query's words often over the syntax diagram that defines the
+command, and a bigger library holds more such prose. Single-token queries like `ATTenuation` suffer
+worst, for the obvious reason. Those are the figures bm25 alone gives; the section below is what
+happened when that was worked on.
 
-So the repair solved the problem it was built for, and exposed the next one. What to do about the
-ranking is issue #3, which records the measured ranks and the one re-ranking idea already tried and
-rejected.
+So the repair solved the problem it was built for, and exposed the next one.
+
+#### Half of that next one: a term on a line of its own
+
+bm25 has no notion of what a page is *for*, so the page that **defines** a command loses to a page
+that discusses it at length. Search now multiplies a page's score when one of the query's terms
+appears on a line of its own — a label, a heading or a table cell rather than a word inside a
+sentence, which is the shape of a syntax diagram, a pin-out or a front-panel legend.
+
+| | ground truth (33) | 25 repaired pages elsewhere | 40 ordinary pages |
+|---|---|---|---|
+| Without | 27 in the first 25, 21 in the first ten | 23 of 25 | 30 first, 39 in the first ten |
+| With | **31**, **25** | 23 of 25 | 29 first, 39 in the first ten |
+
+`ATTenuation` goes from rank 44 to 12, `PROTection` from 109 to 11, and `:WAVeform:SOURce` — quoted
+here as "beyond 200" for a week — comes back at 88. One ordinary page in forty slips off first
+place; none leave the first ten.
+
+The two controls matter more than the gain. The 33 strings come from one manual and were chosen
+because they failed, so a change designed against them will flatter itself, and only a set of
+queries that had no hand in the design can say whether ordinary search got worse.
+`docs/measurements/ranking-label-bias.md` has all of it, including the boost that was measured at
+the same time and **not** adopted. `--rank-labels 1.0` turns it off.
+
+Six strings are still outside the first ten and issue #3 stays open.
 
 ### Then the rest of the library, and what indexing actually costs
 
@@ -1312,5 +1335,7 @@ it now stands. Re-measuring means re-drawing the seeded sample of 40 pages and l
    the baseline on the bottom edge of the detected ink box. Worth tuning against ground truth in
    phase 7 rather than guessing now, which makes it one of the three things waiting on issue #6.
 7. **Ranking** — the repair put the right page in the index; bm25 does not always put it near the
-   top. Eleven of the 33 ground-truth strings retrieve the correct page and bury it, five of them
-   past rank 39. Issue #3 has the measurements and the one idea already tried and rejected.
+   top. Boosting a page that carries a query term on a line of its own took the ground truth from
+   21 of 33 in the first ten to 25, measured against two controls that had no hand in the change.
+   Six strings are still outside the first ten and `:WAVeform:SOURce` sits at 88, so issue #3
+   stays open. `docs/measurements/ranking-label-bias.md`.

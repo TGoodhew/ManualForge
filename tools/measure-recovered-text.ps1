@@ -46,6 +46,10 @@ param(
 
     [int] $Limit = 25,
 
+    # Extra arguments handed to every search against the *after* index only, so a ranking change can
+    # be measured on a set of queries that had no hand in choosing it.
+    [string[]] $Extra = @(),
+
     [string] $Out
 )
 
@@ -126,7 +130,10 @@ foreach ($file in $candidates) {
         # title it saw first. A library with two copies of one manual would otherwise score as a
         # miss for the copy that lost the fold, which is a fact about this script rather than about
         # the repair.
-        $output = & $Exe search $phrase --index $index --limit $Limit --show-duplicates 2>&1 | Out-String
+        $arguments = @('search', $phrase, '--index', $index, '--limit', $Limit, '--show-duplicates')
+        if ($Extra -and $index -eq $AfterIndex) { $arguments += $Extra }
+
+        $output = & $Exe @arguments 2>&1 | Out-String
         $r = 0
         foreach ($line in ($output -split "`r?`n")) {
             if ($line -match '^\s{2}(?<title>\S.*?)\s\s+page\s(?<page>[\d,]+)') {

@@ -47,14 +47,21 @@ Nothing regressed. Every one of the six that drop out is **ranking, not retrieva
 text is in the index and it matches. Asked for more results, the correct page comes back for five of
 them, and the sixth is the one this document already singles out.
 
-| Query | Physical page | Rank in the full library |
-|---|---|---|
-| `:CHANnel<N>:DISPlay` | 40 | 39 |
-| `:CHANnel<N>:INPut` | 40 | 40 |
-| `ATTenuation` | 41 | 41 |
-| `:CHANnel<N>:PROBe` | 40 | 47 |
-| `PROTection` | 42 | 108 |
-| `:WAVeform:SOURce` | 106 | beyond 200 |
+| Query | Physical page | Rank, bm25 alone | With the label bias |
+|---|---|---|---|
+| `:CHANnel<N>:DISPlay` | 40 | 39 | 27 |
+| `:CHANnel<N>:INPut` | 40 | 40 | 19 |
+| `ATTenuation` | 41 | 41 | **12** |
+| `:CHANnel<N>:PROBe` | 40 | 47 | 19 |
+| `PROTection` | 42 | 108 | **11** |
+| `:WAVeform:SOURce` | 106 | beyond 200 | 88 |
+
+The right-hand column is what search does now: a page scores higher when one of the query's terms
+stands on a line of its own, which is what a syntax diagram looks like and what a paragraph does
+not. It takes the table as a whole from 27 of 33 within the first 25 to **31**, and from 21 within
+the first ten to **25**, at a cost of one ordinary page in forty losing first place.
+`docs/measurements/ranking-label-bias.md` measures it three ways and records what was rejected
+beside it.
 
 The mechanism is the one described under "The two that rank low" below, and corpus size is what
 sharpens it: bm25 prefers a prose page that uses the query's words many times over the syntax

@@ -193,7 +193,12 @@ internal static class SearchCommand
                 if (!machine)
                     Console.Error.WriteLine();
             },
-            model: arguments.Get("model"));
+            model: arguments.Get("model"),
+            ranking: new RankingBias
+            {
+                Label = arguments.GetDouble("rank-labels") ?? RankingBias.Default.Label,
+                Recovered = arguments.GetDouble("rank-recovered") ?? RankingBias.Default.Recovered,
+            });
 
         if (machine)
             return MachineOutput(index, hits, asJson, root, indexPath);

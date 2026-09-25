@@ -42,7 +42,11 @@ param(
 
     # Pass an instrument model the way a caller who knows it would. Every string in the table comes
     # from one manual, so this measures what the hint is worth to somebody holding the instrument.
-    [string] $Model
+    [string] $Model,
+
+    # Extra arguments handed to every search, for trying a ranking change without editing this file.
+    # e.g. -Extra @('--rank-labels','1.4')
+    [string[]] $Extra = @()
 )
 
 $ErrorActionPreference = 'Stop'
@@ -72,6 +76,7 @@ $results = foreach ($case in $cases) {
     # order they come back in, so count title lines and stop at the expected page.
     $arguments = @('search', $case.Query, '--index', $indexPath, '--limit', $Limit)
     if ($Model) { $arguments += @('--model', $Model) }
+    if ($Extra) { $arguments += $Extra }
 
     $output = & $Exe @arguments 2>&1 | Out-String
 

@@ -14,6 +14,9 @@ Nothing in here is hand-edited. If a number looks wrong, re-run the harness and 
 | `new-flags-precision.md` | Twelve pages the new render-gate limb added, looked at by eye. 11 genuine, 1 false positive — enough to decide the repair was worth running. |
 | `ground-truth-after-reaudit.md` | The 33 strings after the re-audit and the third repair. Still 27 of 33, 21 in the first ten: 700k more words of competition changed nothing by more than a rank or three. |
 | `recovered-text-after-reaudit.md` | 25 pages from the third repair. 21 newly findable, 2 already findable, 2 whose *document* returns at ranks 4 and 2 but whose page sits below 25. |
+| **`ranking-label-bias.md`** | **Read this one first about ranking.** Why a term on a line of its own is boosted, measured three ways, and what was tried and rejected beside it. |
+| `ground-truth-with-label-bias.md` | The 33 strings with the bias that is now the default: 31 of 33 in the first 25, 25 in the first ten. |
+| `ordinary-pages-without-label-bias.md` / `ordinary-pages-with-label-bias.md` | The control that decides whether a ranking change ships: 40 pages quoted at random from the library. 30 first against 29, nothing leaving the first ten. |
 
 ## Adding one
 
@@ -39,3 +42,18 @@ commit, because a score without those is not a measurement of anything.
 To measure an index that has since been overwritten, pass `-Index` a copy. Copying
 `_Originals/manualforge-index.db` aside before a repair costs 300 MB and is the difference between
 having a control and arguing from memory.
+
+## Measuring a ranking change
+
+The 33 strings come from one manual and were chosen because they failed, so a change designed
+against them will flatter itself. Anything that alters ranking is measured against two sets of
+queries that had no hand in its design as well:
+
+```
+./tools/measure-ground-truth.ps1    -Extra @('--rank-labels','1.4')   # the target
+./tools/measure-recovered-text.ps1  -Extra @('--rank-labels','1.4')   # other documents
+./tools/measure-ordinary-pages.ps1  -Extra @('--rank-labels','1.4')   # ordinary prose, does it harm?
+```
+
+The third is the one that decides. A change that gains four places on the ground truth and costs ten
+ordinary pages their first place is not an improvement, and only that script will say so.

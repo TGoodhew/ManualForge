@@ -6,6 +6,70 @@ namespace ManualForge.Core.Indexing;
 /// <summary>One document in the index.</summary>
 public sealed record IndexedDocument(long Id, string Path, string Title, int PageCount, string ContentHash);
 
+/// <summary>
+/// Adjustments applied to bm25's score after retrieval, each off at 1.0.
+///
+/// <para>
+/// bm25 scores on term frequency and page length and has no notion of what a page is *for*. The
+/// page that defines <c>:WAVeform:SOURce</c> mentions it once, in a diagram; a page discussing
+/// waveform sources at length mentions the words thirty times and wins. These are attempts to say
+/// what a defining page looks like, and they are separate knobs because the only honest way to
+/// adopt one is to measure it alone.
+/// </para>
+/// <para>
+/// A multiplier rather than an added constant: bm25 returns a negative score where more negative is
+/// better, so multiplying widens an existing lead and cannot drag a poor match to the top.
+/// </para>
+/// </summary>
+public sealed record RankingBias
+{
+    /// <summary>
+    /// For a page carrying a query term on a line of its own — a label, a heading or a cell rather
+    /// than a word inside a sentence. This is the shape of a syntax diagram, a pin-out and a
+    /// component-locator table, and it is what a single-token query like <c>ATTenuation</c> is
+    /// almost always looking for.
+    /// </summary>
+    public double Label { get; init; } = 1.0;
+
+    /// <summary>
+    /// For a hit whose matched words came from text the repair read off the rendered page. The
+    /// premise is that a page whose text had to be recovered is disproportionately the page that
+    /// draws rather than discusses — which is the defining page. The premise may be wrong; that is
+    /// what measuring is for.
+    /// </summary>
+    public double Recovered { get; init; } = 1.0;
+
+    /// <summary>Whether anything here would change an ordering.</summary>
+    public bool Any => Label != 1.0 || Recovered != 1.0;
+
+    /// <summary>
+    /// What search does unless told otherwise: the label boost on, the recovered-text boost off.
+    ///
+    /// <para>
+    /// Measured three ways before being made the default, because a ranking change tuned against
+    /// the 33 hand-read strings will flatter itself — those strings were chosen because they
+    /// failed. On the ground truth it takes 27 of 33 to 31 within the first 25, and 21 to 25 within
+    /// the first ten. On 25 repaired pages from other documents it changes nothing. On 40 ordinary
+    /// pages quoted at random from the library, one page in forty slips off first place and
+    /// nothing leaves the first ten.
+    /// </para>
+    /// <para>
+    /// So: a large gain on the queries this library is actually asked, an unmeasurable cost on
+    /// ordinary prose, and a mechanism that is a fact about technical manuals rather than about the
+    /// 54845A — a term printed on a line of its own is a label, and a page of labels is usually the
+    /// page that defines the thing. `--rank-labels 1.0` turns it off.
+    /// </para>
+    /// <para>
+    /// The recovered-text boost stays off. It was measured at the same time on the premise that a
+    /// page whose text had to be recovered is disproportionately the defining page, and the
+    /// numbers did not support it: better in the first ten, worse in the first 25, and it pushed
+    /// `:WAVeform:SOURce` back out of reach. Kept as a flag, and recorded here rather than
+    /// rediscovered.
+    /// </para>
+    /// </summary>
+    public static readonly RankingBias Default = new() { Label = 1.4 };
+}
+
 /// <summary>Where the text on a page came from.</summary>
 public enum TextSource
 {
@@ -441,14 +505,21 @@ public sealed class SearchIndex : IDisposable
     /// question about one instrument is often printed in another instrument's manual, and a filter
     /// would hide exactly those.
     /// </param>
+    /// <param name="ranking">
+    /// Score adjustments applied after retrieval. Null takes <see cref="RankingBias.Default"/>;
+    /// <c>new RankingBias()</c> leaves bm25's ordering alone.
+    /// </param>
     public IReadOnlyList<SearchHit> Search(
         string query,
         int limit = 20,
         bool foldDuplicates = true,
         Action<string>? note = null,
-        string? model = null)
+        string? model = null,
+        RankingBias? ranking = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(query);
+
+        ranking ??= RankingBias.Default;
 
         // What arrives here is what somebody typed, and MATCH takes a query language rather than a
         // phrase. See SearchQuery for why a hyphen is enough to break it.
@@ -492,7 +563,7 @@ public sealed class SearchIndex : IDisposable
         // model bias needs a wider window still: a hit it would promote from rank 80 to rank 3 has
         // to have been fetched, and re-ordering a list of ten cannot reach it.
         var window = foldDuplicates ? limit * 6 : limit;
-        if (!string.IsNullOrWhiteSpace(model))
+        if (!string.IsNullOrWhiteSpace(model) || ranking?.Any == true)
             window = Math.Min(Math.Max(window * 10, 200), 2000);
 
         command.Parameters.AddWithValue("$limit", window);
@@ -535,6 +606,15 @@ public sealed class SearchIndex : IDisposable
                 var score = rank;
                 if (Mentions(model, title, path))
                     score *= ModelBias;
+
+                if (ranking is not null)
+                {
+                    if (ranking.Label != 1.0 && CarriesALabel(terms, fullText))
+                        score *= ranking.Label;
+
+                    if (ranking.Recovered != 1.0 && hit.MatchSource == TextSource.Ocr)
+                        score *= ranking.Recovered;
+                }
 
                 candidates.Add((hit, hash, score));
             }
@@ -625,6 +705,42 @@ public sealed class SearchIndex : IDisposable
     /// behaviour wanted, because the model is a hint about relevance and not a statement of it.
     /// </summary>
     private const double ModelBias = 1.5;
+
+    /// <summary>
+    /// Whether the page carries one of the query's terms on a line of its own, rather than inside a
+    /// sentence.
+    ///
+    /// <para>
+    /// "On a line of its own" is read generously — a line no more than a few characters longer than
+    /// the term — because a diagram's label often has a stray mark or a continuation on it, and
+    /// because the lines here were rebuilt from word positions rather than read from the file. A
+    /// term of three characters or fewer is ignored: too many of them sit alone somewhere on a page
+    /// by accident.
+    /// </para>
+    /// </summary>
+    private static bool CarriesALabel(IReadOnlyList<string> terms, string text)
+    {
+        if (text.Length == 0)
+            return false;
+
+        foreach (var term in terms)
+        {
+            if (term.Length <= 3)
+                continue;
+
+            foreach (var line in text.Split('\n'))
+            {
+                var trimmed = line.Trim();
+                if (trimmed.Length == 0 || trimmed.Length > term.Length + 8)
+                    continue;
+
+                if (trimmed.Contains(term, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+        }
+
+        return false;
+    }
 
     /// <summary>Whether a hit's manual is named for the model the caller asked about.</summary>
     private static bool Mentions(string? model, string title, string path)
