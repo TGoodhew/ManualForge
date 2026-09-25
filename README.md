@@ -494,6 +494,22 @@ Twenty of the 21 come back at rank 1 to 4. This says the recovered text is prese
 attached to the right page; it says nothing about whether the recogniser read it *correctly*, which
 is character error rate and needs the hand-corrected pages of issue #6.
 
+### And then the detector learned to look at more pages, so it all happened again
+
+Fixing the render gate meant re-auditing, which found 19,351 flagged pages where there had been
+11,008, of which 8,343 were new. Twelve of those were checked by eye first — eleven genuine, one
+false positive — and then repaired: **8,704 pages, 698,971 words at 82.4% confidence, 224.7
+minutes**, merged in 2.0. Not one of them recovered nothing.
+
+Measured the same way, on 25 pages repaired in that pass and sampled one per document: **21 findable
+only afterwards, 2 already findable, 2 that the harness scores as misses and are not**. Both of
+those return their *document* — at ranks 4 and 2 — but not the exact page inside 25 results, one of
+them because the phrase is a safety warning printed on every page of the manual. That is ranking
+again, which is the problem this whole section keeps arriving at.
+
+Where the library now stands: **19,351 flagged pages, 19,712 repaired, nothing outstanding**, and an
+index of 584 documents and 104,504 pages.
+
 #### Reproducing it, and measuring the next change against it
 
 ```

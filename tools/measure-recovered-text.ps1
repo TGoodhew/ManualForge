@@ -121,7 +121,12 @@ foreach ($file in $candidates) {
 
     $rank = {
         param($index)
-        $output = & $Exe search $phrase --index $index --limit $Limit 2>&1 | Out-String
+
+        # --show-duplicates, because search folds identical copies together and reports whichever
+        # title it saw first. A library with two copies of one manual would otherwise score as a
+        # miss for the copy that lost the fold, which is a fact about this script rather than about
+        # the repair.
+        $output = & $Exe search $phrase --index $index --limit $Limit --show-duplicates 2>&1 | Out-String
         $r = 0
         foreach ($line in ($output -split "`r?`n")) {
             if ($line -match '^\s{2}(?<title>\S.*?)\s\s+page\s(?<page>[\d,]+)') {

@@ -1,13 +1,13 @@
-# Ground truth, 54845A Programmer: with the model hint a caller already has
+# Ground truth, 54845A Programmer: after the re-audit, with the model hint
 
 Produced by `tools/measure-ground-truth.ps1`. Do not hand-edit.
 
 | | |
 |---|---|
-| Measured | 2026-09-24 17:14 |
+| Measured | 2026-09-24 21:57 |
 | Index | `C:\Users\Tony\OneDrive\Documents\Manuals\_Originals\manualforge-index.db` |
-| Index written | 2026-09-24 15:09, 382.2 MB |
-| Repo commit | b0a4968 |
+| Index written | 2026-09-24 21:57, 385.2 MB |
+| Repo commit | 2c9b4d9 |
 | Asked at | `--limit 200` with `--model 54845A` |
 
 | | of 33 |

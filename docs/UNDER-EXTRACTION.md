@@ -249,6 +249,15 @@ this library.
 
 Of the 9,510 pages, 167 recovered no text at all — 1.8%, against 3.7% in the first pass.
 
+A third pass followed the re-audit, on the 8,343 pages the new gate limb added: **8,704 pages across
+373 documents in 224.7 minutes at 39 pages/min**, recovering 698,971 words at 82.4% mean confidence,
+with **no page recovering nothing**. Merging it took 2.0 minutes. The audit now reads 19,351 flagged
+and nothing outstanding.
+
+The rate is lower than the second pass's 55 pages/min because these are scanned pages rendered at
+400–600 dpi rather than smaller drawn ones — worth knowing, because `repair` estimates from a single
+library-wide average and will quote about three hours for work that takes closer to four.
+
 ### Asking what happened to one document
 
 ```
@@ -492,15 +501,25 @@ the earlier pass, and none are unfindable. Reports are in `docs/measurements/`.
 
 ### The corpus, in full
 
-579 documents, 100,830 pages.
+Re-audited on 24 September 2026 with the three-limb gate and the rule-segment filter: **584
+documents, 105,355 pages, in 61.9 minutes**.
 
-| | |
-|---|---|
-| Documents flagged | 511 |
-| Pages flagged | 11,008 — **3,434 drawn**, 7,574 raster |
-| Documents whose drawn share crosses 10% — **the finding** | **104**, 2,847 pages |
-| Documents with isolated figure pages | 226, 2,070 pages |
-| Scanned documents with OCR gaps | 180, 5,735 pages |
+| | Two-limb gate, 17 Sep | Three limbs, 24 Sep |
+|---|---|---|
+| Documents flagged | 511 | **537** |
+| Pages flagged | 11,008 | **19,351** |
+| — drawn on the page | 3,434 | 4,015 |
+| Documents whose drawn share crosses 10% — **the finding** | 104, 2,847 pages | 110, 3,267 pages |
+| Documents with isolated figure pages | 226, 2,070 pages | 143, **1,522** pages |
+| Scanned documents with OCR gaps | 180, 5,735 pages | 284, **14,126** pages |
+
+Both changes are visible in that table and they pull opposite ways. Figure pages fall by a quarter,
+which is the rule-segment filter no longer counting table borders as lettering. Scan gaps more than
+double, which is the third limb reaching pages that have a text layer *and* a large image — an
+OCR'd scan, the commonest thing in this library and the one shape the old gate could never look at.
+
+Twelve of the new flags were checked by eye before any GPU time was spent on them: eleven genuine,
+one false positive. `docs/measurements/new-flags-precision.md`.
 
 ### Error rate
 
