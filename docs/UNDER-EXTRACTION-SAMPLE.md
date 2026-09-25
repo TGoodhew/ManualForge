@@ -99,6 +99,14 @@ The two misses:
   `G9 Bulb`, `Tab` unextracted. **The page was never rendered at all**: 1,974 characters of prose and
   2 path operations, so neither limb of the gate fired.
 
+### Re-measured, 25 September 2026
+
+Everything below describes the two-limb gate. After the third limb was added and the corpus
+re-audited, the same seeded draw of 20 unflagged pages found **1 miss rather than 2**, moving recall
+from a point estimate near 49% to near **79%** — with an interval no narrower, because the sample is
+no larger. The surviving miss is the reverse-video blind spot described at the end of this document,
+not the render gate. `docs/measurements/recall-after-the-third-limb.md` has the working.
+
 ### What recall actually is, and why the number is soft
 
 Precision is measured on 20 flagged pages drawn from 11,008, and 16/20 is a reasonably firm 80%.

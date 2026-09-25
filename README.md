@@ -1338,15 +1338,20 @@ commands now say so rather than implying a precision they do not have. Narrowing
 per-class rates measured over a full run, which is worth doing the next time there is a full run to
 measure.
 
-### Recall is about half, and the sample is too small to say better
+### Recall is better than it was, and still known only to within a factor of two
 
-The detector's precision is 80%, measured on 20 flagged pages checked by eye. Recall is the softer
-number: 2 misses in 20 unflagged pages puts it somewhere between 20% and 90%, with a point estimate
-near 50%. One of the two known causes — the render gate never looking at a prose page that carries a
-raster figure — is now fixed, and the other, ruled tables counted as lettering, is fixed too. Both
-change what the audit sees, so the numbers above describe the detector as it was measured and not as
-it now stands. Re-measuring means re-drawing the seeded sample of 40 pages and looking at them:
-`doctor --review 20 --seed 1`, and `docs/UNDER-EXTRACTION-SAMPLE.md` for what that involves.
+Precision is 80% on the flags the two-limb gate produced and 92% on the 8,343 the third limb added,
+each measured by looking at pages. Recall was 2 misses in 20 unflagged pages; re-drawn after the
+gate was fixed it is **1 in 20**, which moves the point estimate from about 49% to about **79%**.
+
+The interval has not improved, because the sample size has not: one miss in twenty puts recall
+anywhere between 43% and 99% at 95% confidence. Narrowing that means a few hundred unflagged pages
+rather than twenty — a day of looking at pictures, not an afternoon — and it has not been done.
+
+The one miss is **reverse video**: white letters on a black badge, which a detector looking for ink
+cannot see, because the letters are an absence of ink inside a block of it. That blind spot was
+already documented; it is now the leading known cause of misses, having replaced the render gate.
+`docs/measurements/recall-after-the-third-limb.md`.
 
 ## Open questions
 
