@@ -134,9 +134,15 @@ substantially.
 **It is done, as of 24 September 2026.** The gate has a third limb — render a page carrying an image
 over 10% of itself, whatever its character count — and `GERange.pdf` page 29, the page this section
 was written about, is now flagged: 97 glyph-shaped clusters and 2.61% of the page in ink nothing
-accounts for. On two folders of this corpus the limb added 7% and 12% more flagged pages for no
-meaningful change in audit time, because a page with no text layer at all is decided before the gate
-and so a library of scans does not begin rendering end to end.
+accounts for. A page with no text layer at all is decided before the gate, so a library of scans
+does not begin rendering end to end.
+
+Re-audited over the whole corpus it took the flag count from 11,008 pages to **19,351**, and a
+seeded sample of twelve of the new flags, judged by eye, found **eleven genuine and one false
+positive**: front-panel photographs whose legends do not extract, CAUTION labels carrying fuse
+ratings, schematics whose designators are missing, figures holding part numbers. The one miss is
+dense line art read as lettering — the carrier strokes of an AM waveform — which is the family this
+document already describes. `docs/measurements/new-flags-precision.md` has the twelve.
 
 Everything below is why it waited, and it still describes what the change costs: it changes what the
 audit looks at, so it invalidates the corpus run above and the 2.5 hours that produced it, and it
