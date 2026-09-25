@@ -62,6 +62,26 @@ operations, images and their coverage, and looks for Type 3 fonts and embedded f
 measurement that settles it, and keeping it behind a gate is what makes a hundred-thousand-page
 audit finish in minutes rather than hours.
 
+The gate has three limbs, and a page passing any of them is rendered:
+
+| Limb | Threshold | What it catches |
+|---|---|---|
+| Few characters | under 900 extracted | a page that is mostly drawing |
+| Many paths | 40 or more painting operations | a syntax diagram, schematic or pin-out |
+| A large image | covering 10% or more of the page | lettering inside a photograph or screenshot |
+
+**The third limb was missing until 24 September 2026, and its absence was the larger half of the
+recall problem.** A page with plenty of prose and a raster figure whose labels do not extract
+satisfies neither of the first two — too many characters for one, too few paths for the other — so
+it was never rendered and could not be flagged whatever the thresholds said. That is an extremely
+common shape in illustrated manuals, and it is `clean-33` in `docs/UNDER-EXTRACTION-SAMPLE.md`:
+1,974 characters of prose, 2 path operations, and `Receptacle`, `Socket` and `G6.35 Bulb` sitting
+unextracted in the figure. With the limb it is flagged.
+
+The cost is smaller than it sounds. Pages with no text layer at all are decided before the gate, so
+a library of scans does not suddenly render end to end. Measured on two folders of this corpus, the
+limb added 7% and 12% more flagged pages for no meaningful change in audit time.
+
 ### The deciding signal
 
 Render the page, count the pixels carrying a mark, and subtract the ones an extracted glyph
@@ -84,6 +104,7 @@ carry the same reasoning in their XML docs.
 |---|---|---|---|
 | Render below characters/page | 900 | `--render-below-chars` | Below the 1,500–3,000 a normal typeset page yields here, well above the 458/page the 54845A guide manages. Only decides what gets *looked at*; a page over it is still rendered by the rule below. |
 | Render at/above path ops | 40 | `--render-above-paths` | Page furniture — a header rule, a footer rule, a table's ruling, a logo — costs well under 40 painting operations. A syntax diagram costs hundreds; page 40 of the 54845A guide paints 183. |
+| Render at/above image coverage | 0.10 | `--render-above-image` | The third limb, added 24 Sep 2026. About a quarter-page figure: below that there is not room for enough lettering to be worth a render, above it one sits comfortably. Set it to 1.0 for the two-limb gate the 17 September audit was made with. |
 | Audit render resolution | 150 dpi | `--audit-dpi` | Not the OCR resolution. It only has to make ink countable and glyph-sized blobs separable; at 150 dpi a 6 pt annotation is still twelve pixels tall and does not merge with its neighbour. |
 | Ink level | 200 of 255 | — | PDFium antialiases vector strokes, so a hairline lands as a band of greys. Counting every off-white pixel would let antialiasing dominate the ink fraction on a page whose only mark is a header rule. |
 | Text box padding | 1.5 pt | — | Absorbs antialiasing, hinting and descenders without letting one line of text claim the ink of the line 10–12 pt below it. |
@@ -93,7 +114,9 @@ carry the same reasoning in their XML docs.
 | Blob height | 2.5–30 pt | — | Below, a speck; above, a bubble, a box or a rule. Display headings in this corpus top out around 24 pt. |
 | Blob width | ≤ 30 pt | — | Wider is a connector line, an arrow run or a box edge. |
 | Blob fill | ≥ 0.18 of its box | — | A letter fills 25–60% of its bounding box; a diagonal connector or an L-shaped corner fills far less. |
-| Blob aspect | ≤ 8:1 either way | — | An `l` is about 1:6 and an `m` about 1.2:1. A rule fragment is 40:1. |
+| Blob aspect | ≤ 8:1 either way | — | An `l` is about 1:6 and an `m` about 1.2:1. A long rule fragment is 40:1. |
+| Rule-segment run | 3 | `--rule-run` | A *short* rule fragment passes every shape test above — between two close table rows it is a few pixels each way, solid, aspect near one. Position gives it away: three or more hairline blobs of identical width sharing one x is a ruled line with gaps in it, not text, because glyphs differ in width even in a left-aligned column. Only ever removes flags. |
+| Rule-segment width | ≤ 1.5 pt | — | Needed alongside the run test, which alone would take a column of left-aligned text with it. Table rules here are half a point to one point; the narrowest glyph that survives the height and fill thresholds is several points of ink wide at 150 dpi. |
 | Characters per blob | 0.85 | — | For the recoverable-text estimate only. Slightly below one because touching characters merge and some blobs are arrowheads. Labelled as an estimate everywhere it is shown. |
 | Raster page image coverage | 0.2 | — | A flagged page whose missing lettering sits under an image this large is a scan or a screenshot, not a drawing. Nowhere near a boundary: a scanned page is one image covering 90%+, a vector diagram has none. |
 | Document flagged share | 0.10 | — | Decides whether the *report* calls a document broken, scanned-and-gappy, or merely illustrated. See below. |

@@ -143,6 +143,9 @@ internal static class SurveyCommand
             var hours = MeasuredThroughput.HoursFor(workPages);
             Console.WriteLine(
                 $"  Estimated at {MeasuredThroughput.PagesPerMinuteOnGpu:F0} pages/min on CUDA: {hours:F1} hours");
+            Console.WriteLine(
+                "  A library-wide average, and the smallest files run first, so the last of those " +
+                "hours are the densest material and will run longer than this.");
         }
     }
 

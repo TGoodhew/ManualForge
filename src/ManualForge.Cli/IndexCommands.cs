@@ -1,3 +1,4 @@
+using System.Text.Json;
 using ManualForge.Core.Auditing;
 using ManualForge.Core.Indexing;
 using Microsoft.Extensions.Logging;
@@ -28,6 +29,8 @@ internal static class IndexCommand
             DoctorStorePath = arguments.Get("doctor-db"),
             WithoutRepairs = arguments.Has("no-repairs"),
             Workers = arguments.GetInt("workers") ?? new IndexOptions().Workers,
+            Compact = arguments.Has("compact"),
+            SidecarsBesidePdfs = arguments.Has("sidecars-inline"),
         };
 
         var indexPath = options.IndexPath ?? LibraryIndexer.DefaultIndexPath(root);
@@ -38,6 +41,8 @@ internal static class IndexCommand
             $"Workers : {options.Workers} extracting at once, one writing - --workers changes it");
         if (options.SidecarDirectory is not null)
             Console.WriteLine($"Sidecars: {options.SidecarDirectory}");
+        if (options.SidecarsBesidePdfs)
+            Console.WriteLine("Sidecars: one <name>.txt beside each PDF, in the library folder itself");
         Console.WriteLine();
 
         var indexer = new LibraryIndexer(loggerFactory.CreateLogger<LibraryIndexer>());
@@ -84,6 +89,15 @@ internal static class IndexCommand
             $"Index     : {statistics.Documents:N0} documents, {statistics.Pages:N0} pages, " +
             $"{statistics.SizeBytes / 1024.0 / 1024.0:F1} MB");
 
+        // A tenth of the file, or 50 MB, is enough to be worth a sentence. Below that it is noise,
+        // and rewriting a cloud-synced index to save it would cost more than it returns.
+        if (report.ReclaimableBytes > Math.Max(50L * 1024 * 1024, statistics.SizeBytes / 10))
+        {
+            Console.WriteLine(
+                $"Free space: {report.ReclaimableBytes / 1024.0 / 1024.0:F0} MB of the file is free pages " +
+                "left by updating documents in place — `--compact` rewrites the index without them");
+        }
+
         PrintReconciliation(root, index, options);
 
         return report.DocumentsFailed > 0 ? 1 : 0;
@@ -121,9 +135,30 @@ internal static class IndexCommand
     }
 }
 
-/// <summary>Queries the index.</summary>
+/// <summary>
+/// Queries the index.
+///
+/// <para>
+/// Answers a person by default and a program on request. The exit code is part of that contract:
+/// <b>0</b> results, <b>2</b> searched and nothing matched, <b>1</b> could not search at all. A
+/// caller deciding whether to fall back to its own file-name search needs 1 and 2 to be different,
+/// because they mean opposite things — one says this library has nothing, the other says nobody
+/// asked it.
+/// </para>
+/// <para>
+/// With <c>--json</c> or <c>--files-only</c>, stdout carries machine output and nothing else.
+/// Every note, caveat and warning goes to stderr, where a pipe will not swallow it and a parser
+/// will not trip over it.
+/// </para>
+/// </summary>
 internal static class SearchCommand
 {
+    /// <summary>Searched the index, and it holds nothing matching. Not an error.</summary>
+    private const int NothingMatched = 2;
+
+    /// <summary>Could not search: no index, or one this build cannot read. Not the same thing.</summary>
+    private const int CouldNotSearch = 1;
+
     public static int Run(CommandLine arguments)
     {
         var query = arguments.Positional(0)
@@ -134,10 +169,14 @@ internal static class SearchCommand
             ?? (root is not null ? LibraryIndexer.DefaultIndexPath(root) : null)
             ?? throw new ArgumentException("Give --library <folder> or --index <path>.");
 
+        var asJson = arguments.Has("json");
+        var filesOnly = arguments.Has("files-only");
+        var machine = asJson || filesOnly;
+
         if (!File.Exists(indexPath))
         {
             Console.Error.WriteLine($"No index at {indexPath}. Build one with `manualforge index <folder>`.");
-            return 1;
+            return CouldNotSearch;
         }
 
         using var index = new SearchIndex(indexPath, readOnly: true);
@@ -148,15 +187,22 @@ internal static class SearchCommand
             foldDuplicates: !arguments.Has("show-duplicates"),
             note: message =>
             {
-                Console.WriteLine(message);
-                Console.WriteLine();
-            });
+                // To stderr always: it is a caveat about the answer, and a caller parsing stdout
+                // still needs to hear it.
+                Console.Error.WriteLine(message);
+                if (!machine)
+                    Console.Error.WriteLine();
+            },
+            model: arguments.Get("model"));
+
+        if (machine)
+            return MachineOutput(index, hits, asJson, root, indexPath);
 
         if (hits.Count == 0)
         {
             Console.WriteLine($"Nothing matched {query}.");
             PrintMissWarning(root, indexPath);
-            return 0;
+            return NothingMatched;
         }
 
         Console.WriteLine($"{hits.Count} result(s) for {query}:");
@@ -193,6 +239,89 @@ internal static class SearchCommand
         }
 
         return 0;
+    }
+
+    /// <summary>
+    /// Output for a program rather than a person: one JSON document, or one path per line.
+    ///
+    /// <para>
+    /// The JSON carries the caveats as data — how many pages of this library hold text nobody has
+    /// checked, and how many documents are in it with no text at all — because a caller that
+    /// cannot see those will report "not in the library" for something that is in the library and
+    /// merely invisible. GPIB-MCP is the caller this exists for, and it passes the caveat on.
+    /// </para>
+    /// </summary>
+    private static int MachineOutput(
+        SearchIndex index, IReadOnlyList<SearchHit> hits, bool asJson, string? root, string indexPath)
+    {
+        if (!asJson)
+        {
+            // Distinct paths in rank order: what a caller choosing which files to open wants, and
+            // nothing else on stdout.
+            foreach (var path in hits.Select(h => h.Path).Distinct(StringComparer.OrdinalIgnoreCase))
+                Console.WriteLine(path);
+
+            return hits.Count == 0 ? NothingMatched : 0;
+        }
+
+        var statistics = index.Statistics();
+
+        var payload = new
+        {
+            schemaVersion = SearchIndex.SchemaVersion,
+            index = indexPath,
+            documents = statistics.Documents,
+            pages = statistics.Pages,
+            results = hits.Select(hit => new
+            {
+                path = hit.Path,
+                title = hit.Title,
+                page = hit.PageNumber,
+                snippet = hit.Snippet,
+                rank = hit.Rank,
+                source = hit.MatchSource.ToString(),
+                recoveredByOcr = hit.MatchedOcrText,
+                ocrConfidence = hit.MatchedOcrText ? hit.OcrConfidence : 0,
+                alsoAt = hit.AlsoAt,
+            }),
+            caveats = new
+            {
+                pagesFromOcr = statistics.RepairedPages,
+                documentsWithNoTextAtAll = statistics.DocumentsWithoutText,
+                someOfThem = index.DocumentsWithoutText(5),
+                unrepairedFlaggedPages = OutstandingPages(root, indexPath),
+            },
+        };
+
+        Console.WriteLine(JsonSerializer.Serialize(
+            payload, new JsonSerializerOptions { WriteIndented = true }));
+
+        return hits.Count == 0 ? NothingMatched : 0;
+    }
+
+    /// <summary>
+    /// Pages the audit flagged and the repair has not reached, or null when nobody has audited.
+    /// Null and zero mean different things and the caller is told which.
+    /// </summary>
+    private static long? OutstandingPages(string? root, string indexPath)
+    {
+        var folder = root ?? Path.GetDirectoryName(Path.GetDirectoryName(indexPath));
+        if (folder is null)
+            return null;
+
+        var doctorPath = DoctorStore.DefaultPathFor(folder);
+        if (!File.Exists(doctorPath))
+            return null;
+
+        try
+        {
+            using var store = new DoctorStore(doctorPath, readOnly: true);
+            return store.Summary().OutstandingPages;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
     }
 
     /// <summary>

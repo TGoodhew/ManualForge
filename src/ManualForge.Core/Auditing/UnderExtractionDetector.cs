@@ -373,7 +373,8 @@ public sealed class UnderExtractionDetector(DoctorOptions? options = null)
 
         var worthRendering =
             glyphs < _options.RenderBelowCharactersPerPage
-            || pathOps >= _options.RenderAtOrAbovePathOperations;
+            || pathOps >= _options.RenderAtOrAbovePathOperations
+            || imageCoverage >= _options.RenderAtOrAboveImageCoverage;
 
         if (!worthRendering)
         {

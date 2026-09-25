@@ -38,7 +38,11 @@ param(
     [string] $Out,
 
     # Goes in the report header: "before", "after full repair", and so on.
-    [string] $Label = 'unlabelled'
+    [string] $Label = 'unlabelled',
+
+    # Pass an instrument model the way a caller who knows it would. Every string in the table comes
+    # from one manual, so this measures what the hint is worth to somebody holding the instrument.
+    [string] $Model
 )
 
 $ErrorActionPreference = 'Stop'
@@ -66,7 +70,10 @@ Write-Host ""
 $results = foreach ($case in $cases) {
     # Results print as "  <title>  page <n>" followed by snippet and path lines. Rank is the
     # order they come back in, so count title lines and stop at the expected page.
-    $output = & $Exe search $case.Query --index $indexPath --limit $Limit 2>&1 | Out-String
+    $arguments = @('search', $case.Query, '--index', $indexPath, '--limit', $Limit)
+    if ($Model) { $arguments += @('--model', $Model) }
+
+    $output = & $Exe @arguments 2>&1 | Out-String
 
     $rank = 0
     $found = 0
@@ -120,7 +127,8 @@ $report.Add("| Measured | $(Get-Date -Format 'yyyy-MM-dd HH:mm') |")
 $report.Add("| Index | ``$indexPath`` |")
 $report.Add("| Index written | $($indexFile.LastWriteTime.ToString('yyyy-MM-dd HH:mm')), $([math]::Round($indexFile.Length / 1MB, 1)) MB |")
 $report.Add("| Repo commit | $commit |")
-$report.Add("| Asked at | ``--limit $Limit`` |")
+$asked = if ($Model) { "``--limit $Limit`` with ``--model $Model``" } else { "``--limit $Limit``" }
+$report.Add("| Asked at | $asked |")
 $report.Add('')
 $report.Add("| | of $total |")
 $report.Add('|---|---|')

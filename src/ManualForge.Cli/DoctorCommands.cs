@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text.Json;
 using ManualForge.Core.Auditing;
 using ManualForge.Core.Ocr;
+using ManualForge.Core.Pipeline;
 using Microsoft.Extensions.Logging;
 
 namespace ManualForge.Cli;
@@ -439,6 +440,9 @@ internal static class DoctorCommand
             arguments.GetInt("render-below-chars") ?? new DoctorOptions().RenderBelowCharactersPerPage,
         RenderAtOrAbovePathOperations =
             arguments.GetInt("render-above-paths") ?? new DoctorOptions().RenderAtOrAbovePathOperations,
+        RenderAtOrAboveImageCoverage =
+            arguments.GetDouble("render-above-image") ?? new DoctorOptions().RenderAtOrAboveImageCoverage,
+        RuleSegmentRun = arguments.GetInt("rule-run") ?? new DoctorOptions().RuleSegmentRun,
         SamplePages = arguments.GetInt("sample") ?? 0,
         Workers = arguments.GetInt("workers") ?? new DoctorOptions().Workers,
     };
@@ -687,6 +691,22 @@ internal static class RepairCommand
         Console.WriteLine(options.IncludeScannedPages
             ? "Scope    : drawn pages and scanned ones — this will take hours on a corpus this size"
             : "Scope    : drawn pages only. --include-scans also redoes scanned pages whose OCR missed text");
+
+        // Before, not after. A repair pass over a corpus backlog is a multi-hour commitment, and
+        // somebody deciding whether to start one now or overnight needs the number at the top.
+        if (summary.OutstandingPages > 0)
+        {
+            var hours = summary.OutstandingPages / MeasuredThroughput.PagesPerMinuteRepairing / 60.0;
+            var howLong = hours < 1
+                ? $"{hours * 60:F0} minutes"
+                : $"{hours:F1} hours";
+
+            Console.WriteLine(
+                $"Expect   : up to {summary.OutstandingPages:N0} page(s) at the measured " +
+                $"{MeasuredThroughput.PagesPerMinuteRepairing:F0} pages/min — about {howLong}, " +
+                "less whatever this scope leaves out");
+        }
+
         Console.WriteLine();
 
         if (summary.OutstandingPages == 0 && !options.Force)

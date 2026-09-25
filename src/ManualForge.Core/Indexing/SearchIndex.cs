@@ -79,6 +79,17 @@ public sealed record IndexStatistics(int Documents, long Pages, long SizeBytes)
     public long RepairedPages { get; init; }
 
     public int RepairedDocuments { get; init; }
+
+    /// <summary>
+    /// Documents in the index holding no text on any page: image-only scans nobody has OCR'd.
+    ///
+    /// <para>
+    /// Worth a number of its own because it is the difference between "not in this library" and
+    /// "in this library and invisible to search", and a caller told only the first will pass a
+    /// wrong answer on to somebody. <see cref="SearchIndex.DocumentsWithoutText"/> names them.
+    /// </para>
+    /// </summary>
+    public int DocumentsWithoutText { get; init; }
 }
 
 /// <summary>
@@ -115,6 +126,11 @@ public sealed class SearchIndex : IDisposable
         }.ToString());
 
         _connection.Open();
+
+        // Checked before anything is read or written, on an existing file either way. Something
+        // else is being invited to depend on this file, and a reader that quietly misreads a
+        // schema it does not understand is worse than one that stops.
+        EnsureSchemaIsReadable();
 
         if (readOnly)
             return;
@@ -162,6 +178,46 @@ public sealed class SearchIndex : IDisposable
         command.ExecuteNonQuery();
 
         Migrate();
+
+        using var stamp = _connection.CreateCommand();
+        stamp.CommandText = $"PRAGMA user_version = {SchemaVersion}";
+        stamp.ExecuteNonQuery();
+    }
+
+    /// <summary>
+    /// The schema this build understands, written into the file as <c>PRAGMA user_version</c>.
+    ///
+    /// <para>
+    /// It rises whenever an existing column changes meaning — not when one is added. A reader that
+    /// does not know about a new column carries on correctly; a reader that misunderstands an old
+    /// one is quietly wrong, and that is the case this number exists to make loud. Adding
+    /// <c>supplement_hash</c> did not raise it; redefining what <c>text</c> holds would.
+    /// </para>
+    /// <para>
+    /// Version 1 is every index built before the number existed, which is why an unstamped file is
+    /// read rather than refused: those indexes are correct, they simply predate anybody promising
+    /// anything about them.
+    /// </para>
+    /// </summary>
+    public const int SchemaVersion = 1;
+
+    /// <summary>
+    /// Refuses an index written by a newer build, and says so in a sentence a caller can act on.
+    /// </summary>
+    private void EnsureSchemaIsReadable()
+    {
+        using var command = _connection.CreateCommand();
+        command.CommandText = "PRAGMA user_version";
+        var version = Convert.ToInt32(command.ExecuteScalar(), CultureInfo.InvariantCulture);
+
+        if (version <= SchemaVersion)
+            return;
+
+        throw new InvalidOperationException(
+            $"{DatabasePath} was written by a newer version of ManualForge: its schema is version " +
+            $"{version} and this build understands {SchemaVersion}. Update ManualForge, or point " +
+            "at a different index. Nothing was read from it, because a reader that guesses at a " +
+            "schema it does not know is worse than one that stops.");
     }
 
     /// <summary>
@@ -379,8 +435,18 @@ public sealed class SearchIndex : IDisposable
     /// guess is wrong the query is re-run with every term quoted rather than failed, since an
     /// error message in place of results is the worst of the three possible answers.
     /// </remarks>
+    /// <param name="model">
+    /// An instrument model the caller already knows, such as <c>54845A</c>. Manuals whose title or
+    /// path mentions it are ranked higher — biased, never filtered, because the answer to a
+    /// question about one instrument is often printed in another instrument's manual, and a filter
+    /// would hide exactly those.
+    /// </param>
     public IReadOnlyList<SearchHit> Search(
-        string query, int limit = 20, bool foldDuplicates = true, Action<string>? note = null)
+        string query,
+        int limit = 20,
+        bool foldDuplicates = true,
+        Action<string>? note = null,
+        string? model = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(query);
 
@@ -422,8 +488,14 @@ public sealed class SearchIndex : IDisposable
             """;
         command.Parameters.AddWithValue("$q", prepared);
 
-        // Folding happens after the fact, so the limit has to allow for copies being dropped.
-        command.Parameters.AddWithValue("$limit", foldDuplicates ? limit * 6 : limit);
+        // Folding happens after the fact, so the limit has to allow for copies being dropped. A
+        // model bias needs a wider window still: a hit it would promote from rank 80 to rank 3 has
+        // to have been fetched, and re-ordering a list of ten cannot reach it.
+        var window = foldDuplicates ? limit * 6 : limit;
+        if (!string.IsNullOrWhiteSpace(model))
+            window = Math.Min(Math.Max(window * 10, 200), 2000);
+
+        command.Parameters.AddWithValue("$limit", window);
 
         // Every candidate is read before any is chosen, so that folding identical copies together
         // cannot silently shorten the result list.
@@ -456,7 +528,15 @@ public sealed class SearchIndex : IDisposable
                     OcrConfidence = ocrText is null ? 0 : confidence,
                 };
 
-                candidates.Add((hit, hash, rank));
+                // bm25 returns a negative score where more negative is better, so multiplying a
+                // matching hit's score widens its lead. A multiplier rather than a constant, so
+                // the bias scales with how well the page matched in the first place: it promotes a
+                // good hit in the right manual, and cannot drag a poor one to the top.
+                var score = rank;
+                if (Mentions(model, title, path))
+                    score *= ModelBias;
+
+                candidates.Add((hit, hash, score));
             }
         }
 
@@ -539,6 +619,24 @@ public sealed class SearchIndex : IDisposable
     }
 
     /// <summary>
+    /// How much better a hit scores for being in a manual whose title or path names the model the
+    /// caller asked about. 1.5 promotes the right manual's page past a handful of near-equals
+    /// without letting it overtake a page that matched the words far better — which is the
+    /// behaviour wanted, because the model is a hint about relevance and not a statement of it.
+    /// </summary>
+    private const double ModelBias = 1.5;
+
+    /// <summary>Whether a hit's manual is named for the model the caller asked about.</summary>
+    private static bool Mentions(string? model, string title, string path)
+    {
+        if (string.IsNullOrWhiteSpace(model))
+            return false;
+
+        return title.Contains(model, StringComparison.OrdinalIgnoreCase)
+            || Path.GetFileName(path).Contains(model, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
     /// Runs the MATCH, and if FTS5 rejects the expression, runs it again with every term quoted.
     /// </summary>
     private static SqliteDataReader Execute(
@@ -607,12 +705,50 @@ public sealed class SearchIndex : IDisposable
         using var reader = command.ExecuteReader();
         reader.Read();
 
+        var documents = reader.GetInt32(0);
+        var pages = reader.GetInt64(1);
+        reader.Close();
+
         var size = File.Exists(DatabasePath) ? new FileInfo(DatabasePath).Length : 0;
-        return new IndexStatistics(reader.GetInt32(0), reader.GetInt64(1), size)
+        return new IndexStatistics(documents, pages, size)
         {
             RepairedPages = repairedPages,
             RepairedDocuments = repairedDocuments,
+            DocumentsWithoutText = DocumentsWithoutText(int.MaxValue).Count,
         };
+    }
+
+    /// <summary>
+    /// Documents that are in the index and hold no text at all, newest first, up to a limit.
+    ///
+    /// <para>
+    /// These are the library's blind spots. The document is known, its page count is known, and
+    /// searching for anything on any of its pages returns nothing — not because the library lacks
+    /// the answer but because nobody has run OCR over it. Silence about that is what turns
+    /// "nothing matched" into a false negative that a caller repeats as fact.
+    /// </para>
+    /// </summary>
+    public IReadOnlyList<string> DocumentsWithoutText(int limit = 5)
+    {
+        using var command = _connection.CreateCommand();
+        command.CommandText = """
+            SELECT d.path
+            FROM documents d
+            WHERE NOT EXISTS (
+                SELECT 1 FROM pages p
+                WHERE p.doc_id = d.id AND LENGTH(TRIM(p.text)) > 0
+            )
+            ORDER BY d.indexed_utc DESC
+            LIMIT $limit
+            """;
+        command.Parameters.AddWithValue("$limit", limit);
+
+        var paths = new List<string>();
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+            paths.Add(reader.GetString(0));
+
+        return paths;
     }
 
     public IReadOnlyList<IndexedDocument> Documents()
@@ -637,6 +773,40 @@ public sealed class SearchIndex : IDisposable
     {
         using var command = _connection.CreateCommand();
         command.CommandText = "INSERT INTO pages(pages) VALUES('optimize')";
+        command.ExecuteNonQuery();
+    }
+
+    /// <summary>
+    /// Bytes the file is holding that nothing is using — free pages left behind by updating
+    /// documents in place. <see cref="Optimise"/> merges the full-text index; it does not give
+    /// these back, which is why an index that grew is larger than the same index built fresh.
+    /// </summary>
+    public long ReclaimableBytes()
+    {
+        using var command = _connection.CreateCommand();
+        command.CommandText = "PRAGMA freelist_count";
+        var free = Convert.ToInt64(command.ExecuteScalar(), CultureInfo.InvariantCulture);
+
+        command.CommandText = "PRAGMA page_size";
+        var size = Convert.ToInt64(command.ExecuteScalar(), CultureInfo.InvariantCulture);
+
+        return free * size;
+    }
+
+    /// <summary>
+    /// Rewrites the database without its free pages.
+    ///
+    /// <para>
+    /// Deliberately not part of an ordinary index run. VACUUM rewrites the whole file, needs room
+    /// for a second copy of it while it works, and on a 300 MB index living in OneDrive it means
+    /// re-uploading 300 MB — a cost nobody asked for as the tail of a routine build. Offered when
+    /// it is worth having, run when it is asked for.
+    /// </para>
+    /// </summary>
+    public void Compact()
+    {
+        using var command = _connection.CreateCommand();
+        command.CommandText = "VACUUM";
         command.ExecuteNonQuery();
     }
 

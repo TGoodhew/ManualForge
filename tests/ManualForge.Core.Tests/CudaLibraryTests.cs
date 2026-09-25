@@ -119,6 +119,32 @@ public class CudaLibraryTests
     }
 
     [Fact]
+    public void TheArm64CopyOfTheSameLibrariesIsNotAnAnswer()
+    {
+        // CUDA 13 installs an arm64 build of every one of these DLLs beside the x64 build, under
+        // the same file names, and on a real 13.4 install a plain recursive search finds arm64
+        // first. Handing an x64 process those fails exactly the way a missing file does: the
+        // provider declines, nothing throws, and the work runs on the CPU at a tenth of the speed.
+        //
+        // Only x64 is offered here, so a search that has no opinion about architecture returns the
+        // wrong directory and this test fails. Descending name order used to make it come out
+        // right by luck.
+        var tree = new FakeTree()
+            .Add(
+                "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v13.4\\bin\\arm64",
+                "cublas64_13.dll", "cublasLt64_13.dll", "cudart64_13.dll")
+            .Add(
+                "C:\\Tools\\cudnn-9.26.0.51\\cudnn-windows-x86_64-9.26.0.51_cuda13-archive\\bin\\arm64",
+                "cudnn64_9.dll", "cudnn_graph64_9.dll");
+
+        var location = CudaLibraries.Locate(Search(tree));
+
+        Assert.False(location.Complete);
+        Assert.Null(location.CudaDirectory);
+        Assert.Null(location.CudnnDirectory);
+    }
+
+    [Fact]
     public void ItFindsCudnnThreeFoldersBelowWhereTheZipLands()
     {
         var location = CudaLibraries.Locate(Search(CompleteInstall()));

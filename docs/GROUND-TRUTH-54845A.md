@@ -19,6 +19,17 @@ chapter 2, confirmed against the printed folio on each page.
 | After the repair, development library | **33 of 33** |
 | After the repair, **full 584-document library** | **27 of 33**, 21 of them in the first ten |
 | After the whole library was repaired, 24 Sep 2026 | **27 of 33**, 21 in the first ten — unchanged |
+| The same, asked with `--model 54845A` | **33 of 33**, **32** in the first ten |
+
+That last row is not a fix for ranking; it is a caller handing over something the index never had.
+Every string in this table comes from one manual, so telling search which instrument is being asked
+about is worth six queries and eleven top-ten places. It biases rather than filters, so a technique
+described in another instrument's manual is still returned. The one query still outside the first
+ten is `The EXTernal command is only available on the 54810/20`, at 13, for the reason this document
+already gives: the note is printed verbatim on several continuation pages and they are all equally
+correct answers.
+
+A user who does not know the model gets the 27. That is still issue #3.
 
 The last row is not a disappointment, it is a category error corrected. This document measures one
 manual, and that manual was repaired on 18 September; the pass that followed repaired the other 510

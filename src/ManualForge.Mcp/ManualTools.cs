@@ -39,7 +39,12 @@ public sealed class ManualTools(ManualLibraryContext library)
                      "':TRIGger:MODE {EDGE|GLITch}' is read as the notation it is. " +
                      "AND, OR, NOT and NEAR( work if you want them.")]
         string query,
-        [Description("Results to return. Default 8, maximum 30.")] int limit = 8)
+        [Description("Results to return. Default 8, maximum 30.")] int limit = 8,
+        [Description(
+            "An instrument model you already know, e.g. '54845A'. Manuals whose title or filename " +
+            "mention it are ranked higher. This biases, it does not filter: a technique described " +
+            "in another instrument's manual is still returned, because it is often the answer.")]
+        string? model = null)
     {
         if (string.IsNullOrWhiteSpace(query))
             return "Give something to search for.";
@@ -48,7 +53,7 @@ public sealed class ManualTools(ManualLibraryContext library)
             return library.MissingIndexAdvice();
 
         using var index = library.OpenIndex();
-        var hits = index.Search(query, Math.Clamp(limit, 1, 30));
+        var hits = index.Search(query, Math.Clamp(limit, 1, 30), model: model);
 
         if (hits.Count == 0)
             return NothingFound(query, index.Statistics());

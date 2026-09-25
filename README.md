@@ -37,6 +37,8 @@ manualforge doctor <file.pdf> --report     one document, page by page, and what 
 manualforge repair <folder>                OCR just those pages; merge, never replace
 manualforge index <folder>                 build the full-text index over a library
 manualforge search <query> --library <f>   ask it: manual, page and snippet
+manualforge search <query> --model 54845A  same, ranking that instrument's manuals higher
+manualforge search <query> --json          the same answer for a program, with its caveats
 manualforge reconcile <folder>             which PDFs are not in the index, and why
 manualforge gpu                            which execution provider is actually active
 ```
@@ -83,8 +85,21 @@ The solution is `ManualForge.slnx` with five projects and central package manage
 
 ### Installing it
 
-There is no installer yet — [#2](https://github.com/TGoodhew/ManualForge/issues/2) tracks the script
-that will set a machine up from nothing. Until then, publishing into place is two commands:
+The GPU prerequisites come first, and there is a script for them:
+
+```powershell
+./tools/setup-cuda.ps1 -WhatIf      # what it would download and install, and how large
+./tools/setup-cuda.ps1 -CheckOnly   # what this machine already has, changing nothing
+./tools/setup-cuda.ps1              # install what is missing
+```
+
+It installs CUDA 13 and cuDNN 9, finds the DLLs rather than assuming a layout, puts them on `PATH`
+without duplicating entries, and finishes by asking `manualforge gpu` which provider it actually
+got. It never lets the toolkit installer replace a newer display driver with its bundled one. It
+does not install .NET, Visual Studio or the driver, and it does not build anything — publishing is
+below, because a machine is prepared once and the application is published on every change.
+
+Publishing into place is three commands:
 
 ```powershell
 $target = "$env:LOCALAPPDATA\Programs\ManualForge"
@@ -863,7 +878,16 @@ writes and the other may read:
 ```
 
 SQLite, opened read-only, safe to read while ManualForge is writing (WAL). Its schema is a
-**stable contract** — it will not change shape without a version bump and a note here:
+**stable contract**, and the file now says so itself: `PRAGMA user_version` carries the schema
+version, currently **1**. ManualForge refuses an index stamped higher than the version it
+understands, with a message saying so, rather than reading it and guessing — and a consumer should
+do the same.
+
+The number rises when an existing column changes *meaning*, not when one is added: a reader that
+does not know about a new column stays correct, while a reader that misunderstands an old one is
+quietly wrong, and that is the case worth making loud. Adding `supplement_hash` did not raise it.
+An index built before the stamp existed reads as 0 and is accepted, because those indexes are
+correct — they simply predate anybody promising anything.
 
 ```sql
 CREATE TABLE documents (
@@ -899,6 +923,35 @@ LIMIT 12;
 documentation is full of punctuation that collides with it — `HP-IB handshake` fails outright with
 `no such column: IB`. Quote each term (`"HP-IB" "handshake"`) unless the caller clearly meant the
 query language. ManualForge does this in `SearchQuery.Prepare`.
+
+### Or ask the command line, which is a contract too
+
+A consumer that would rather not take a SQLite dependency does not have to. `manualforge` on `PATH`
+answers in JSON, which is the same arrangement GPIB-MCP already has with `pdftotext`:
+
+```
+manualforge search "<query>" --library <folder> --json         one object per hit, plus caveats
+manualforge search "<query>" --library <folder> --files-only   ranked distinct paths, one per line
+manualforge search "<query>" --library <folder> --model 8340B  bias towards that instrument
+```
+
+Three things a caller can rely on:
+
+* **stdout is machine output and nothing else.** Every note, caveat and warning goes to stderr.
+* **The exit code separates two different answers.** `0` results, `2` searched and nothing matched,
+  `1` could not search — no index, or one written by a newer build. A caller deciding whether to
+  fall back to its own file-name search needs `1` and `2` to differ, because they mean opposite
+  things: one says this library has nothing, the other says nobody asked it.
+* **The caveats travel with the answer.** `--json` reports how many pages hold recovered OCR text,
+  how many documents are indexed with no text at all and names a few, and how many flagged pages
+  are still unrepaired. A "no results" that omits those invites the caller to report absence when
+  the truth is that nobody has looked yet.
+
+`--model` exists because the caller often knows something the index does not. Measured on the 33
+hand-read strings, all of which come from one manual: **27 of 33 in the first 25 without it, 33 of
+33 with it, and the first-ten figure goes from 21 to 32**. It biases rather than filters — a
+technique described in another instrument's manual is still returned, and hiding those would be a
+worse failure than ranking them low. See `docs/measurements/ground-truth-with-model-hint.md`.
 
 ### Three ways they help each other
 
@@ -1095,6 +1148,7 @@ tests/ManualForge.Core.Tests/     357 tests, no GPU or network needed
 tools/measure-ground-truth.ps1    runs the 33 hand-read strings, scores where each one ranked
 tools/ground-truth-54845A.tsv     those strings, and the page each should return
 tools/measure-recovered-text.ps1  samples repaired pages; did the recovered text reach search?
+tools/setup-cuda.ps1              installs CUDA 13 and cuDNN 9, then checks what actually loaded
 docs/measurements/                what those produced: one dated file per run, not hand-edited
 ```
 
@@ -1204,13 +1258,29 @@ documents in flight rather than the library.
 
 ## Known gaps
 
-### Throughput estimates still quote the serial rate
+### An estimate is an average, and the work is not evenly spread
 
-`status` and `survey` estimate remaining time at 55.9 pages/min, which was the measured serial rate
-before the pipeline. With two pages on the GPU the real figure is 104, so those estimates are now
-pessimistic by about half. They are also a library-wide average over work ordered smallest-first, so
-the tail of a run is the densest material. Both want fixing together, against a fresh full-library
-run rather than a five-manual sample.
+`status`, `survey` and `repair` estimate remaining time from measured rates — 104 pages/min on the
+GPU, 46 for a repair — held in one place, `MeasuredThroughput`, so that a figure which goes stale
+goes stale once. This section used to say they still quoted 55.9 pages/min, the pre-pipeline serial
+rate; that was fixed in `115d036` and the note outlived it, which is its own small lesson about
+documentation that records a problem rather than a behaviour.
+
+What remains true is that the estimate is a library-wide average applied to work ordered
+smallest-first, so the last hours are the densest material and run longer than the average. The
+commands now say so rather than implying a precision they do not have. Narrowing it properly means
+per-class rates measured over a full run, which is worth doing the next time there is a full run to
+measure.
+
+### Recall is about half, and the sample is too small to say better
+
+The detector's precision is 80%, measured on 20 flagged pages checked by eye. Recall is the softer
+number: 2 misses in 20 unflagged pages puts it somewhere between 20% and 90%, with a point estimate
+near 50%. One of the two known causes — the render gate never looking at a prose page that carries a
+raster figure — is now fixed, and the other, ruled tables counted as lettering, is fixed too. Both
+change what the audit sees, so the numbers above describe the detector as it was measured and not as
+it now stands. Re-measuring means re-drawing the seeded sample of 40 pages and looking at them:
+`doctor --review 20 --seed 1`, and `docs/UNDER-EXTRACTION-SAMPLE.md` for what that involves.
 
 ## Open questions
 

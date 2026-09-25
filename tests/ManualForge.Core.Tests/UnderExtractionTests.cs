@@ -23,6 +23,37 @@ public sealed class UnderExtractionTests : IDisposable
     private string Path_(string name) => System.IO.Path.Combine(_directory, name);
 
     [Fact]
+    public void APageOfProseCarryingAFigureIsStillLookedAt()
+    {
+        // The gap that cost half the recall. Plenty of prose, so the "few characters" limb does not
+        // fire; an image rather than vectors, so the "many paths" limb does not either. Before the
+        // image-coverage limb existed this page was never rendered, and a page that is never
+        // rendered cannot be flagged whatever the thresholds say.
+        var prose = string.Join(' ', Enumerable.Repeat("the instrument responds to this command", 60));
+        var path = TestPdf.ScannedWithText(Path_("prose-with-figure.pdf"), prose);
+
+        var page = Assert.Single(new UnderExtractionDetector().Audit(path).Pages);
+
+        Assert.NotEqual(InkAnalysis.NotRendered, page.Ink);
+        Assert.True(page.CharactersDecoded > 900, "the page is supposed to be prose-heavy, or it proves nothing");
+        Assert.True(page.PathPaintOperations < 40, "and it is supposed to paint no paths, or it proves nothing");
+    }
+
+    [Fact]
+    public void WithoutThatLimbTheSamePageIsNeverRendered()
+    {
+        var prose = string.Join(' ', Enumerable.Repeat("the instrument responds to this command", 60));
+        var path = TestPdf.ScannedWithText(Path_("prose-with-figure-off.pdf"), prose);
+
+        // 1.0 is the two-limb gate the 17 September corpus audit was made with. Keeping it reachable
+        // is what lets that audit's numbers be reproduced rather than merely remembered.
+        var options = new DoctorOptions { RenderAtOrAboveImageCoverage = 1.0 };
+        var page = Assert.Single(new UnderExtractionDetector(options).Audit(path).Pages);
+
+        Assert.Equal(InkAnalysis.NotRendered, page.Ink);
+    }
+
+    [Fact]
     public void FlagsAPageWhoseFigureIsDrawnRatherThanSet()
     {
         var path = TestPdf.DrawnFigure(Path_("drawn.pdf"), "CHANnel Commands", labels: 150);

@@ -46,6 +46,28 @@ public sealed class DoctorOptions
     public int RenderAtOrAbovePathOperations { get; init; } = 40;
 
     /// <summary>
+    /// A page carrying an image over this much of itself is rendered whatever its character count,
+    /// because lettering inside a photograph or a screenshot does not extract and neither limb
+    /// above can see it.
+    ///
+    /// <para>
+    /// The third limb, and the one that was missing. A page with plenty of prose and a raster
+    /// figure whose labels are unextracted satisfies neither of the others: it has too many
+    /// characters for the first and paints too few paths for the second, so it was never rendered
+    /// and could not be flagged whatever the thresholds said. That is `clean-33` in
+    /// <c>docs/UNDER-EXTRACTION-SAMPLE.md</c> — 1,974 characters of prose, 2 path operations, and
+    /// `Receptacle`, `Socket` and `G6.35 Bulb` sitting unextracted in the figure — and it is an
+    /// extremely common shape in a corpus of illustrated manuals.
+    /// </para>
+    /// <para>
+    /// 10% is about a quarter-page figure. Below that there is not room for enough lettering to be
+    /// worth a render; above it, one sits comfortably. Set it to 1.0 to switch the limb off and get
+    /// the two-limb gate the corpus audit of 17 September was made with.
+    /// </para>
+    /// </summary>
+    public double RenderAtOrAboveImageCoverage { get; init; } = 0.10;
+
+    /// <summary>
     /// Resolution for the audit render. Not the OCR resolution — this only has to make ink
     /// countable and glyph-sized blobs separable, and 150 dpi is where a 6 pt annotation is still
     /// twelve pixels tall and does not merge with its neighbour. Repair renders far higher.
@@ -153,6 +175,46 @@ public sealed class DoctorOptions
     /// about 1:6 and an 'm' about 1.2:1; a rule fragment is 40:1.
     /// </summary>
     public double MaximumBlobAspect { get; init; } = 8.0;
+
+    /// <summary>
+    /// How many blobs of the same width, at the same x, evenly spaced down the page it takes before
+    /// they are read as a ruled line rather than as lettering. Zero switches the test off.
+    ///
+    /// <para>
+    /// Where a table's row line crosses its column line it cuts the rule into short segments, and a
+    /// segment of rule between two closely spaced rows is the size, aspect and fill of a character
+    /// — every threshold above passes it. What it is not is *where* lettering goes: forty fragments
+    /// of identical width sharing one x, spaced at the row pitch, is a line with gaps in it. Text
+    /// does not stack like that even when it is a left-aligned column of digits, because its glyphs
+    /// differ in width.
+    /// </para>
+    /// <para>
+    /// Three, because a table has at least that many rows before it looks like a table, and because
+    /// two coincidentally aligned letters are common while three identical-width ones are not. This
+    /// only ever removes flags: it cannot cost recall on a page that was flagged for its lettering.
+    /// </para>
+    /// </summary>
+    public int RuleSegmentRun { get; init; } = 3;
+
+    /// <summary>
+    /// How far apart, in points, two blobs may sit and still count as sharing an edge for the rule
+    /// test above. 1 pt at 150 dpi is two pixels, which is the most a rule wanders.
+    /// </summary>
+    public double RuleSegmentTolerancePt { get; init; } = 1.0;
+
+    /// <summary>
+    /// How wide a blob may be and still be taken for a fragment of rule.
+    ///
+    /// <para>
+    /// The alignment test needs this alongside it, because alignment alone would take a column of
+    /// left-aligned text with it. Table rules in this corpus are hairlines — half a point to one
+    /// point — while the narrowest glyph that survives the height and fill thresholds is several
+    /// points of ink wide at the 150 dpi audit render. 1.5 pt sits between the two with room on
+    /// both sides, and an `l` or a `1` is not at risk because a character that narrow is also too
+    /// short to have been counted.
+    /// </para>
+    /// </summary>
+    public double RuleSegmentMaximumWidthPt { get; init; } = 1.5;
 
     /// <summary>
     /// Characters assumed per glyph-like blob when estimating how much text a repair would

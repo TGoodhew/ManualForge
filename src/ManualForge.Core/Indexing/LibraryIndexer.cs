@@ -26,6 +26,23 @@ public sealed class IndexOptions
     public string? SidecarDirectory { get; init; }
 
     /// <summary>
+    /// Write each document's text as <c>&lt;name&gt;.txt</c> beside the PDF itself rather than
+    /// into a separate tree.
+    ///
+    /// <para>
+    /// This is the convention another tool already follows: GPIB-MCP's extractor prefers a
+    /// <c>.txt</c> sitting next to a PDF over shelling out to <c>pdftotext</c>, so writing them
+    /// there hands it work already done, with no dependency in either direction.
+    /// </para>
+    /// <para>
+    /// Off by default and worth being deliberate about: it puts one text file per manual into the
+    /// library folder, and on a synced folder that is several hundred new files to upload rather
+    /// than a detail.
+    /// </para>
+    /// </summary>
+    public bool SidecarsBesidePdfs { get; init; }
+
+    /// <summary>
     /// The audit database holding text the repair recovered from under-extracted pages. Null takes
     /// the one beside the index; a path that does not exist simply means nothing to merge.
     ///
@@ -40,6 +57,12 @@ public sealed class IndexOptions
 
     /// <summary>Ignore recovered text even when there is some. For proving what the merge changed.</summary>
     public bool WithoutRepairs { get; init; }
+
+    /// <summary>
+    /// Rewrite the index without its free pages when the run finishes. Off by default: it rewrites
+    /// the whole file, which on a library index in cloud storage means re-uploading all of it.
+    /// </summary>
+    public bool Compact { get; init; }
 
     /// <summary>
     /// How many documents to extract text from at once.
@@ -75,6 +98,12 @@ public sealed record IndexReport(
 
     /// <summary>Pages that now carry some recognised text alongside the PDF's own.</summary>
     public long PagesWithRecoveredText { get; init; }
+
+    /// <summary>
+    /// Bytes the index file holds that nothing is using, after this run. Updating documents in
+    /// place leaves free pages behind, and enough of them are worth telling somebody about.
+    /// </summary>
+    public long ReclaimableBytes { get; init; }
 }
 
 /// <summary>
@@ -201,6 +230,10 @@ public sealed class LibraryIndexer(ILogger<LibraryIndexer>? logger = null)
                         root, done.Path, done.Text, options.SidecarDirectory, cancellationToken)
                         .ConfigureAwait(false);
 
+                if (options.SidecarsBesidePdfs)
+                    await WriteSidecarBesideAsync(done.Path, done.Text, cancellationToken)
+                        .ConfigureAwait(false);
+
                 progress?.Report(new IndexProgress(
                     done.Path, indexed + unchanged + failed, files.Length, (int)pages));
             }
@@ -237,12 +270,22 @@ public sealed class LibraryIndexer(ILogger<LibraryIndexer>? logger = null)
         await writing.ConfigureAwait(false);
 
         index.Optimise();
+
+        var reclaimable = index.ReclaimableBytes();
+        if (options.Compact && reclaimable > 0)
+        {
+            _logger.LogInformation("Compacting the index, reclaiming {Bytes:N0} byte(s)", reclaimable);
+            index.Compact();
+            reclaimable = 0;
+        }
+
         stopwatch.Stop();
 
         var report = new IndexReport(indexed, unchanged, failed, withoutText, pages, stopwatch.Elapsed)
         {
             DocumentsWithRecoveredText = repairedDocuments,
             PagesWithRecoveredText = repairedPages,
+            ReclaimableBytes = reclaimable,
         };
 
         _logger.LogInformation(
@@ -405,6 +448,32 @@ public sealed class LibraryIndexer(ILogger<LibraryIndexer>? logger = null)
         return string.Join('\n', lines
             .OrderByDescending(l => l.Top)
             .Select(l => string.Join(' ', l.Words)));
+    }
+
+    /// <summary>
+    /// Writes one document's text as <c>&lt;name&gt;.txt</c> in the same folder as the PDF.
+    ///
+    /// <para>
+    /// Same content as the sidecar tree, different place, and the place is the point: it is where
+    /// another tool already looks. Written to a temporary file and moved into position, because
+    /// this one lands in the user's own library folder rather than in an output directory, and a
+    /// half-written file there would be read by something else as though it were whole.
+    /// </para>
+    /// </summary>
+    private static async Task WriteSidecarBesideAsync(
+        string path, IReadOnlyList<IndexedPageText> pages, CancellationToken cancellationToken)
+    {
+        var target = Path.ChangeExtension(path, ".txt");
+        var partial = target + ".partial";
+
+        var text = string.Join(
+            Environment.NewLine,
+            pages.Select((p, i) => $"--- page {i + 1} ---{Environment.NewLine}{p.Text}"));
+
+        await File.WriteAllTextAsync(partial, text, new System.Text.UTF8Encoding(false), cancellationToken)
+            .ConfigureAwait(false);
+
+        File.Move(partial, target, overwrite: true);
     }
 
     private static async Task WriteSidecarAsync(

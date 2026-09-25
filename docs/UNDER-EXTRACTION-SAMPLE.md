@@ -131,9 +131,16 @@ The fix is to add a third limb: render a page that carries an image covering a m
 it, whatever its character count. That is a small change and it would probably move recall
 substantially.
 
-It is **not done**, deliberately, and is tracked as issue #5. It changes what the audit looks at, so
-it invalidates the corpus run above and the 2.5 hours that produced it, and it needs its own
-precision measurement afterwards
+**It is done, as of 24 September 2026.** The gate has a third limb — render a page carrying an image
+over 10% of itself, whatever its character count — and `GERange.pdf` page 29, the page this section
+was written about, is now flagged: 97 glyph-shaped clusters and 2.61% of the page in ink nothing
+accounts for. On two folders of this corpus the limb added 7% and 12% more flagged pages for no
+meaningful change in audit time, because a page with no text layer at all is decided before the gate
+and so a library of scans does not begin rendering end to end.
+
+Everything below is why it waited, and it still describes what the change costs: it changes what the
+audit looks at, so it invalidates the corpus run above and the 2.5 hours that produced it, and it
+needs its own precision measurement afterwards
 — adding a limb that renders every illustrated page could easily flag thousands more. Shipping the
 measured detector with a known, named, diagnosed gap is more useful than shipping an unmeasured one
 that might be better.

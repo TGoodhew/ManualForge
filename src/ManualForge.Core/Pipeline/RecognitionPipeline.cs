@@ -87,6 +87,14 @@ public static class MeasuredThroughput
     /// <summary>The same corpus on 24 CPU threads, for a machine with no usable GPU.</summary>
     public const double PagesPerMinuteOnCpu = 15.2;
 
+    /// <summary>
+    /// Repairing flagged pages, which is a different rate from processing a library and deserves
+    /// its own number: 46 pages/min over 1,498 pages on 2026-09-18, 55 over 9,510 on 2026-09-24.
+    /// The lower figure is quoted, because an estimate that runs long is the one that costs
+    /// somebody an evening.
+    /// </summary>
+    public const double PagesPerMinuteRepairing = 46.0;
+
     /// <summary>Hours for a number of pages, at whichever rate applies.</summary>
     public static double HoursFor(long pages, bool usingGpu = true) =>
         pages / (usingGpu ? PagesPerMinuteOnGpu : PagesPerMinuteOnCpu) / 60.0;

@@ -111,9 +111,19 @@ internal static class StatusCommand
         Console.WriteLine($"  Outstanding: {outstanding.Length:N0} files, {pages:N0} pages");
 
         if (pages > 0)
+        {
             Console.WriteLine(
                 $"  At the measured {MeasuredThroughput.PagesPerMinuteOnGpu:F0} pages/min on CUDA: " +
                 $"{MeasuredThroughput.HoursFor(pages):F1} hours");
+
+            // The rate is a library-wide average and the work runs smallest first, so the estimate
+            // is optimistic exactly where it matters — near the end, when somebody is deciding
+            // whether to wait up. Saying so costs a line and is more honest than a number that
+            // quietly drifts.
+            Console.WriteLine(
+                "  A library-wide average, and the smallest files run first, so the last of those " +
+                "hours are the densest material and will run longer than this.");
+        }
 
         // Smallest first, which is the order they will be processed in.
         foreach (var record in outstanding.Take(limit))

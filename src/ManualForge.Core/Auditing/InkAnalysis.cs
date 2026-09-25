@@ -368,7 +368,60 @@ public static class InkAnalyser
             blobs.Add(new RectD(minX, minY, blobWidth, blobHeight));
         }
 
-        return blobs;
+        return DropRuleSegments(blobs, geometry, options);
+    }
+
+    /// <summary>
+    /// Removes blobs that are fragments of a ruled line rather than characters.
+    ///
+    /// <para>
+    /// Shape cannot separate the two: a piece of column rule between two table rows is a few pixels
+    /// each way, solid, and aspect near one, which is also a description of the letter o. Position
+    /// separates them. A rule broken by its own intersections leaves fragments of identical width
+    /// at one x, repeated down the page; lettering does not do that, because glyphs differ in width
+    /// even when they are left-aligned in a column.
+    /// </para>
+    /// </summary>
+    private static List<RectD> DropRuleSegments(
+        List<RectD> blobs, PageGeometry geometry, DoctorOptions options)
+    {
+        if (options.RuleSegmentRun <= 0 || blobs.Count < options.RuleSegmentRun)
+            return blobs;
+
+        var tolerance = Math.Max(1.0, options.RuleSegmentTolerancePt / geometry.PointsPerPixelX);
+        var maximumWidth = options.RuleSegmentMaximumWidthPt / geometry.PointsPerPixelX;
+        var dropped = new HashSet<int>();
+
+        // Two conditions, and both are needed. Alignment alone would take a column of left-aligned
+        // text with it; narrowness alone would take the thin strokes of ordinary lettering. A blob
+        // that is hairline-thin *and* one of several identical ones down a single x is a rule.
+        var groups = blobs
+            .Select((blob, index) => (blob, index))
+            .Where(b => b.blob.Width <= maximumWidth)
+            .GroupBy(b => (
+                Left: (int)Math.Round(b.blob.Left / tolerance),
+                Width: (int)Math.Round(b.blob.Width / tolerance)));
+
+        foreach (var group in groups)
+        {
+            if (group.Count() < options.RuleSegmentRun)
+                continue;
+
+            foreach (var (_, index) in group)
+                dropped.Add(index);
+        }
+
+        if (dropped.Count == 0)
+            return blobs;
+
+        var kept = new List<RectD>(blobs.Count - dropped.Count);
+        for (var i = 0; i < blobs.Count; i++)
+        {
+            if (!dropped.Contains(i))
+                kept.Add(blobs[i]);
+        }
+
+        return kept;
     }
 
     /// <summary>

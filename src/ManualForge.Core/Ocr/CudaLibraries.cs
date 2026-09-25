@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -213,6 +214,35 @@ public static class CudaLibraries
     }
 
     /// <summary>
+    /// Directories holding another processor architecture's build of the same libraries.
+    ///
+    /// <para>
+    /// CUDA 13 installs an arm64 copy of every one of these DLLs beside the x64 one, under the same
+    /// file names. Handing the loader the wrong architecture fails, and it fails the same silent way
+    /// a missing file does — the provider declines to register and everything runs on the CPU at a
+    /// tenth of the speed. Descending name order happens to put <c>x64</c> before <c>arm64</c>, so
+    /// this was working by luck; skipping them outright is the part that is actually true.
+    /// </para>
+    /// </summary>
+    private static bool IsForeignArchitecture(string directoryName)
+    {
+        var mine = RuntimeInformation.ProcessArchitecture switch
+        {
+            Architecture.Arm64 => "arm64",
+            Architecture.X86 => "win32",
+            _ => "x64",
+        };
+
+        foreach (var known in new[] { "x64", "arm64", "aarch64", "win32", "x86" })
+        {
+            if (string.Equals(directoryName, known, StringComparison.OrdinalIgnoreCase))
+                return !string.Equals(known, mine, StringComparison.OrdinalIgnoreCase);
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// Breadth-first so that a shallower answer wins, and newest-first within a level so that
     /// v13.4 is preferred to v13.0 and a later cuDNN to an earlier one. Descending ordinal order is
     /// a crude version comparison, but it never has to choose between major versions: the file name
@@ -238,6 +268,7 @@ public static class CudaLibraries
                 continue;
 
             var children = search.Subdirectories(directory)
+                .Where(child => !IsForeignArchitecture(Path.GetFileName(child)))
                 .OrderByDescending(child => child, StringComparer.OrdinalIgnoreCase);
 
             foreach (var child in children)
