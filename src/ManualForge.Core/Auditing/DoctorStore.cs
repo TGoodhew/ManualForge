@@ -18,6 +18,16 @@ public sealed record AuditedDocument(
     DateTimeOffset AuditedUtc,
     string? Error)
 {
+    /// <summary>
+    /// Flagged pages with no recovered text yet.
+    ///
+    /// <para>
+    /// A subtraction, which is only sound because <see cref="RepairedPages"/> counts repairs of
+    /// pages that are <i>currently flagged</i> rather than every repair the document has ever had.
+    /// Those are different sets the moment a re-audit changes its mind about a page, and counting
+    /// the wrong one told `repair` that a library with 352 pages waiting had nothing to do.
+    /// </para>
+    /// </summary>
     public int OutstandingPages => Math.Max(0, FlaggedPages - RepairedPages);
 
     public bool IsRepaired => FlaggedPages > 0 && OutstandingPages == 0;
@@ -233,6 +243,9 @@ public sealed class DoctorStore : IDisposable
         command.CommandText = """
             SELECT a.path, a.title, a.content_hash, a.page_count, a.flagged_pages, a.drawn_pages,
                    (SELECT COUNT(*) FROM page_repairs r
+                     JOIN page_findings f
+                       ON f.path = r.path AND f.page_number = r.page_number
+                          AND f.verdict = 'UnderExtracted'
                      WHERE r.path = a.path AND r.content_hash = a.content_hash),
                    a.recoverable_chars, a.suggested_dpi, a.verdict, a.audited_utc, a.error
             FROM audited_documents a
@@ -250,6 +263,9 @@ public sealed class DoctorStore : IDisposable
         command.CommandText = """
             SELECT a.path, a.title, a.content_hash, a.page_count, a.flagged_pages, a.drawn_pages,
                    (SELECT COUNT(*) FROM page_repairs r
+                     JOIN page_findings f
+                       ON f.path = r.path AND f.page_number = r.page_number
+                          AND f.verdict = 'UnderExtracted'
                      WHERE r.path = a.path AND r.content_hash = a.content_hash),
                    a.recoverable_chars, a.suggested_dpi, a.verdict, a.audited_utc, a.error
             FROM audited_documents a
@@ -387,8 +403,12 @@ public sealed class DoctorStore : IDisposable
                    (SELECT COUNT(*) FROM audited_documents WHERE flagged_pages > 0),
                    (SELECT COALESCE(SUM(flagged_pages), 0) FROM audited_documents),
                    (SELECT COALESCE(SUM(drawn_pages), 0) FROM audited_documents),
-                   (SELECT COUNT(*) FROM page_repairs r JOIN audited_documents a
-                        ON a.path = r.path AND a.content_hash = r.content_hash)
+                   (SELECT COUNT(*) FROM page_repairs r
+                        JOIN audited_documents a
+                          ON a.path = r.path AND a.content_hash = r.content_hash
+                        JOIN page_findings f
+                          ON f.path = r.path AND f.page_number = r.page_number
+                             AND f.verdict = 'UnderExtracted')
             """;
         using var reader = command.ExecuteReader();
         reader.Read();
