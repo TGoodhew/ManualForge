@@ -99,7 +99,7 @@ public static class TextLayerVerifier
         int pageNumber,
         IReadOnlyList<RecognisedWord> expected,
         PageGeometry geometry,
-        double baselineOffsetFraction = 0.0)
+        double baselineOffsetFraction = Text.TextLayerOptions.DefaultBaselineOffsetFraction)
     {
         using var document = PdfDocument.Open(pdfPath);
         var page = document.GetPage(pageNumber);
@@ -110,7 +110,7 @@ public static class TextLayerVerifier
         Page page,
         IReadOnlyList<RecognisedWord> expected,
         PageGeometry geometry,
-        double baselineOffsetFraction = 0.0)
+        double baselineOffsetFraction = Text.TextLayerOptions.DefaultBaselineOffsetFraction)
     {
         ArgumentNullException.ThrowIfNull(page);
         ArgumentNullException.ThrowIfNull(expected);

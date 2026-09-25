@@ -45,6 +45,7 @@ manualforge search <query> --model 54845A  same, ranking that instrument's manua
 manualforge search <query> --json          the same answer for a program, with its caveats
 manualforge reconcile <folder>             which PDFs are not in the index, and why
 manualforge gpu                            which execution provider is actually active
+manualforge baselines --library <folder>   where a word's baseline sits relative to its ink
 ```
 
 The source file is opened read-only and is never written to. Output goes to a separate file,
@@ -1357,9 +1358,13 @@ it now stands. Re-measuring means re-drawing the seeded sample of 40 pages and l
 4. ~~**xunit**~~ — resolved: kept.
 5. ~~**Locating CUDA without `PATH`**~~ — resolved: `Ocr/CudaLibraries.cs` finds them at startup.
    See "It does not depend on `PATH` being right" above.
-6. **Baseline offset** — `TextLayerOptions.BaselineOffsetFraction` currently defaults to 0, putting
-   the baseline on the bottom edge of the detected ink box. Worth tuning against ground truth in
-   phase 7 rather than guessing now, which makes it one of the three things waiting on issue #6.
+6. ~~**Baseline offset**~~ — resolved: measured, not guessed. It defaulted to 0 with a comment
+   supposing a small *positive* value would help; the sign was wrong. Over 2,925 words of
+   born-digital type, whose true baselines the pages themselves record, a word with a descender sits
+   -0.24 of its ink height above the bottom of that ink and a word without one still sits at -0.037,
+   because round letters are drawn slightly below the baseline to look aligned. The default is now
+   **-0.04**, which cuts mean baseline error from 0.86 pt to 0.66 pt. `manualforge baselines`
+   re-measures it; see "Where a word's baseline really sits" in `docs/measurements/`.
 7. **Ranking** — the repair put the right page in the index; bm25 does not always put it near the
    top. Boosting a page that carries a query term on a line of its own took the ground truth from
    21 of 33 in the first ten to 25, measured against two controls that had no hand in the change.

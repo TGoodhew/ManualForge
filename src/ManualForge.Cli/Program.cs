@@ -53,6 +53,7 @@ try
         "reconcile" => ReconcileCommand.Run(arguments),
         "truth" => await TruthCommand.RunAsync(arguments, loggerFactory, cancellation.Token),
         "benchmark" => await BenchmarkCommand.RunAsync(arguments, loggerFactory, cancellation.Token),
+        "baselines" => BaselineCommand.Run(arguments, loggerFactory, cancellation.Token),
         _ => Unknown(arguments.Command),
     };
 }

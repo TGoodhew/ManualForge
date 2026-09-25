@@ -10,11 +10,33 @@ namespace ManualForge.Core.Text;
 public sealed class TextLayerOptions
 {
     /// <summary>
-    /// Fraction of a word box's height by which the baseline is dropped below the box. Detectors
-    /// return an ink box, which for a word without descenders sits on the baseline; a small
-    /// positive value helps when the corpus is mostly mixed case.
+    /// Fraction of a word box's height by which the baseline is dropped below the box. Negative
+    /// lifts it, which is what the measurement says it needs.
+    ///
+    /// <para>
+    /// This was 0.0 with a comment guessing that "a small positive value helps when the corpus is
+    /// mostly mixed case". The guess was wrong in its sign. Measured over 2,925 words of born-digital
+    /// type, whose true baselines the page itself records: a word with a descender sits
+    /// <b>-0.24</b> of its ink height above the bottom of that ink, and a word without one still
+    /// sits at <b>-0.037</b>, because round letters are drawn fractionally below the baseline so
+    /// that they look aligned. Both numbers hold at 200, 300 and 400 dpi, which is how you can tell
+    /// they are typography rather than sampling.
+    /// </para>
+    /// <para>
+    /// One constant has to serve both populations, and -0.04 is the one that costs least: mean
+    /// baseline error falls from 0.86 pt to 0.66 pt, about a quarter. `manualforge baselines`
+    /// re-measures it, and `docs/measurements/baseline-offset.md` has the working.
+    /// </para>
     /// </summary>
-    public double BaselineOffsetFraction { get; init; } = 0.0;
+    public double BaselineOffsetFraction { get; init; } = DefaultBaselineOffsetFraction;
+
+    /// <summary>
+    /// The same number as a constant, so that the verifier's default cannot drift away from the
+    /// writer's. They were 0.0 in two places and stayed in step by luck; a measured value has no
+    /// such excuse, and a verifier checking against a different intention from the writer's would
+    /// report the difference as error.
+    /// </summary>
+    public const double DefaultBaselineOffsetFraction = -0.04;
 
     /// <summary>Words recognised below this confidence are left out of the text layer.</summary>
     public double MinimumConfidence { get; init; } = 0.30;
