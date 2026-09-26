@@ -115,6 +115,7 @@ internal sealed class CommandLine
               manualforge truth <input.pdf> --pages …     Seed hand-correctable ground-truth pages
               manualforge benchmark --truth <folder>      Measure character and word error rates
               manualforge gpu                            Report which execution provider is active
+              manualforge version                        Which build this is, and where it was loaded from
 
             ocr options:
               --out <path>            Output file. Default: <input>.searchable.pdf next to the source.

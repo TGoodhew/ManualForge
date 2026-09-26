@@ -16,6 +16,13 @@ if (arguments.Command is null or "help" or "--help" or "-h")
     return 0;
 }
 
+// Before the log file is opened: asking which build this is should work even when nothing else does.
+if (arguments.Command is "version" or "--version" or "-v")
+{
+    BuildStamp.Print();
+    return 0;
+}
+
 using var cancellation = new CancellationTokenSource();
 Console.CancelKeyPress += (_, e) =>
 {

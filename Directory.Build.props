@@ -21,4 +21,32 @@
     <ManagedRuntimeMarshalling>false</ManagedRuntimeMarshalling>
   </PropertyGroup>
 
+  <!--
+    Stamp the commit into every assembly's informational version, so an installed binary can say
+    which build it is. Without this the only evidence is a file timestamp, which says when a copy
+    was made and nothing about what was in it - and an installed CLI sat two fixes behind `main`
+    for an evening with nothing reporting it. See issue #18.
+
+    ContinueOnError because a build from a source archive has no git; it stamps `+nogit` and the
+    build succeeds. A working tree with uncommitted changes stamps `.dirty`, because "built from
+    3441e55" is a lie if it was built from 3441e55 plus edits.
+  -->
+  <Target Name="StampGitCommit" BeforeTargets="GetAssemblyAttributes">
+    <Exec Command="git -C &quot;$(MSBuildThisFileDirectory.TrimEnd('\'))&quot; rev-parse --short=7 HEAD"
+          ConsoleToMSBuild="true" ContinueOnError="true" StandardOutputImportance="low" StandardErrorImportance="low">
+      <Output TaskParameter="ConsoleOutput" PropertyName="_GitCommit" />
+      <Output TaskParameter="ExitCode" PropertyName="_GitExitCode" />
+    </Exec>
+    <Exec Command="git -C &quot;$(MSBuildThisFileDirectory.TrimEnd('\'))&quot; status --porcelain --untracked-files=no"
+          ConsoleToMSBuild="true" ContinueOnError="true" StandardOutputImportance="low" StandardErrorImportance="low">
+      <Output TaskParameter="ConsoleOutput" PropertyName="_GitDirty" />
+    </Exec>
+    <PropertyGroup>
+      <_Stamp Condition="'$(_GitExitCode)' == '0'">$(_GitCommit.Trim())</_Stamp>
+      <_Stamp Condition="'$(_GitExitCode)' != '0'">nogit</_Stamp>
+      <_Stamp Condition="'$(_GitDirty)' != ''">$(_Stamp).dirty</_Stamp>
+      <InformationalVersion>$(Version)+$(_Stamp)</InformationalVersion>
+    </PropertyGroup>
+  </Target>
+
 </Project>
