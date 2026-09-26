@@ -1,0 +1,211 @@
+===============================================================================
+MANUALFORGE - GROUND TRUTH CORRECTION
+Nine pages. Everything else in phase 7 is done and waiting on these.
+===============================================================================
+
+WHY THIS MATTERS
+
+Every accuracy number the project can honestly quote comes from these nine
+files. Right now the README says "83.7% mean confidence", which is the
+recogniser's opinion of its own work, not a measurement of correctness. It
+should not be quoted as accuracy and will be removed once these exist.
+
+Once they exist we get: a real character error rate, separately for prose,
+tables and schematics; and an answer to whether deskew, denoise and 300 dpi
+actually earn their cost, which is currently argued rather than known.
+
+
+-------------------------------------------------------------------------------
+THE ONE RULE
+-------------------------------------------------------------------------------
+
+Type what is PRINTED on the page. Not what it should say.
+
+If the manual has a typo, keep the typo. If it says "recieve", write
+"recieve". You are recording what is on the paper, and the engine is being
+marked against the paper.
+
+
+-------------------------------------------------------------------------------
+WHAT IS MEASURED, AND WHAT IS IGNORED
+-------------------------------------------------------------------------------
+
+Do NOT spend time on these. They are stripped out before scoring:
+
+  - CAPITALISATION.  Everything is lower-cased before comparison. "WARNING"
+    and "warning" score identically. Type whatever is quickest.
+  - LINE BREAKS, indentation, blank lines, column alignment. All whitespace
+    collapses to single spaces. Do not try to reproduce the layout.
+
+DO get these right. They are compared exactly:
+
+  - PUNCTUATION.  A comma, full stop, colon or hyphen counts.
+  - DIGITS AND LETTERS that look alike. 1N21 vs 1N2l vs 1N2I are three
+    different answers, and telling them apart is the whole point.
+  - SYMBOLS.  Type the real character where you can:
+        ohms        -> Omega sign
+        micro       -> mu sign
+        plus/minus  -> the +/- sign, not "+"
+        degrees     -> the degree sign
+    In Notepad these paste fine. If a symbol is genuinely unavailable to you,
+    see question 3 below and just note it - do not silently substitute, and
+    do NOT spell it out as a word.
+  - WORD ORDER.  This is scored two ways: once counting order, once ignoring
+    it. Getting the order right is worth doing, but if you are unsure which
+    of two columns comes first, do not agonise - the second number covers it.
+
+
+-------------------------------------------------------------------------------
+THE NINE PAGES
+-------------------------------------------------------------------------------
+
+All the PDFs are under:
+  C:\Users\Tony\OneDrive\Documents\Manuals\BASELINE\
+
+All the text files are under:
+  C:\Users\Tony\source\ManualForge\truth\
+
+  START HERE - easiest, mostly already correct
+  ----------------------------------------------------------------------------
+  438A.p0009.txt      438A.pdf              page 9      prose
+  438A.p0010.txt      438A.pdf              page 10     prose
+  438A.p0020.txt      438A.pdf              page 20     prose
+
+  HARDER - column order is wrong in the seed, see below
+  ----------------------------------------------------------------------------
+  331A.p0044.txt      331A.pdf              page 44     table
+  331A.p0045.txt      331A.pdf              page 45     table
+  461A.p0039.txt      461A.pdf              page 39     table
+  461A.p0040.txt      461A.pdf              page 40     table
+
+  HARDEST - hand-drawn, sparse, may be partly illegible
+  ----------------------------------------------------------------------------
+  HP-419A_Marked-up_Schematic.p0001.txt
+                      HP-419A Marked-up Schematic.pdf   page 1    schematic
+  HP-419_-_Fluke_845_Modification_Hand_Drawn_Schematics_2015-06-04.p0003.txt
+                      HP-419 - Fluke 845 ... .pdf       page 3    schematic
+
+Do the three prose pages first. They are close to correct already and should
+take a few minutes each, not fifteen. That also proves the loop before you
+commit to the hard ones.
+
+
+-------------------------------------------------------------------------------
+RULES FOR THE AWKWARD CASES
+-------------------------------------------------------------------------------
+
+1. HEADERS AND FOOTERS
+   Include them. Running heads ("Model 331A/332A  Section VI") and page
+   numbers are printed on the page, so they belong in the text.
+
+2. WORDS SPLIT ACROSS A LINE BREAK
+   Join them into one word and drop the hyphen. "replace-" / "able" becomes
+   "replaceable". The indexer does this too, so matching it is correct.
+   A real hyphen in a compound word ("hand-drawn") stays.
+
+3. SOMETHING YOU CANNOT READ
+   Do not guess, and do not leave it out silently. Write exactly:
+       [illegible]
+   That one token, in square brackets. It will be counted and reported
+   separately, and it tells us the ceiling - if a human cannot read 5% of a
+   page, no engine can be marked down for missing it. Guessing instead
+   poisons the measurement in a way we cannot detect later.
+
+4. TABLES
+   Read along the row, left to right, then move to the next row. That is the
+   order a person reads a parts list. The seeded text has some rows scrambled
+   into column order - fixing that IS the job on these four pages, and it is
+   the single most valuable thing in this whole exercise, because reading a
+   close-set table along its rows is the specific thing the engine is worst
+   at and we have never measured it.
+
+5. SCHEMATICS
+   Transcribe every piece of text you can see: component designators (R13,
+   C4, A2), values, labels, notes, title blocks. Ignore pure graphics - lines,
+   symbols, arrows. If a label is handwritten, transcribe it and mention it in
+   your notes.
+
+6. STRUCK-THROUGH OR MARKED-UP TEXT
+   The HP-419A page is a marked-up schematic. Transcribe the printed text.
+   If something is crossed out by hand, transcribe it anyway and note it.
+
+7. TEXT THAT IS ROTATED OR SIDEWAYS
+   Include it, in whatever position you would naturally read it.
+
+8. IF A WHOLE PAGE TURNS OUT TO BE A BAD CHOICE
+   Say so in your notes and skip it. I picked these by scoring text density
+   and reading the first few lines, which is not the same as having looked at
+   them properly. A wasted page is my mistake, not yours.
+
+
+-------------------------------------------------------------------------------
+QUESTIONS I NEED ANSWERED
+-------------------------------------------------------------------------------
+
+Please answer these in truth\NOTES.txt - it already has the template, just
+fill in the blanks. They are not busywork; each one changes a decision.
+
+PER PAGE (one line each, 10 seconds):
+
+  Q1. MINUTES  - roughly how long did that page take?
+      Why: the estimate of 15 minutes a page is a guess, and it decides
+      whether growing this set to 30 pages is reasonable or absurd.
+
+  Q2. ILLEGIBLE - how many [illegible] markers did you write?
+      Why: this is the ceiling on achievable accuracy for that page. Without
+      it a 12% error rate looks like a bad engine when it may be a bad scan.
+
+  Q3. SYMBOLS  - any symbol you could not type? Which one?
+      Why: if you substituted or skipped one, the score is wrong in a way I
+      would never spot. I would rather fix the file than have a clean-looking
+      number.
+
+OVERALL (a few sentences each, at the end):
+
+  Q4. WAS THE SEED WORTH HAVING, OR WOULD A BLANK FILE HAVE BEEN FASTER?
+      Answer separately for prose and for tables if they differ.
+      Why: I re-seeded these from the reading-order text instead of the
+      documented method, on the argument that correcting beats retyping. That
+      was my judgement and it is untested. If retyping from blank would have
+      been faster for tables, the guide should say so and I should change the
+      seeder.
+
+  Q5. DID YOU SEE THE SAME MISTAKE OVER AND OVER?
+      Anything like "it always reads 0 as O", "it drops the last letter of
+      every line", "it loses everything in bold".
+      Why: a systematic error is fixable in code; scattered noise is not.
+      This is the single most useful thing you can tell me, and you will see
+      it in a way no metric will.
+
+  Q6. ARE THE TWO SCHEMATIC PAGES WORTH KEEPING IN THE SET?
+      Honest answer wanted, including "no".
+      Why: they hold a few hundred characters of mostly hand-lettered text.
+      A character error rate over that little may be too noisy to mean
+      anything, in which case the schematic number should be dropped rather
+      than quoted. You will know after doing one.
+
+  Q7. ANYTHING THAT MADE YOU THINK THE TASK WAS SET UP WRONG?
+      Wrong pages, wrong instructions, something I have not thought of.
+
+
+-------------------------------------------------------------------------------
+WHEN YOU HAVE DONE EVEN ONE PAGE
+-------------------------------------------------------------------------------
+
+Run this. It works on a partly-corrected set, so there is no need to wait
+until all nine are done:
+
+  cd C:\Users\Tony\source\ManualForge
+  manualforge benchmark --truth truth --library "C:\Users\Tony\OneDrive\Documents\Manuals\BASELINE" --score-existing
+
+You will get a per-page and per-kind table. The numbers for uncorrected pages
+are meaningless - they are one machine's text scored against another's - but
+the corrected page's number will be real.
+
+Tell me when you have done some and I will take it from there: run the full
+sweep, put the real error rate in the README, and delete the confidence
+figure.
+
+Nothing here is urgent and stopping after two pages is a perfectly good
+outcome - two real numbers beat nine imagined ones.
+===============================================================================

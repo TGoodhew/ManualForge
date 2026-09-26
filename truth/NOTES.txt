@@ -1,0 +1,51 @@
+===============================================================================
+GROUND TRUTH - CORRECTION NOTES
+Fill in as you go. Questions are explained in INSTRUCTIONS.txt.
+Leave anything blank that you did not do.
+===============================================================================
+
+PER PAGE
+--------
+Q1 minutes | Q2 how many [illegible] | Q3 any symbol you could not type
+
+  438A p9  (prose)        minutes: ____   illegible: ____   symbols: __________
+  438A p10 (prose)        minutes: ____   illegible: ____   symbols: __________
+  438A p20 (prose)        minutes: ____   illegible: ____   symbols: __________
+
+  331A p44 (table)        minutes: ____   illegible: ____   symbols: __________
+  331A p45 (table)        minutes: ____   illegible: ____   symbols: __________
+  461A p39 (table)        minutes: ____   illegible: ____   symbols: __________
+  461A p40 (table)        minutes: ____   illegible: ____   symbols: __________
+
+  HP-419A p1 (schematic)  minutes: ____   illegible: ____   symbols: __________
+  HP-419 Fluke 845 p3     minutes: ____   illegible: ____   symbols: __________
+
+
+OVERALL
+-------
+
+Q4. Was the pre-filled text worth having, or would a blank file have been
+    faster? (Separately for prose and tables if they differ.)
+
+
+
+
+Q5. Did you see the same mistake over and over? Describe it however you like.
+    This is the most useful thing on the page.
+
+
+
+
+Q6. Are the two schematic pages worth keeping in the set? "No" is a fine
+    answer.
+
+
+
+
+Q7. Anything that made you think the task was set up wrong - wrong pages,
+    wrong instructions, something I have not thought of?
+
+
+
+
+===============================================================================
