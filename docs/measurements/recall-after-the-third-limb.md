@@ -26,13 +26,19 @@ unaccounted ink is the only place missing text could be.
 ## The one that was missed
 
 **`clean-37`, a camcorder manual, page 119.** Every word of prose is accounted for. The `AVCHD`,
-`MP4` and `AUTO` badges are not: they are white letters on a black field, and **reverse video is
-invisible to a detector that looks for ink** — the letters are an absence of ink inside a block of
-it, so there is nothing for the blob filter to find.
+`MP4` and `AUTO` badges are not — a reader can see them, and a search for `AVCHD` does not find this
+page.
 
-That blind spot was already written down in `UNDER-EXTRACTION-SAMPLE.md`, discovered while looking
-at a page where it happened not to matter. Here it costs two short labels, so the miss is real and
-thin. It is now the leading known cause of misses, having replaced the render gate.
+**The cause was misdiagnosed here, and the correction is worth reading.** This was first written up
+as reverse video: white letters on a black field, which a detector looking for ink cannot see.
+Building that detector (issue #12) and pointing it at this page found nothing, at any resolution or
+threshold — because the page is not reverse video. Its text layer *does* carry glyphs for those
+badges, from an icon font, and they decode to `N ƒ ' † y }`. The ink is accounted for; the
+characters are simply not the letters on the page.
+
+So the miss stands — the text a reader sees is not the text the layer holds — but its cause is an
+icon font, which is issue #16, and no amount of looking at ink would ever have caught it.
+`docs/measurements/reverse-video.md` has the whole investigation.
 
 ## What that makes recall
 
@@ -56,8 +62,11 @@ pictures. That has not been done and is not pretended.
 
 ## What is left, in order of how much it costs
 
-1. **Reverse video** — the miss above. No fix is obvious: finding white letters inside a block of
-   ink is a different detector, not a threshold.
-2. **The threshold miss** — the older sample's other miss was three blobs short of 40. Still
+1. **Icon fonts** — the miss above. A page whose badges are glyphs from a symbol font is sound by
+   every test this detector applies, and unsearchable to a reader. Issue #16.
+2. **Reverse video** — not the cause of the miss above, but real elsewhere: analyser screenshots
+   whose readouts are white on black. Implemented and left off by default, because it finds
+   photographs at about the same rate. Issue #12, `docs/measurements/reverse-video.md`.
+3. **The threshold miss** — the older sample's other miss was three blobs short of 40. Still
    possible, and it did not recur here.
-3. Everything else the sample did not happen to contain.
+4. Everything else the sample did not happen to contain.

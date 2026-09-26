@@ -286,6 +286,7 @@ public static class InkAnalyser
         var maxWidthPx = options.MaximumBlobWidthPt / geometry.PointsPerPixelX;
 
         var blobs = new List<RectD>();
+        var blocks = new List<Extent>();
         var stack = new Stack<int>(256);
 
         for (var seed = 0; seed < mask.Length; seed++)
@@ -322,7 +323,15 @@ public static class InkAnalyser
                     // them unvisited would let the rest of the shape be re-seeded as a crowd of
                     // small clusters, which is exactly what this rule is meant to avoid counting.
                     stack.Push(index);
-                    Drain(mask, stack, width, height);
+
+                    var extent = options.ReverseVideo ? new Extent() : null;
+                    extent?.Add(minX, minY);
+                    extent?.Add(maxX, maxY);
+                    Drain(mask, stack, width, height, extent);
+
+                    if (extent is not null)
+                        blocks.Add(extent);
+
                     pixels = -1;
                     break;
                 }
@@ -355,6 +364,14 @@ public static class InkAnalyser
             var blobWidth = maxX - minX + 1;
             var blobHeight = maxY - minY + 1;
 
+            // Anything solid and big enough to carry a word is worth looking inside, whatever the
+            // letter filter goes on to decide about it. The first attempt asked only about clusters
+            // *too big to be letters*, and missed the case this was written for: the AVCHD badge on
+            // a camcorder page is 29 by 11 points, which is large for a letter and comfortably
+            // small enough to pass as one.
+            if (options.ReverseVideo)
+                blocks.Add(Extent.Of(minX, minY, maxX, maxY, pixels));
+
             if (blobHeight < minHeightPx || blobHeight > maxHeightPx || blobWidth > maxWidthPx)
                 continue;
 
@@ -368,7 +385,238 @@ public static class InkAnalyser
             blobs.Add(new RectD(minX, minY, blobWidth, blobHeight));
         }
 
-        return DropRuleSegments(blobs, geometry, options);
+        var kept = DropRuleSegments(blobs, geometry, options);
+
+        if (options.ReverseVideo && blocks.Count > 0)
+            kept.AddRange(LetteringInsideBlocks(mask, width, height, geometry, options, blocks));
+
+        return kept;
+    }
+
+    /// <summary>
+    /// Finds lettering printed <i>through</i> a block of ink rather than with it.
+    ///
+    /// <para>
+    /// White text on a black button is the one shape this detector is structurally blind to: the
+    /// letters are an absence of ink inside a block of it, so a filter looking for marks finds the
+    /// block and nothing else. After the render gate was fixed this became the leading known cause
+    /// of missed pages — see issue #12.
+    /// </para>
+    ///
+    /// <para>
+    /// The blocks arrive already measured, because the walk above has to drain them anyway. Two
+    /// conditions decide which are worth looking inside, and both matter: the block must be
+    /// <b>solid</b>, since a page border or a table outline is also a huge cluster and its "inside"
+    /// is the whole page; and it must be <b>ink nothing accounts for</b>, which it is by
+    /// construction — the walk only ever traverses uncovered ink, so a block whose label the text
+    /// layer already holds is never offered here at all.
+    /// </para>
+    /// </summary>
+    private static List<RectD> LetteringInsideBlocks(
+        byte[] mask,
+        int width,
+        int height,
+        PageGeometry geometry,
+        DoctorOptions options,
+        List<Extent> blocks)
+    {
+        var found = new List<RectD>();
+
+        var minimumArea = options.ReverseVideoMinimumAreaPt
+                          / (geometry.PointsPerPixelX * geometry.PointsPerPixelY);
+        var maximumArea = (long)width * height * options.ReverseVideoMaximumPageShare;
+
+        var probe = Environment.GetEnvironmentVariable("MANUALFORGE_REVERSE_VIDEO_PROBE") == "1";
+        var examined = 0;
+
+        foreach (var block in blocks)
+        {
+            var area = (long)block.Width * block.Height;
+
+            if (probe)
+            {
+                var why = area < minimumArea ? "too small"
+                    : area > maximumArea ? "too large"
+                    : block.Fill < options.ReverseVideoMinimumFill ? "not solid"
+                    : "examined";
+
+                Console.Error.WriteLine(
+                    $"    cluster {block.Width,4}x{block.Height,-4} fill {block.Fill,5:P0}  {why}");
+            }
+
+            if (area < minimumArea || area > maximumArea)
+                continue;
+
+            if (block.Fill < options.ReverseVideoMinimumFill)
+                continue;
+
+            examined++;
+            var holes = HolesIn(mask, width, geometry, options, block);
+
+            if (probe && holes.Count > 0)
+            {
+                Console.Error.WriteLine(
+                    $"  block {block.Width}x{block.Height}px fill {block.Fill:P0} -> {holes.Count} hole(s)");
+            }
+
+            found.AddRange(holes);
+        }
+
+        if (probe)
+        {
+            Console.Error.WriteLine(
+                $"  reverse video: {blocks.Count} cluster(s), {examined} examined, {found.Count} hole(s); " +
+                $"area {minimumArea:N0}-{maximumArea:N0} px²");
+        }
+
+        return found;
+    }
+
+    /// <summary>
+    /// Glyph-shaped holes enclosed by one block of ink.
+    ///
+    /// <para>
+    /// "Enclosed" is the load-bearing word, and it is why this floods inwards from the edge rather
+    /// than simply counting light pixels. A block is rarely a perfect rectangle, so the corners of
+    /// its bounding box are page background; counting those would find one enormous hole and, worse,
+    /// would let a block that merely touches the margin swallow the entire page.
+    /// </para>
+    /// </summary>
+    private static List<RectD> HolesIn(
+        byte[] mask, int width, PageGeometry geometry, DoctorOptions options, Extent block)
+    {
+        var w = block.Width;
+        var h = block.Height;
+
+        // 0 = a hole not yet accounted for, 1 = ink, 2 = background reached from outside.
+        var local = new byte[w * h];
+        for (var y = 0; y < h; y++)
+        {
+            for (var x = 0; x < w; x++)
+                local[y * w + x] = mask[(block.MinY + y) * width + block.MinX + x] == 0 ? (byte)0 : (byte)1;
+        }
+
+        var queue = new Queue<int>();
+        for (var x = 0; x < w; x++)
+        {
+            Seed(local, queue, x, w);
+            Seed(local, queue, (h - 1) * w + x, w);
+        }
+
+        for (var y = 0; y < h; y++)
+        {
+            Seed(local, queue, y * w, w);
+            Seed(local, queue, y * w + w - 1, w);
+        }
+
+        while (queue.Count > 0)
+        {
+            var index = queue.Dequeue();
+            var y = index / w;
+            var x = index - y * w;
+
+            if (x > 0) Seed(local, queue, index - 1, w);
+            if (x < w - 1) Seed(local, queue, index + 1, w);
+            if (y > 0) Seed(local, queue, index - w, w);
+            if (y < h - 1) Seed(local, queue, index + w, w);
+        }
+
+        // What is left at 0 is enclosed, and is measured with the same filter as ordinary
+        // lettering. Whatever those thresholds are worth they are worth the same here, and a second
+        // set of numbers to defend would be worse than the blind spot.
+        return Clusters(local, w, h, geometry, options)
+            .Select(r => new RectD(block.MinX + r.Left, block.MinY + r.Top, r.Width, r.Height))
+            .ToList();
+    }
+
+    private static void Seed(byte[] local, Queue<int> queue, int index, int width)
+    {
+        if (local[index] != 0)
+            return;
+
+        local[index] = 2;
+        queue.Enqueue(index);
+    }
+
+    /// <summary>
+    /// Connected runs of <c>0</c> in a small grid, kept only if they are the size, shape and
+    /// density of a character. The same thresholds the page-wide filter uses, deliberately.
+    /// </summary>
+    private static List<RectD> Clusters(
+        byte[] cells, int width, int height, PageGeometry geometry, DoctorOptions options)
+    {
+        var minHeightPx = options.MinimumBlobHeightPt / geometry.PointsPerPixelY;
+        var maxHeightPx = options.MaximumBlobHeightPt / geometry.PointsPerPixelY;
+        var maxWidthPx = options.MaximumBlobWidthPt / geometry.PointsPerPixelX;
+
+        var found = new List<RectD>();
+        var stack = new Stack<int>(128);
+
+        for (var seed = 0; seed < cells.Length; seed++)
+        {
+            if (cells[seed] != 0)
+                continue;
+
+            var minX = int.MaxValue;
+            var maxX = int.MinValue;
+            var minY = int.MaxValue;
+            var maxY = int.MinValue;
+            var pixels = 0;
+
+            stack.Push(seed);
+            cells[seed] = 3;
+
+            while (stack.Count > 0)
+            {
+                var index = stack.Pop();
+                var y = index / width;
+                var x = index - y * width;
+
+                pixels++;
+                if (x < minX) minX = x;
+                if (x > maxX) maxX = x;
+                if (y < minY) minY = y;
+                if (y > maxY) maxY = y;
+
+                for (var dy = -1; dy <= 1; dy++)
+                {
+                    var ny = y + dy;
+                    if (ny < 0 || ny >= height)
+                        continue;
+
+                    for (var dx = -1; dx <= 1; dx++)
+                    {
+                        var nx = x + dx;
+                        if (nx < 0 || nx >= width || (dx == 0 && dy == 0))
+                            continue;
+
+                        var neighbour = ny * width + nx;
+                        if (cells[neighbour] != 0)
+                            continue;
+
+                        cells[neighbour] = 3;
+                        stack.Push(neighbour);
+                    }
+                }
+            }
+
+            var blobWidth = maxX - minX + 1;
+            var blobHeight = maxY - minY + 1;
+
+            if (blobHeight < minHeightPx || blobHeight > maxHeightPx || blobWidth > maxWidthPx)
+                continue;
+
+            var aspect = blobWidth / (double)blobHeight;
+            if (aspect > options.MaximumBlobAspect || aspect < 1.0 / options.MaximumBlobAspect)
+                continue;
+
+            if (pixels / (double)(blobWidth * blobHeight) < options.MinimumBlobFill)
+                continue;
+
+            found.Add(new RectD(minX, minY, blobWidth, blobHeight));
+        }
+
+        return found;
     }
 
     /// <summary>
@@ -424,17 +672,65 @@ public static class InkAnalyser
         return kept;
     }
 
+    /// <summary>A cluster's bounding box and how solidly it fills it, accumulated pixel by pixel.</summary>
+    private sealed class Extent
+    {
+        public int MinX { get; private set; } = int.MaxValue;
+
+        public int MaxX { get; private set; } = int.MinValue;
+
+        public int MinY { get; private set; } = int.MaxValue;
+
+        public int MaxY { get; private set; } = int.MinValue;
+
+        public long Pixels { get; private set; }
+
+        public int Width => MaxX - MinX + 1;
+
+        public int Height => MaxY - MinY + 1;
+
+        /// <summary>How much of the bounding box is ink. A solid block is near 1; an outline is not.</summary>
+        public double Fill => Width <= 0 || Height <= 0 ? 0 : Pixels / (double)((long)Width * Height);
+
+        public void Add(int x, int y)
+        {
+            if (x < MinX) MinX = x;
+            if (x > MaxX) MaxX = x;
+            if (y < MinY) MinY = y;
+            if (y > MaxY) MaxY = y;
+            Pixels++;
+        }
+
+        /// <summary>A cluster the walk already measured, rather than one being accumulated.</summary>
+        public static Extent Of(int minX, int minY, int maxX, int maxY, long pixels)
+        {
+            var extent = new Extent();
+            extent.Add(minX, minY);
+            extent.Add(maxX, maxY);
+            extent.Pixels = pixels;
+            return extent;
+        }
+    }
+
     /// <summary>
-    /// Finishes consuming a cluster already known to be too big to be a letter, without keeping
-    /// track of anything about it.
+    /// Finishes consuming a cluster already known to be too big to be a letter, optionally
+    /// measuring it on the way through.
+    ///
+    /// <para>
+    /// A cluster too big to be a letter is not automatically uninteresting: a solid block of ink is
+    /// exactly what white lettering is printed on, and the only way to look inside one is to know
+    /// where it is. Measuring costs nothing extra, because the drain visits every pixel either way.
+    /// </para>
     /// </summary>
-    private static void Drain(byte[] mask, Stack<int> stack, int width, int height)
+    private static void Drain(byte[] mask, Stack<int> stack, int width, int height, Extent? extent = null)
     {
         while (stack.Count > 0)
         {
             var index = stack.Pop();
             var y = index / width;
             var x = index - y * width;
+
+            extent?.Add(x, y);
 
             for (var dy = -1; dy <= 1; dy++)
             {

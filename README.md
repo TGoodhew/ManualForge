@@ -1348,10 +1348,17 @@ The interval has not improved, because the sample size has not: one miss in twen
 anywhere between 43% and 99% at 95% confidence. Narrowing that means a few hundred unflagged pages
 rather than twenty — a day of looking at pictures, not an afternoon — and it has not been done.
 
-The one miss is **reverse video**: white letters on a black badge, which a detector looking for ink
-cannot see, because the letters are an absence of ink inside a block of it. That blind spot was
-already documented; it is now the leading known cause of misses, having replaced the render gate.
-`docs/measurements/recall-after-the-third-limb.md`.
+The one miss was first written up as reverse video — white letters on a black badge, which a
+detector looking for ink cannot see. Building that detector proved it was nothing of the kind: the
+page's badges *are* covered by glyphs, from an icon font, and they decode to `N ƒ ' † y }`. The ink
+is accounted for and the characters are not the letters on the page, so the page is sound by every
+test here and unsearchable to a reader. Issue #16.
+
+Reverse video is real elsewhere, and is implemented: `doctor --reverse-video` finds the readouts on
+spectrum-analyser screenshots, which no text layer holds. It is **off by default**, because on 458
+pages of application notes it flagged 41% more pages and about half of those were photographs and
+oscilloscope traces. A discriminator was tried, made things worse, and was removed.
+`docs/measurements/reverse-video.md` and `recall-after-the-third-limb.md` have both stories.
 
 ## Open questions
 

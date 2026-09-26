@@ -217,6 +217,48 @@ public sealed class DoctorOptions
     public double RuleSegmentMaximumWidthPt { get; init; } = 1.5;
 
     /// <summary>
+    /// Look for lettering printed through a block of ink rather than with it — white on black.
+    ///
+    /// <para>
+    /// The one shape a detector that looks for marks cannot see, because the letters are an absence
+    /// of ink inside a block of it. It was the only miss in the recall sample re-drawn after the
+    /// render gate was fixed, which makes it the leading known cause of missed pages. Issue #12.
+    /// </para>
+    /// </summary>
+    public bool ReverseVideo { get; init; }
+
+    /// <summary>
+    /// How solidly a cluster must fill its bounding box before its inside is worth examining.
+    ///
+    /// <para>
+    /// The condition that separates a button from a border. A page frame, a table outline and a
+    /// figure's box are all clusters far too big to be letters, and the "inside" of any of them is
+    /// the whole page — invert one of those and every word on the page is suddenly lettering
+    /// nothing accounts for. A filled block is near 1.0; an outline is a few per cent.
+    /// </para>
+    /// </summary>
+    public double ReverseVideoMinimumFill { get; init; } = 0.6;
+
+    /// <summary>
+    /// The smallest block worth looking inside, in square points.
+    ///
+    /// <para>
+    /// 180 pt² is about 20 × 9 pt, which is `MP4` on a badge — measured from the page this feature
+    /// was written for rather than chosen. It was 400 to begin with, and 400 excluded the very
+    /// thing being hunted.
+    /// </para>
+    /// </summary>
+    public double ReverseVideoMinimumAreaPt { get; init; } = 180.0;
+
+    /// <summary>
+    /// The largest, as a share of the page. A block covering most of the page is a photograph, and
+    /// light detail in a photograph is not lettering — it is the shape most likely to flag a
+    /// thousand pages for nothing.
+    /// </summary>
+    public double ReverseVideoMaximumPageShare { get; init; } = 0.25;
+
+
+    /// <summary>
     /// Characters assumed per glyph-like blob when estimating how much text a repair would
     /// recover. Slightly below one, because touching characters merge into a single blob and
     /// because a few blobs are arrowheads rather than letters. The estimate is for ranking the

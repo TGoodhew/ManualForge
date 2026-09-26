@@ -443,6 +443,11 @@ internal static class DoctorCommand
         RenderAtOrAboveImageCoverage =
             arguments.GetDouble("render-above-image") ?? new DoctorOptions().RenderAtOrAboveImageCoverage,
         RuleSegmentRun = arguments.GetInt("rule-run") ?? new DoctorOptions().RuleSegmentRun,
+        ReverseVideo = !arguments.Has("no-reverse-video"),
+        ReverseVideoMinimumAreaPt =
+            arguments.GetDouble("reverse-video-area") ?? new DoctorOptions().ReverseVideoMinimumAreaPt,
+        ReverseVideoMinimumFill =
+            arguments.GetDouble("reverse-video-fill") ?? new DoctorOptions().ReverseVideoMinimumFill,
         SamplePages = arguments.GetInt("sample") ?? 0,
         Workers = arguments.GetInt("workers") ?? new DoctorOptions().Workers,
     };
