@@ -86,3 +86,60 @@ is not "catch up with Acrobat" but two specific defects it exposed:
 * **Page 20 of this book** — a scanned schematic sheet where Acrobat finds three times the real
   text. `_compare/circuit-test.pdf` p20 is the regression case, and Acrobat's output beside it says
   what a good answer looks like.
+
+---
+
+# Round three: Tony's own selection, and the scanned-sheet hypothesis dies
+
+Round two ended by noting that two of Acrobat's four winning pages were photographed sheets from
+1970s manuals, and declined to call it a pattern on eight pages. Tony then hand-picked twelve pages
+— almost all scanned fold-outs, the exact type in question — which is the right way to settle it.
+
+`11713A-OSM` 71, 74 · `651B_OSM` 31, 32 · `400F_OSM` 28 · `3335A-OSM` 87, 88 ·
+`8902A Service Manual Full - Searchable` 561 · `8903B Service Manual` 213 ·
+`5200A-OSM` 217, 222, 238
+
+Eleven of the twelve pages are landscape, four of them 34 inches wide. Text layer removed by
+construction: 0 extractable characters.
+
+## The pattern does not survive contact with more pages
+
+| | Acrobat | ManualForge |
+|---|---|---|
+| Raw words | **7,431** | 6,438 |
+| **Content-bearing tokens** | 1,961 | **3,991  (+103.5%)** |
+| Pages led on | **0** | **10**  (2 level) |
+
+Acrobat produces more words and **less than half the real content**, and does not lead a single page.
+This is the widest margin of the three rounds, on the set chosen to be hardest for us.
+
+| Unique words | designators | values | junk (≤2 chars) |
+|---|---|---|---|
+| Acrobat, n=5,566 | 3.0% | 6.1% | **67.9%** |
+| ManualForge, n=4,573 | **21.7%** | **23.0%** | 24.8% |
+
+```
+Acrobat only      /  q  ----  -  i  73  -  -  r52.  -  oti-i  j  .  -  2104  u  p/0  -c  000  -  --
+ManualForge only  loop  amptd  nrfd  +15v2  timing  pulse  5200a.4165  cr2o  l2  u1-5  r24  cr333  08901-60130
+```
+
+Book page 8 is round two's story in miniature: `8902A` p561 gives Acrobat 1,692 raw words to our
+924, an 83% lead, which becomes 509 against 548 once only meaningful tokens are counted. The lead
+was junk.
+
+## So what was page 20 of round two?
+
+An outlier, not a class. `59401A-OSM` p61 remains a genuine deficit — 691 content-bearing tokens to
+our 204 — but twelve more pages of the same kind produce no Acrobat advantage at all. Whatever is
+wrong on that page is specific to it, and guessing from one example is what the extra twelve pages
+were for.
+
+## What all three rounds cannot tell us
+
+Every number here counts *how much real text is found*, never whether it is right. `R13` read as
+`R18` scores identically to `R13` read correctly. Three rounds have measured recall and nothing
+else, and no amount of further rounds changes that — it needs pages corrected by hand, which is #6.
+
+That is worth stating plainly next to a 103% margin, because a margin that large invites the
+conclusion that the recognition is good. What has been shown is that it finds far more of the text
+than Acrobat does. How much of what it finds is correct remains unmeasured.
