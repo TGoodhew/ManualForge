@@ -22,6 +22,8 @@ Nothing in here is hand-edited. If a number looks wrong, re-run the harness and 
 | **`publisher-truth-benchmark.md`** | The first accuracy numbers: 12 born-digital pages scored against their own text layers, so nobody had to transcribe anything. Deskew and denoise earn nothing on clean type and cost a fifth of the throughput; 200 dpi matches 300 and is 48% faster; a table is three times harder than prose. The floor, not accuracy on scans. |
 | `ground-truth-with-label-bias.md` | The 33 strings with the bias that is now the default: 31 of 33 in the first 25, 25 in the first ten. |
 | `ordinary-pages-without-label-bias.md` / `ordinary-pages-with-label-bias.md` | The control that decides whether a ranking change ships: 40 pages quoted at random from the library. 30 first against 29, nothing leaving the first ten. |
+| `ground-truth-after-shared-folder-ingest.md` | The 33 strings after 31 documents and 3,742 pages arrived from the shared folder (#17). Identical: 33 found, 31 in the first 25, 25 in the first ten. |
+| `ordinary-pages-after-shared-folder-ingest.md` | The harm control for that ingest. 40 of 40 retrievable, 38 in the first ten. The two below it lose to documents the library already held - a second copy of the same 8657B volume, and an 8903B manual reusing the same boilerplate - so neither was displaced by the new material. Not directly comparable with the runs above: the sample is drawn from the dump, and the dump grew. |
 
 ## Adding one
 

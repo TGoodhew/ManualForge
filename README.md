@@ -543,6 +543,22 @@ nothing could open, and thirteen 8340B and 8341B documents brought in from a sha
 it to **602 documents and 109,350 pages**, of which **20,443 carry text the repair read off a
 rendered page**.
 
+The rest of that shared folder followed on 25 September: **31 documents and 3,742 pages**, leaving
+the library at **632 documents and 112,739 pages**, with **20,877 pages carrying recovered text**.
+The triage is the part worth repeating rather than the totals. Of 88 candidate PDFs, **29 were
+byte-identical to files already held** — hashed only where a size matched, so the comparison cost
+nothing — and most of the rest already had sound text layers. What looked like "several thousand
+pages of OCR, hours rather than minutes" was **13 pages and 51 seconds**. Three of those thirteen
+were fold-outs 36 inches wide, run at 200 dpi because 300 would have rasterised them to nearly
+11,000 pixels across, and they gave up 4,220, 11,054 and 7,708 characters each. The audit then found
+440 pages worth repairing, which took 10.1 minutes at 44 pages/min and recovered 40,017 words.
+
+Search came through it unchanged: the 33 hand-read strings score exactly as before — 33 found, 31 in
+the first 25, 25 in the first ten — against 3,742 pages of new competition. The ordinary-pages
+control put two pages outside the first ten, and both turned out to be losing to documents the
+library already held: one to a second copy of the same 8657B volume, the other to an 8903B service
+manual reusing the same circuit-description boilerplate. Neither was displaced by anything ingested.
+
 Ten of those thirteen arrived as pure scans with no text layer at all, 2,655 pages of them, and were
 recognised before being indexed. One needed three separate repairs first: a corrupted `stream`
 keyword that PDFsharp would not write, a page whose image the corruption had destroyed, and a blank
