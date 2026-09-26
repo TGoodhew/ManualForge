@@ -77,6 +77,14 @@ public sealed class SearchablePdfBuilder(
     ILogger<SearchablePdfBuilder>? logger = null,
     IPageOcrCache? pageCache = null)
 {
+    /// <summary>
+    /// Diagnostic switch for issue #19. When set, the text dump carries the recogniser's own line
+    /// text beside the words each line was split into, which is the only way to tell a run the
+    /// recogniser misread from one it read correctly and we then cut apart.
+    /// </summary>
+    private static bool LineProbeWanted =>
+        Environment.GetEnvironmentVariable("MANUALFORGE_LINE_PROBE") == "1";
+
     private readonly IOcrEngine _ocrEngine = ocrEngine ?? throw new ArgumentNullException(nameof(ocrEngine));
     private readonly PageRasteriser _rasteriser = rasteriser ?? throw new ArgumentNullException(nameof(rasteriser));
     private readonly TextLayerWriter _textLayerWriter = textLayerWriter ?? throw new ArgumentNullException(nameof(textLayerWriter));
@@ -88,9 +96,16 @@ public sealed class SearchablePdfBuilder(
     /// different resolution would put every word box in the wrong coordinate space, and nothing
     /// downstream could tell.
     /// </summary>
+    /// <summary>
+    /// What the cached recognition depended on. Anything that changes what the recogniser returns
+    /// belongs here, or a settings change is silently ignored for every page already done - which
+    /// happened: large-page tiling was added, measured against a cached result, and appeared to do
+    /// nothing at all.
+    /// </summary>
     public string SettingsFingerprint =>
         $"dpi={_rasteriser.Options.Dpi};grey={_rasteriser.Options.Grayscale};" +
-        $"provider={_ocrEngine.Runtime.ExecutionProvider};conf={_textLayerWriter.Options.MinimumConfidence}";
+        $"provider={_ocrEngine.Runtime.ExecutionProvider};conf={_textLayerWriter.Options.MinimumConfidence};" +
+        $"ocr={_ocrEngine.Runtime.SettingsFingerprint}";
 
     /// <summary>OCR results kept from the last build, so verification can compare against them.</summary>
     public IReadOnlyDictionary<int, PageInput> LastPageInputs => _lastPageInputs;
@@ -200,6 +215,7 @@ public sealed class SearchablePdfBuilder(
                 var ocrWatch = Stopwatch.StartNew();
 
                 RecognisedWord[] words;
+                IReadOnlyList<RecognisedLine>? probeLines = null;
                 var recognisedWordCount = 0;
                 var meanConfidence = 0.0;
                 var fromCache = cached is not null;
@@ -227,6 +243,7 @@ public sealed class SearchablePdfBuilder(
                     }
 
                     words = recognised.Words.Where(w => w.IsUsable).ToArray();
+                    probeLines = recognised.Lines;
                     recognisedWordCount = recognised.WordCount;
                     meanConfidence = recognised.MeanConfidence;
 
@@ -247,7 +264,19 @@ public sealed class SearchablePdfBuilder(
 
                 textDump?.Add($"--- page {pageNumber} ---");
                 if (textDump is not null)
+                {
+                    // MANUALFORGE_LINE_PROBE=1 writes the recogniser's own line text beside the
+                    // words it was split into. The two disagreeing is the signature of #19: a
+                    // widely letter-spaced run read correctly as a line and then cut into
+                    // fragments. Diagnostic only, and off unless asked for.
+                    if (probeLines is not null && LineProbeWanted)
+                    {
+                        foreach (var probeLine in probeLines)
+                            textDump.Add($"[line] {probeLine.Text}");
+                    }
+
                     textDump.AddRange(words.Select(w => w.Text));
+                }
 
                 var report = new PageReport(
                     pageNumber,

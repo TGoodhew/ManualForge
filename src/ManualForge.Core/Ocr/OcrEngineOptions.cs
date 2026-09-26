@@ -52,6 +52,7 @@ public sealed class OcrEngineOptions
     /// <summary>Never hit the network for models; fail if they are not already cached.</summary>
     public bool OfflineModels { get; init; } = false;
 
+
     /// <summary>
     /// Cap on the threads ONNX Runtime uses for a single operator. Null leaves it to the runtime,
     /// which takes every core.
@@ -83,4 +84,5 @@ public sealed record OcrRuntimeSummary(
     bool UsingGpu,
     string? AccelerationHint,
     string ModelCachePath,
-    string? CudaLibraries = null);
+    string? CudaLibraries = null,
+    string SettingsFingerprint = "");

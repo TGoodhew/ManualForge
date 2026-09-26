@@ -152,7 +152,10 @@ public class LibraryProcessorTests : IDisposable
     private const int Dpi = 150;
 
     /// <summary>The settings cached recognition is scoped by, for these tests' rasteriser and engine.</summary>
-    private const string CacheSettings = "dpi=150;grey=True;provider=Fake;conf=0.3";
+    // Spelled out rather than derived, so that widening the fingerprint has to be a deliberate
+    // edit here. It already needed widening once: recognition settings were missing from it, and a
+    // detection change measured against a cached page appeared to do nothing.
+    private const string CacheSettings = "dpi=150;grey=True;provider=Fake;conf=0.3;ocr=";
 
     private LibraryOptions NewOptions(ClassificationPolicy? policy = null) => new()
     {

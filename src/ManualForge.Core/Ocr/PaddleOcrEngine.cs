@@ -79,7 +79,10 @@ public sealed class PaddleOcrEngine : IOcrEngine
             _service.UseGpu,
             _service.GpuAccelerationHint,
             options.ModelCachePath,
-            cudaLibraries);
+            cudaLibraries,
+            // Everything here changes what recognition returns, so it has to reach the page cache.
+            $"deskew={options.Deskew};denoise={options.Denoise};" +
+            $"drop={options.DropScore}");
 
         _logger.LogInformation(
             "OCR engine ready: provider {Provider}, GPU {UsingGpu}, models in {ModelCache}",
@@ -146,4 +149,5 @@ public sealed class PaddleOcrEngine : IOcrEngine
         RectD.FromEdges(box.MinX, box.MinY, box.MaxX, box.MaxY);
 
     public async ValueTask DisposeAsync() => await _service.DisposeAsync().ConfigureAwait(false);
+
 }
