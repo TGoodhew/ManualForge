@@ -54,6 +54,12 @@ public sealed class PaddleOcrEngine : IOcrEngine
             Download = new ModelDownloadOptions { Offline = options.OfflineModels },
             IntraOpNumThreads = options.CpuThreads,
             InterOpNumThreads = options.CpuThreads is null ? null : 1,
+            // Matched to the rasteriser's own ceiling. The library's default is 100M, ours is
+            // 120M, and a page between the two rasterises happily and is then refused - which on
+            // a 600 dpi run over a book of fold-outs killed the whole job at page 117. The guard
+            // exists against decompression bombs from untrusted input; these are the user's own
+            // manuals, already capped before they reach here.
+            MaxImagePixels = options.MaxImagePixels,
         };
 
         _service = new PaddleOcrService(serviceOptions, logger: null);

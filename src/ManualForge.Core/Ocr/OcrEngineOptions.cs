@@ -52,6 +52,13 @@ public sealed class OcrEngineOptions
     /// <summary>Never hit the network for models; fail if they are not already cached.</summary>
     public bool OfflineModels { get; init; } = false;
 
+    /// <summary>
+    /// The largest page the recogniser will accept, in pixels. Kept equal to
+    /// <see cref="Rendering.RasterOptions.MaxPixels"/>: when the two disagree a page can be
+    /// rasterised and then refused, and the refusal arrives after the work is done.
+    /// </summary>
+    public long MaxImagePixels { get; init; } = 120_000_000;
+
 
     /// <summary>
     /// Cap on the threads ONNX Runtime uses for a single operator. Null leaves it to the runtime,

@@ -125,7 +125,13 @@ internal sealed class CommandLine
               --pages <spec>          Pages to process, e.g. 1,4,7-9. Default: all.
               --engine <name>         auto | cuda | directml | cpu. Default auto.
               --batch <n>             Recognition batch size. Default 8.
-              --min-confidence <x>    Drop words recognised below this score. Default 0.30.
+              --min-confidence <x>    Drop words below this score when WRITING the text layer.
+                                      Default 0.30. It does not change what the recogniser
+                                      returns; --drop-score does that.
+              --drop-score <x>        The recogniser's own floor: a candidate below this never
+                                      comes back at all. Default 0.30. Lowering it keeps weak
+                                      readings, which is worth trying on material that reads
+                                      as noise.
               --text <path>           Also write a plain-text dump of what was recognised.
               --no-deskew             Skip deskewing before recognition.
               --no-denoise            Skip despeckling before recognition.
@@ -191,7 +197,13 @@ internal sealed class CommandLine
             repair options:
               --dpi <n>               Override the per-page resolution the audit suggested.
               --max-dpi <n>           Ceiling on that suggestion. Default 600.
-              --min-confidence <x>    Drop words recognised below this score. Default 0.30.
+              --min-confidence <x>    Drop words below this score when WRITING the text layer.
+                                      Default 0.30. It does not change what the recogniser
+                                      returns; --drop-score does that.
+              --drop-score <x>        The recogniser's own floor: a candidate below this never
+                                      comes back at all. Default 0.30. Lowering it keeps weak
+                                      readings, which is worth trying on material that reads
+                                      as noise.
               --redo                  Re-recognise pages an earlier run already did.
               --limit <n>             Stop after n documents, worst first.
               --worst-only            Skip documents the audit called merely figure-heavy.

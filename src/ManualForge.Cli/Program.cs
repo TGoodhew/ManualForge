@@ -191,6 +191,11 @@ namespace ManualForge.Cli
                 BatchSize = arguments.GetInt("batch") ?? 8,
                 Deskew = !arguments.Has("no-deskew"),
                 Denoise = !arguments.Has("no-denoise"),
+                // The recogniser's own floor, which is a different thing from the writer's
+                // --min-confidence below: this decides what comes back at all, that decides what
+                // gets written. There was no way to reach it from here, so the one knob most
+                // likely to matter on a page read badly could not be tried. See #19.
+                DropScore = arguments.GetDouble("drop-score") ?? new OcrEngineOptions().DropScore,
             };
 
             Console.WriteLine($"Source : {input}");
