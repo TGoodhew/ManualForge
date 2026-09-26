@@ -409,7 +409,10 @@ internal static class ReconcileCommand
             return 1;
         }
 
-        using var index = new SearchIndex(indexPath, readOnly: true);
+        // Trimming writes, so the index cannot be opened read-only when it is asked for.
+        var trimMissing = arguments.Has("trim-missing");
+
+        using var index = new SearchIndex(indexPath, readOnly: !trimMissing);
         var reconciliation = LibraryReconciler.Reconcile(root, index, new IndexOptions());
 
         Console.WriteLine($"Library : {root}");
@@ -446,6 +449,25 @@ internal static class ReconcileCommand
                 Console.WriteLine($"  {Path.GetRelativePath(root, path)}");
 
             Console.WriteLine();
+
+            // `index --reindex` does not clear these: it rebuilds the documents it finds on disk and
+            // never visits one that has gone, so the orphan rows and their pages survive a rebuild.
+            // Removing them is the only way back to a clean index short of deleting the file.
+            if (trimMissing)
+            {
+                foreach (var path in reconciliation.IndexedButGone)
+                    index.Remove(path);
+
+                Console.WriteLine(
+                    $"Forgot {reconciliation.IndexedButGone.Count:N0} document(s) whose file is gone. " +
+                    "Their pages are out of the index and can no longer be returned by a search.");
+                Console.WriteLine();
+            }
+            else
+            {
+                Console.WriteLine("  → `manualforge reconcile <folder> --trim-missing` forgets them.");
+                Console.WriteLine();
+            }
         }
 
         return 0;

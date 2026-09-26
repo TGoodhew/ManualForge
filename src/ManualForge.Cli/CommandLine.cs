@@ -179,6 +179,11 @@ internal sealed class CommandLine
               --sample <n>            Audit n pages per document instead of all of them.
               --workers <n>           Documents at once. Default half the cores.
               --doctor-db <path>      Findings database. Default <root>/_Originals/manualforge-doctor.db.
+              --reverse-video         Also look inside solid blocks of ink for glyph-shaped holes -
+                                      white lettering on black, which a filter looking for marks
+                                      cannot see. Off by default: at the shipped thresholds it
+                                      flags about one page in 1,200 and finds photographs as
+                                      readily as readouts. docs/measurements/reverse-video.md.
 
             repair options:
               --dpi <n>               Override the per-page resolution the audit suggested.
@@ -200,6 +205,10 @@ internal sealed class CommandLine
                                       exactly what the merge changed and what it left alone.
               --limit <n>             Results to show. Default 10.
               --show-duplicates       List identical copies separately instead of folding them.
+              --trim-missing          reconcile only: forget indexed documents whose file has gone.
+                                      `--reindex` does not clear these - it rebuilds what it finds
+                                      on disk and never visits what has been deleted - so without
+                                      this a search can return a page of a file that is not there.
 
             truth / benchmark options:
               --truth <folder>        The ground-truth set: one corrected text file per page.

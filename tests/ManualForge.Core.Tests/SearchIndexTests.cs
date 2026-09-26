@@ -196,4 +196,42 @@ public class SearchIndexTests : IDisposable
         using (var reopened = NewIndex(name))
             Assert.Single(reopened.Search("YIG"));
     }
+
+    /// <summary>
+    /// <c>Remove</c> existed and nothing called it, so a document whose file had been deleted stayed
+    /// in the index and kept answering searches. <c>index --reindex</c> does not clear one either: a
+    /// rebuild visits the files on disk and never visits the one that has gone. Measured on the real
+    /// library on 25 Sep 2026 - a full rebuild reported 632 documents indexed and an index of 633.
+    /// </summary>
+    [Fact]
+    public void ARemovedDocumentStopsAnsweringSearches()
+    {
+        using var index = NewIndex();
+        index.AddDocument(
+            @"C:\Manuals\gone.pdf", "gone", "hash-gone",
+            Pages("The klystron reflector voltage is set by the rear panel control."));
+        index.AddDocument(
+            @"C:\Manuals\kept.pdf", "kept", "hash-kept",
+            Pages("The klystron reflector voltage is set by the rear panel control."));
+
+        Assert.Equal(2, index.Search("klystron reflector", 10).Count);
+
+        index.Remove(@"C:\Manuals\gone.pdf");
+
+        var results = index.Search("klystron reflector", 10);
+        Assert.Single(results);
+        Assert.Equal("kept", results[0].Title);
+    }
+
+    [Fact]
+    public void RemovingADocumentThatIsNotThereChangesNothing()
+    {
+        using var index = NewIndex();
+        index.AddDocument(
+            @"C:\Manuals\kept.pdf", "kept", "hash-kept", Pages("Attenuator hold-off adjustment."));
+
+        index.Remove(@"C:\Manuals\never-indexed.pdf");
+
+        Assert.Single(index.Search("attenuator", 10));
+    }
 }
