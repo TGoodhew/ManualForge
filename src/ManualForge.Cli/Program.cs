@@ -196,6 +196,7 @@ namespace ManualForge.Cli
                 // gets written. There was no way to reach it from here, so the one knob most
                 // likely to matter on a page read badly could not be tried. See #19.
                 DropScore = arguments.GetDouble("drop-score") ?? new OcrEngineOptions().DropScore,
+                UseServerModels = arguments.Has("server-models"),
             };
 
             Console.WriteLine($"Source : {input}");

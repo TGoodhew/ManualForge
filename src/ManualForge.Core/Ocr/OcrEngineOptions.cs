@@ -59,6 +59,18 @@ public sealed class OcrEngineOptions
     /// </summary>
     public long MaxImagePixels { get; init; } = 120_000_000;
 
+    /// <summary>
+    /// Run PP-OCRv5's larger detection and recognition networks instead of the default ones.
+    ///
+    /// <para>
+    /// "Mobile" and "server" name the model's size, not the machine it runs on: the mobile pack is
+    /// built to be small enough for constrained deployment, and the server pack is roughly 3-5x
+    /// larger and more accurate. Nothing here ever chose, so every page in this library has been
+    /// recognised by the small one on a desktop with a CUDA card. Issue #22.
+    /// </para>
+    /// </summary>
+    public bool UseServerModels { get; init; }
+
 
     /// <summary>
     /// Cap on the threads ONNX Runtime uses for a single operator. Null leaves it to the runtime,

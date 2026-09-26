@@ -60,6 +60,8 @@ public sealed class PaddleOcrEngine : IOcrEngine
             // exists against decompression bombs from untrusted input; these are the user's own
             // manuals, already capped before they reach here.
             MaxImagePixels = options.MaxImagePixels,
+            DetectionModel = options.UseServerModels ? OcrModelVariant.Server : OcrModelVariant.Mobile,
+            RecognitionModel = options.UseServerModels ? OcrModelVariant.Server : OcrModelVariant.Mobile,
         };
 
         _service = new PaddleOcrService(serviceOptions, logger: null);
@@ -87,7 +89,7 @@ public sealed class PaddleOcrEngine : IOcrEngine
             options.ModelCachePath,
             cudaLibraries,
             // Everything here changes what recognition returns, so it has to reach the page cache.
-            $"deskew={options.Deskew};denoise={options.Denoise};" +
+            $"server={options.UseServerModels};deskew={options.Deskew};denoise={options.Denoise};" +
             $"drop={options.DropScore}");
 
         _logger.LogInformation(
