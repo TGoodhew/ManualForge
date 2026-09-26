@@ -116,6 +116,7 @@ internal sealed class CommandLine
               manualforge benchmark --truth <folder>      Measure character and word error rates
               manualforge gpu                            Report which execution provider is active
               manualforge version                        Which build this is, and where it was loaded from
+              manualforge pages <folder> --shape drawn   Find test pages by shape, from the audit's geometry
               manualforge assemble --pages <list>        Collect pages from many PDFs into one image-only PDF
 
             ocr options:
@@ -211,6 +212,16 @@ internal sealed class CommandLine
                                       `--reindex` does not clear these - it rebuilds what it finds
                                       on disk and never visits what has been deleted - so without
                                       this a search can return a page of a file that is not there.
+
+            pages options:
+              --shape drawn|scanned   drawn: a circuit diagram, where the drawing outweighs the
+                                      labels. scanned: a photographed sheet, few glyphs and much
+                                      ink no glyph accounts for. Default drawn.
+              --limit <n>             How many pages. Default 16.
+              --per-document <n>      At most this many from any one document, so a single densely
+                                      drawn manual cannot supply the whole set. Default 2.
+              --out <file>            Write the list for `assemble` to read.
+              --doctor-db <path>      Findings database. Default <root>/_Originals/manualforge-doctor.db.
 
             assemble options:
               --pages <file>          A list of 'path<TAB>page' lines; # starts a comment.

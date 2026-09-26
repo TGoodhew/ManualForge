@@ -62,6 +62,7 @@ try
         "benchmark" => await BenchmarkCommand.RunAsync(arguments, loggerFactory, cancellation.Token),
         "baselines" => BaselineCommand.Run(arguments, loggerFactory, cancellation.Token),
         "assemble" => AssembleCommand.Run(arguments),
+        "pages" => PagesCommand.Run(arguments),
         _ => Unknown(arguments.Command),
     };
 }
