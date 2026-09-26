@@ -116,6 +116,7 @@ internal sealed class CommandLine
               manualforge benchmark --truth <folder>      Measure character and word error rates
               manualforge gpu                            Report which execution provider is active
               manualforge version                        Which build this is, and where it was loaded from
+              manualforge assemble --pages <list>        Collect pages from many PDFs into one image-only PDF
 
             ocr options:
               --out <path>            Output file. Default: <input>.searchable.pdf next to the source.
@@ -210,6 +211,13 @@ internal sealed class CommandLine
                                       `--reindex` does not clear these - it rebuilds what it finds
                                       on disk and never visits what has been deleted - so without
                                       this a search can return a page of a file that is not there.
+
+            assemble options:
+              --pages <file>          A list of 'path<TAB>page' lines; # starts a comment.
+              --out <file.pdf>        Where to write. A .manifest.tsv is written beside it mapping
+                                      each book page back to its source document and page.
+              --dpi <n>               Rasterisation resolution. Default 300.
+              --quality <n>           JPEG quality, 1-100. Default 90.
 
             truth / benchmark options:
               --truth <folder>        The ground-truth set: one corrected text file per page.

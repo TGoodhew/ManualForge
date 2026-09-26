@@ -12,3 +12,6 @@ TestResults/
 models/
 logs/
 *.jsonl
+
+# Comparison artefacts: large, regenerable, and not the measurement itself.
+_compare/

@@ -61,6 +61,7 @@ try
         "truth" => await TruthCommand.RunAsync(arguments, loggerFactory, cancellation.Token),
         "benchmark" => await BenchmarkCommand.RunAsync(arguments, loggerFactory, cancellation.Token),
         "baselines" => BaselineCommand.Run(arguments, loggerFactory, cancellation.Token),
+        "assemble" => AssembleCommand.Run(arguments),
         _ => Unknown(arguments.Command),
     };
 }
