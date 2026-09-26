@@ -21,3 +21,29 @@ drawing as text produces enormous counts of nothing.
 | 300 dpi, keep weak words | 53490 | **40351** | 75.4% | 14.2% | 3.7 |
 | 300 dpi, no deskew | 53303 | **40133** | 75.3% | 14.2% | 3.5 |
 | 400 dpi, defaults | 51287 | **38658** | 75.4% | 14% | 4.9 |
+
+## The confidence floor, measured separately once it could be reached
+
+The sweep above could not test this: `--min-confidence` sets the *writer's*
+threshold and never reached the recogniser's own floor, so its "keep weak words"
+run returned numbers identical to the default. `--drop-score` was added in
+`e118e3d` and the question asked properly.
+
+| `--drop-score` | Raw tokens | Content-bearing | Junk share |
+|---|---|---|---|
+| 0.30 *(default)* | 53,490 | 40,351 | 14.2% |
+| 0.15 | 54,199 | 40,652 | 14.8% |
+| 0.05 | 54,270 | **40,678** | 14.8% |
+| 0.01 | 54,270 | **40,678** | 14.8% |
+
+**0.8%, and saturated below 0.05** — 0.01 returns exactly what 0.05 returns, so
+there is nothing further down there to find.
+
+On the page that started all of this, the answer is sharper still. Dropping the
+floor from 0.30 to 0.01 takes it from 298 words to 317, and from **one**
+bit-pattern reading to **one**. Acrobat reads fifty-six.
+
+So the readings are not being produced and discarded as weak. They are not being
+produced. That closes the configuration line of enquiry on #19: detection finds
+the boxes, no threshold, grouping, resolution or confidence setting changes the
+outcome, and the recogniser simply does not read these cells.
