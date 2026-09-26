@@ -538,9 +538,16 @@ again, which is the problem this whole section keeps arriving at.
 Where the library now stands: **19,351 flagged pages, 19,712 repaired, nothing outstanding**, and an
 index of 584 documents and 104,504 pages.
 
-Since then the library has grown: four 8340A volumes and a service supplement recovered from a file
-nothing could open, taking it to **589 documents and 106,000 pages**, of which **19,848 carry text
-the repair read off a rendered page**.
+Since then the library has grown: four 8340A volumes, a service supplement recovered from a file
+nothing could open, and thirteen 8340B and 8341B documents brought in from a shared folder — taking
+it to **602 documents and 109,350 pages**, of which **20,443 carry text the repair read off a
+rendered page**.
+
+Ten of those thirteen arrived as pure scans with no text layer at all, 2,655 pages of them, and were
+recognised before being indexed. One needed three separate repairs first: a corrupted `stream`
+keyword that PDFsharp would not write, a page whose image the corruption had destroyed, and a blank
+spliced into its place so that every later page kept its number. It is now the largest document in
+the corpus at 992 pages.
 
 ### A rebuilt index is a fifth smaller than a grown one
 
