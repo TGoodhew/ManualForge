@@ -12,6 +12,7 @@ Nothing in here is hand-edited. If a number looks wrong, re-run the harness and 
 | `recovered-text-reaches-search.md` | The pass those 33 strings cannot see: 25 repaired pages across 25 other documents, asked for a phrase that exists only in recovered text. 21 newly findable, 4 already findable, 0 missing. |
 | `ground-truth-with-model-hint.md` | The same 33 strings asked with `--model 54845A`, as a caller who knows the instrument would. 33 of 33, and 32 in the first ten against 21 without. |
 | `new-flags-precision.md` | Twelve pages the new render-gate limb added, looked at by eye. 11 genuine, 1 false positive — enough to decide the repair was worth running. |
+| `ground-truth-after-compact.md` | The same 33 strings after the index was rebuilt from scratch and vacuumed, 385 MB down to 306 MB. Identical scores, which is what a rebuild losing nothing looks like. |
 | `ground-truth-after-reaudit.md` | The 33 strings after the re-audit and the third repair. Still 27 of 33, 21 in the first ten: 700k more words of competition changed nothing by more than a rank or three. |
 | `recovered-text-after-reaudit.md` | 25 pages from the third repair. 21 newly findable, 2 already findable, 2 whose *document* returns at ranks 4 and 2 but whose page sits below 25. |
 | **`ranking-label-bias.md`** | **Read this one first about ranking.** Why a term on a line of its own is boosted, measured three ways, and what was tried and rejected beside it. |

@@ -538,6 +538,21 @@ again, which is the problem this whole section keeps arriving at.
 Where the library now stands: **19,351 flagged pages, 19,712 repaired, nothing outstanding**, and an
 index of 584 documents and 104,504 pages.
 
+Since then the library has grown: four 8340A volumes and a service supplement recovered from a file
+nothing could open, taking it to **589 documents and 106,000 pages**, of which **19,848 carry text
+the repair read off a rendered page**.
+
+### A rebuilt index is a fifth smaller than a grown one
+
+Updating documents in place leaves free pages behind, and a corpus-wide repair updates most of the
+library. The index had reached 385 MB carrying 79 MB of nothing. Rebuilt from scratch and vacuumed —
+`index --reindex --compact`, 2.9 minutes — it is **306 MB** with the same 589 documents, the same
+106,000 pages and the same 19,848 recovered ones. The 33 hand-read strings score exactly as before,
+which is the point of re-running them: a rebuild that quietly lost something would show up there.
+
+Worth doing after a large repair and not worth doing often, since a vacuum rewrites the whole file
+and a cloud-synced index then re-uploads all of it.
+
 #### Reproducing it, and measuring the next change against it
 
 ```
