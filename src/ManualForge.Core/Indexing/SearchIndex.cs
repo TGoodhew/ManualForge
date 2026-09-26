@@ -37,6 +37,14 @@ public sealed record RankingBias
     /// draws rather than discusses — which is the defining page. The premise may be wrong; that is
     /// what measuring is for.
     /// </summary>
+    /// <summary>
+    /// For a page whose match is text the repair read off a rendered page, when the query is a
+    /// single bare word. The page that defines a bare instrument term is disproportionately the one
+    /// the repair rescued — a syntax table or a pin-out whose text layer was incomplete — while the
+    /// pages burying it are prose that extracted cleanly all along. Applied to command syntax as
+    /// well it makes matters worse, so it is deliberately narrow:
+    /// <see cref="SearchQuery.IsBareTerm"/> and <c>docs/measurements/ranking-recovered-text.md</c>.
+    /// </summary>
     public double Recovered { get; init; } = 1.0;
 
     /// <summary>Whether anything here would change an ordering.</summary>
@@ -67,7 +75,7 @@ public sealed record RankingBias
     /// rediscovered.
     /// </para>
     /// </summary>
-    public static readonly RankingBias Default = new() { Label = 1.4 };
+    public static readonly RankingBias Default = new() { Label = 1.4, Recovered = 1.4 };
 }
 
 /// <summary>Where the text on a page came from.</summary>
@@ -528,6 +536,7 @@ public sealed class SearchIndex : IDisposable
             return [];
 
         var terms = SearchQuery.Terms(query);
+        var bareTerm = SearchQuery.IsBareTerm(query);
         var hasProvenance = HasTable("page_provenance");
 
         using var command = _connection.CreateCommand();
@@ -612,8 +621,18 @@ public sealed class SearchIndex : IDisposable
                     if (ranking.Label != 1.0 && CarriesALabel(terms, fullText))
                         score *= ranking.Label;
 
-                    if (ranking.Recovered != 1.0 && hit.MatchSource == TextSource.Ocr)
+                    // Only for a single bare word. Measured across the 33 ground-truth strings: on
+                    // bare terms this is decisive - ATTenuation 14 -> 1, PROTection 11 -> 2, SKEW
+                    // 6 -> 1 - and on colon-delimited commands it is actively harmful, taking
+                    // :CHANnel<N>:SCALe from 6 to 15 and :CHANnel<N>:INPut from 19 to 32. Applied
+                    // to everything it gains one place in the first ten and loses two in the first
+                    // 25; applied only here it gains without the loss.
+                    if (ranking.Recovered != 1.0
+                        && hit.MatchSource == TextSource.Ocr
+                        && bareTerm)
+                    {
                         score *= ranking.Recovered;
+                    }
                 }
 
                 candidates.Add((hit, hash, score));

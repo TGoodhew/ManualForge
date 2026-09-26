@@ -39,6 +39,39 @@ public static class SearchQuery
     private static readonly char[] NotationCharacters = [':', '{', '}', '[', ']', '<', '>', '|'];
 
     /// <summary>
+    /// Whether the query is one bare word — <c>ATTenuation</c>, <c>PROTection</c>, <c>SKEW</c> —
+    /// rather than command syntax or a phrase.
+    ///
+    /// <para>
+    /// This is the population bm25 serves worst, because a bare instrument term appears in hundreds
+    /// of manuals and the page that <em>defines</em> it competes with every page that merely
+    /// mentions it. It is also the only population the recovered-text bias measurably helps: see
+    /// <c>docs/measurements/ranking-recovered-text.md</c>, where weighting recovered matches moved
+    /// <c>ATTenuation</c> from 14 to 1 and <c>PROTection</c> from 11 to 2, while pushing every
+    /// colon-delimited command the other way.
+    /// </para>
+    /// </summary>
+    public static bool IsBareTerm(string? query)
+    {
+        if (string.IsNullOrWhiteSpace(query))
+            return false;
+
+        var trimmed = query.Trim();
+
+        // A phrase, a quoted string or anything with notation is not a bare term.
+        if (trimmed.IndexOfAny(NotationCharacters) >= 0)
+            return false;
+
+        foreach (var c in trimmed)
+        {
+            if (char.IsWhiteSpace(c) || c is '"' or '*')
+                return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>
     /// Whether the text is already an FTS5 expression the user meant literally.
     /// </summary>
     public static bool LooksLikeExpression(string query)

@@ -15,6 +15,8 @@ Nothing in here is hand-edited. If a number looks wrong, re-run the harness and 
 | `ground-truth-after-compact.md` | The same 33 strings after the index was rebuilt from scratch and vacuumed, 385 MB down to 306 MB. Identical scores, which is what a rebuild losing nothing looks like. |
 | `ground-truth-after-reaudit.md` | The 33 strings after the re-audit and the third repair. Still 27 of 33, 21 in the first ten: 700k more words of competition changed nothing by more than a rank or three. |
 | `recovered-text-after-reaudit.md` | 25 pages from the third repair. 21 newly findable, 2 already findable, 2 whose *document* returns at ranks 4 and 2 but whose page sits below 25. |
+| **`ranking-recovered-text.md`** | The second ranking change: weighting matches against text the repair recovered, but **only for one-word queries**. Applied to everything it gains one place and loses two; scoped to bare terms it gains two and loses none. Also why the ordinary-pages control reported "unchanged" for a change it could not detect. |
+| `ranking-recovered-1.0.md` / `ranking-recovered-1.2.md` / `ranking-recovered-text-default.md` | The runs behind that: the old default, the flat bias that was rejected, and the scoped bias that shipped. |
 | **`ranking-label-bias.md`** | **Read this one first about ranking.** Why a term on a line of its own is boosted, measured three ways, and what was tried and rejected beside it. |
 | `reverse-video.md` | Looking inside blocks of ink for white lettering: what it finds (analyser readouts), what it also finds (photographs), the discriminator that failed, and why it ships switched off. |
 | `recall-after-the-third-limb.md` | The detector's recall re-measured by eye: 1 miss in 20 unflagged pages against 2 before, so about 79% rather than 49% — with the same wide interval, because the sample is the same size. |
@@ -53,14 +55,21 @@ having a control and arguing from memory.
 ## Measuring a ranking change
 
 The 33 strings come from one manual and were chosen because they failed, so a change designed
-against them will flatter itself. Anything that alters ranking is measured against two sets of
-queries that had no hand in its design as well:
+against them will flatter itself. Anything that alters ranking is measured against sets of queries
+that had no hand in its design as well.
+
+**Match the control to the query shape the change touches.** The ordinary-pages harness asks only
+eight-word phrases, so it reported "40 of 40 unchanged" for the recovered-text bias — not because
+that bias was harmless but because every query it asks is one the bias never sees.
+`measure-bare-terms.ps1` exists for that reason: one distinctive word per page, which is the shape a
+single-token change actually moves. A control that cannot respond is not evidence.
 
 ```
 ./tools/measure-ground-truth.ps1    -Extra @('--rank-labels','1.4')   # the target
 ./tools/measure-recovered-text.ps1  -Extra @('--rank-labels','1.4')   # other documents
 ./tools/measure-ordinary-pages.ps1  -Extra @('--rank-labels','1.4')   # ordinary prose, does it harm?
+./tools/measure-bare-terms.ps1      -Extra @('--rank-labels','1.4')   # one-word queries, does it harm?
 ```
 
-The third is the one that decides. A change that gains four places on the ground truth and costs ten
+The last two are the ones that decide. A change that gains four places on the ground truth and costs ten
 ordinary pages their first place is not an improvement, and only that script will say so.
