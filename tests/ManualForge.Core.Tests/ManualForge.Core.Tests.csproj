@@ -21,6 +21,8 @@
     <!-- The MCP tools are the surface Claude actually sees, and most of what they do is decide
          what to say. That is worth testing directly rather than through a stdio transport. -->
     <ProjectReference Include="..\..\src\ManualForge.Mcp\ManualForge.Mcp.csproj" />
+    <!-- Only for the argument wiring: which flags map to which options. -->
+    <ProjectReference Include="..\..\src\ManualForge.Cli\ManualForge.Cli.csproj" />
   </ItemGroup>
 
   <ItemGroup>

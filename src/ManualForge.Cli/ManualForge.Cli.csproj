@@ -22,4 +22,11 @@
     <PackageReference Include="Microsoft.Extensions.Logging" />
   </ItemGroup>
 
+
+  <ItemGroup>
+    <!-- The option wiring is worth testing directly: a documented default and the flag that sets it
+         drifted apart once already, and nothing else would have noticed. -->
+    <InternalsVisibleTo Include="ManualForge.Core.Tests" />
+  </ItemGroup>
+
 </Project>

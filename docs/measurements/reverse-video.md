@@ -75,3 +75,63 @@ fails on that page is that the characters in the file are not the letters on the
 
 The miss is still a miss — the text a reader can see is not the text the layer holds — but its cause
 was misdiagnosed, and reverse video was never going to fix it. Issue #16 covers the real cause.
+
+## It was never actually off — 25 Sep 2026
+
+The CLI wired the flag backwards:
+
+```csharp
+ReverseVideo = !arguments.Has("no-reverse-video"),    // on unless you type --no-reverse-video
+```
+
+`DoctorOptions.ReverseVideo` defaults to `false`, this file says "off by default",
+`docs/UNDER-EXTRACTION.md` lists the default as `off`, and the README documents
+`--reverse-video` as the switch that turns it on. All four were describing an
+opt-in. The CLI had built an opt-*out*, so `--reverse-video` did nothing at all —
+the limb was already running — and there was no way to turn it off except a flag
+nobody had written down.
+
+Every audit run through the CLI since commit `a36bd0a` had it enabled, including
+the #14 8340B ingest and the first #17 audit. Fixed to
+`ReverseVideo = arguments.Has("reverse-video")`, with
+`tests/ManualForge.Core.Tests/DoctorOptionWiringTests.cs` pinning the default
+against `new DoctorOptions()` so the two cannot drift apart again. Asserting only
+that `--reverse-video` turns it *on* would have passed against the broken wiring;
+asserting the default is what discriminates.
+
+### What it had been contributing: one page in 1,263
+
+Worth knowing before deciding how much the mistake cost. Five documents from the
+#17 material, each audited twice into scratch databases — once with the limb off,
+once with `--reverse-video` — and nothing else changed:
+
+| Document | Pages | Off | On | Delta |
+|---|---|---|---|---|
+| `E4400-90324` (ESG signal generator) | 259 | 38 | 38 | 0 |
+| `E4406-60009-RF-clip` (VSA) | 39 | 2 | 2 | 0 |
+| `HP_8657B_Service_Manual` | 438 | 69 | 69 | 0 |
+| `8902A Service Manual - 526pp` | 526 | 73 | 74 | **+1** |
+| `HP_83592A_A4_ALC_Block_Diagram` | 1 | 1 | 1 | 0 |
+| | **1,263** | **183** | **184** | **+1** |
+
+So at the shipped thresholds the limb is very nearly inert on this corpus: one
+extra page in 1,263, about 0.08%. Two things follow.
+
+The accidental enabling did no real harm. #14's ingest and the first #17 audit
+are not meaningfully different from what they would have been, which is why the
+corpus was not re-audited from scratch to correct it — the 31 #17 documents were
+re-audited with `--recheck`, and the library-wide standing total came back
+identical at 20,762 flagged, 20,322 repaired, 440 outstanding.
+
+And the case for leaving it off is now better than it was. The earlier argument
+was that it finds photographs about as often as readouts, from a four-page
+sample. The stronger argument is that at 180 pt² and 0.6 fill it barely fires:
+the ESG and VSA manuals — the two documents in the set most likely to contain
+analyser screenshots — gained nothing at all. Turning it on is not a trade
+between readouts and photographs so much as a trade for almost nothing either
+way. Loosening the thresholds until it fires often enough to matter is what would
+need measuring, and that is what #12 should ask next.
+
+The deltas varying by document is also what confirms `--recheck` genuinely
+replaces stored findings rather than merging them, which the identical totals
+alone could not have shown.
