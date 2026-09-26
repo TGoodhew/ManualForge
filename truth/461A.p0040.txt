@@ -1,0 +1,96 @@
+Sectlon VI Monlcis 4f1A/4h2A
+REFERENCE. -hj-
+DESIGNATOR PAR'T NO.
+Table G-1. Replaceable Parts (Cont'd)
+$\frac DESCRIPTION MFR MFR. PART NO.
+22
+7683·1015 H: fxid coimp 10 ahins +/5% 1/4 W C81815
+OUBO 1220 A: (xd comp 1:2 kilohins +/5% 1/2 W E
+See Paddlng Lil on Page 5-13
+0604-1021 R: txd comp 1 kilphin +/-10% 1/4 W
+1 CB1021
+0683-816 B: fxd camp 180 uhms +/5% 1/4 2 C01916
+W 3401A omy) 2
+0603-1215. R: (xd cainp 120 chins +/5% 1/1 W (462A only) 2 CD121G
+0680-9115 R:(xil coimp 010 uhns +/-6% 1/2 W E
+0687-3301 :
+B: fxd coimp 33 ohrs v/10% 1/2 W EB3301
+0683-1815 Ri.Ixd cojmp 180 ohims +/-6% 1/4 W. CH1010
+0
+0683-0685 8: fxd comp 5.0 ohins +/-5% 1/4 W. u C0O565
+2628682 25
+0660.1225 H: fuil camp 1.2 kllatims +/5% 1/2 W E01225
+2
+0684-1021 B: fnd coip 1 kilohm +/-10% 1/4 W C01021
+2
+0607-3301 H:fad comp 33 oluns +/10% 1/2 W = 2 E03301
+9181C080 H: Ind comp 10 his 1/5% 1/4W (481A 0ply) CB1015
+0683-6805 H: 1nd comp 60 nhins 1/-5% 1/4 W (462A unty) C06B05
+28230 2
+0680 6216 (1: Ind cormp 620 ahims +/5% 1/2 W.. EDU216
+0643·18j5 11: (xd cump t80 atuns 1/5% 1/4 W. CU1016
+2
+0603-0565 B: txd coinp 5.0 ulims +/5% 1/4 W CH0585
+0680-8216 d comp 82U ohirs +/-+/-5% 1/2 W B121
+0684:1021 fxd coinp 1 kilohin +/:10% 1/4 W. CH1021
+0683-1815 C01815
+01603-3005 1xt t4 CU3O05
+cump 29 uhrm +/5% 1/4 W (482A anly)
+0688-8216 Indt cump 020 ohms +/-5% 1/2 W EBU
+U687 2201 Ixd colnp 22 ohins +/-10% 1/2 W EN2201
+0686-1615 A: fxu coivp 160 ohms +/-1u% 1/2 W E01615
+= 2
+0603-3605 A: fxu commp 30 ohmn +/-5% 1/4 W CH360S
+0690821G 4: (xil comp 820 ohims +/-5% 1/2 W E0U21
+06872201 D: fxd coinp 22 ohrms +/.10% 1/2 W SS EO
+A52,A53 0750-0016. A: fxu met itm 220 ohuns +/5% 1/2 W 0
+ChassiS Mounted components
+0160-3333 *…
+C33,C34 C: txdl dum1 0.00b uF +/-20% 260 vacw 36G219A
+7460 0410 Plo light nean E5B·R
+2110-00114 :
+Fuse: 116 V 1/4 A (Fast- H1o) AU-Cim-312-260
+C16,L1p. 0170-0010 -E Utarts: lenity
+a
+1863-0063 TSTU: 5 PNP seleCIEd $$\fra}$
+1200-(1043 Insulstor for ()) 26365 till
+1200-0081 Hushing for 01 y74 Sprciol
+0687-3331 H: camp 33 kilotins t/10% 1/2 W O1 E03331
+93 ubul
+3100-0769 Switch: r0ly (0AIN) $5094
+8
+0370-0104. Knob for S1 h ubl
+3101-1234 Switch: lia dput (power) 421901 4633
+3
+0110-0277. Translounet hp.
+H121.-1348 ' Coble; puwar. 70903 K114147
+004R1-016U1 Cable assnly:
+powy supply
+0D401-61602 Cublo nssenuly: aulpul
+1855 3
+0040101603 Cohle assembly: translurmer
+1400-0084 Fusaboliter: uxtrectar po11 1ypp 75916 ·J42014
+120:0118 Cunnector: input tuinale 95712 30304-1
+6b5 1241-2357 Couneclor: pawr 3 pln male L209 H100116-31
+1260 0083 Copiector: nupul fernalu 05712 30024.1*
+MISCELLANEDUS
+1400-0116 Clomp: plastic catile W2 w4 00717
+1490-0031 Stand: tilt lp
+2370-0020 Sctow: diteplale mounting 6-32
+Phillips hoad 3/18 83385 00
+6000 0700 Cover; side 1
+5000-0711 Cover: holloin 5 x 11 SMt #
+00401073 Panel: 1ear
+5020-0740 Spacer
+5040 0700 Hing
+5U50-0700 Asseimbly fromu
+5U60 0709 Tup covm t 8
+5060-0721 Foot iasembly: 1/3 mntule
+DO4C1-900U5 Maritat
+004G2-00202 Panel: Front
+00461.00201 Paiel: Fiont
+6000 0559 Cover: tile
+5000-8571 Cuver: boltom
+5060-0555 Cover: tnp,
+T A
+specily option A85 for the front panet and option Y98 for th covers.

@@ -1,0 +1,40 @@
+HP 438A General Information
+1-2. Specifications Instrument specifications are listed in Table 1-1. These specifications
+are the performance standards or limits against which the instrument
+may be tested. Supplemental characteristics are listed in Table 1-2.
+Supplemental characteristics are not warranted specifications, but are
+typical characteristics included as additional information for the user.
+1-3. Safety This product is a Safety Class I instrument, that is, one provided
+Considerations with a protective earth terminal. The power meter and all related
+documentation must be reviewed for familiarization with safety
+markings and instructions before operation. Refer to the "Safety
+Considerations" page found at the beginning of this manual for a
+summary of the safety information. Safety information for installation,
+performance testing, adjustment, and service will be found in
+appropriate places throughout this manual.
+1-4. Instruments Attached to the rear panel of the instrument is a serial number plate.
+Covered by this Manual
+The serial number is in the form: 0000A00000 and 0000U00000. The
+first four digits and the letter constitute the serial number prefix.
+The last five digits are the suffix. The prefix is the same for identical
+instruments; it changes only when a configuration change is made to the
+instrument. The suffix however, is assigned sequentially and is different
+for each instrument. The contents of this manual apply directly to
+instruments having the same serial number prefix(es) listed under Serial
+Numbers on the title page.
+1-5. Manual Changes An instrument manufactured after the printing of this manual may have
+Supplement
+a serial number prefix that is not listed on the title page. This unlisted
+serial number prefix indicates that the instrument is different from
+those documented in the manual. If manual changes are needed, the
+manual for this newer instrument is accompanied by a yellow Manual
+Changes supplement. The supplement contains "change information"
+that explains how to adapt this manual to the newer instrument.
+In addition to change information, the supplement may contain
+information for correcting errors in the manual. The supplement is
+identified with the manual print date and part number, both of which
+appear on the manual title page.
+For information concerning a serial number prefix that is not listed
+on the title page or in the Manual Changes supplement, contact your
+nearest Hewlett-Packard office.
+1-3

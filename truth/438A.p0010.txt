@@ -1,0 +1,41 @@
+General Information HP 438A
+1-6. Description The HP 438A Power Meter is a microprocessor controlled dual channel
+(A and B multiplexed) meter. It measures power in the range of -70
+to +44 dBm over the frequency range of 100 kHz to
+26.5 GHz using
+the existing Hewlett-Packard 8480 series power sensors. A 1.00 mW
+50 MHz POWER REF (reference) is available for calibrating the meter
+to the sensor's sensitivity.
+The meter displays power in the following modes; dBm, dB Rel
+(relative), watts and % Rel (per cent relative). The measured ratio and
+difference of two inputs can be displayed. The power ratio is displayed
+in either dB or % while the power difference is displayed in either watts
+or dBm. The ratio or difference power readings of a single sensor input
+are displayed relative to a stored reference. Also displayed are the
+possible error states of the meter.
+Zeroing, calibration, and offsets are capabilities of the meter that can be
+set either locally by the front panel keys or remotely over the Hewlett
+Packard Interface Bus (HP-IB). When these routines are finished the
+meter resumes measuring and displaying the input power.
+The meter has both manual and automatic ranging. In the AUTO
+RANGE mode the meter automatically switches through its five ranges
+and in the MNL RANGE (manual range) mode one of the five ranges
+can be selected.
+Memory capacity for saving up to 19 front panel settings is built into
+the meter and can be accessed by using (sToRE) and (REcALL).
+1-6. Options
+1-7. Electrical Options
+Option 002 provides the additional capability of having two power input
+connectors on the rear panel in parallel with the front panel inputs and
+a rear panel connector for an additional power reference oscillator. If
+Option 002 was not initially ordered with the power meter, the option
+can be added by ordering the Option 002 retrofit kit HP part number
+00438-60044.
+Option 004 deletes the two HP 11730A Sensor Cables normally supplied
+with the power meter. Refer to paragraph "1-12. Cables" in this
+section for other cables available.
+1-8. Mechanical Option
+A mechanical option kit is available containing hardware and
+installation instructions for adding handles to the meter. To obtain
+front handle kit Option 907 order HP part number 5061-9688.
+1-4
