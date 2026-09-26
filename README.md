@@ -26,8 +26,35 @@ What each of the last two phases is actually waiting on:
   deskew and denoise earning nothing there while costing a fifth of the throughput, and 200 dpi
   matching 300 at 48% more pages a minute.
   <br>That is the recogniser's **floor**, not its accuracy on a 1965 photocopy, and the difference
-  matters: hand-corrected scanned pages are still the only thing that measures the material this
-  application exists for. Issue #6 stays open for those. `docs/measurements/publisher-truth-benchmark.md`.
+  matters. Accuracy on scans would need pages corrected by hand; that was attempted and abandoned,
+  and **is not measured**. See *What is not measured* below before quoting any number from here.
+  `docs/measurements/publisher-truth-benchmark.md`.
+
+## What is not measured
+
+**The accuracy of recognition on a scanned page.** Nothing in this repository establishes it, and
+several numbers here could be mistaken for it.
+
+What *is* measured:
+
+* **6.3% CER on born-digital type**, against pages whose own text layer is the publisher's
+  typesetting. That is a floor on clean input, not a result on a 1965 photocopy.
+* **Recall against Adobe Acrobat**, over three rounds on 60 schematic pages with the text layer
+  removed by rasterisation. ManualForge finds more real text in all three — on the twelve pages
+  chosen by hand to be hardest for it, more than twice as much. But every one of those rounds counts
+  *how much real text is found*, never whether it is right: `R13` read as `R18` scores exactly as
+  well as `R13` read correctly.
+* **Mean confidence**, quoted in places below as around 80-84%. That is the recogniser scoring its
+  own work. It is reported because it is what the run reported, and it is not an accuracy figure.
+
+Measuring the missing thing needs pages transcribed by hand against the image. Nine were seeded for
+it in September 2026 and the attempt was abandoned after review: the seeded tables were mis-ordered
+enough to need retyping rather than correcting, the schematic pages were unreadable as text, and the
+whole exercise was several hours for numbers that only ever describe nine pages. That was a
+reasonable call, and it leaves this gap open rather than closed.
+
+So: treat everything here as evidence about **how much** of a page is recovered, and nothing here as
+evidence about **how correctly**. Issue #6 has the full account of what was tried.
 
 ## What it does
 
@@ -520,7 +547,7 @@ repaired pages sampled across 25 documents:
 
 Twenty of the 21 come back at rank 1 to 4. This says the recovered text is present, matchable and
 attached to the right page; it says nothing about whether the recogniser read it *correctly*, which
-is character error rate and needs the hand-corrected pages of issue #6.
+is character error rate and is not measured on scans — see *What is not measured*.
 
 ### And then the detector learned to look at more pages, so it all happened again
 

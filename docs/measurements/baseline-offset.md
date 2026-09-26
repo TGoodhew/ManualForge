@@ -53,7 +53,8 @@ and no single number satisfies both.
 
 The pages are clean digital type. A scan's ink carries speckle and bleed-through that can extend a
 detected box further than a rendered glyph's, so the constant may want to be slightly different
-there — that needs hand-corrected scanned pages, which is issue #6 and still open.
+there — that needs hand-corrected scanned pages, which was attempted and abandoned. Accuracy on
+scans is not measured; see *What is not measured* in the README and the closing note on issue #6.
 
 The measurement also uses the *rendered* ink rather than a recogniser's box. Those should agree,
 since the recogniser reads the same render, but "should" is doing work in that sentence.

@@ -51,8 +51,9 @@ the errors live.
 **This is not accuracy on this library.** A clean render of digital type is a far easier read than a
 1965 photocopy with halftone screening, bleed-through and a skew from the book's spine. These
 numbers are the recogniser's **floor**: what it manages when the page is perfect. The real figure
-for a scan can only come from hand-corrected scanned pages, and issue #6 is still open for exactly
-that reason.
+for a scan can only come from hand-corrected scanned pages. That was attempted and abandoned, so it
+remains unmeasured — issue #6 records why, and the README's *What is not measured* says what may
+and may not be claimed from the numbers here.
 
 **It does not answer the baseline-offset question.** `TextLayerOptions.BaselineOffsetFraction`
 governs where the invisible text layer is written, not what the recogniser reads, so no benchmark of
