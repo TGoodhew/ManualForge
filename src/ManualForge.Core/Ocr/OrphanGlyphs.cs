@@ -187,7 +187,7 @@ public static class OrphanGlyphs
     /// A real orphan shares a row with recognised words: its middle lies inside a word of about its
     /// size, somewhere along the same line of the page.
     /// </summary>
-    private static bool OnTextRow(RectD c, List<RectD> words, double row)
+    internal static bool OnTextRow(RectD c, IReadOnlyList<RectD> words, double row)
     {
         double middle = (c.Top + c.Bottom) / 2;
         return words.Any(w =>

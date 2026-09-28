@@ -144,6 +144,9 @@ internal sealed class CommandLine
               --no-orphan-rescue      Leave lone characters the detector never boxed, such as
                                       a parts list's check digits and quantities, unread.
                                       This is how pages were read before that was measured.
+              --no-stack-split        Leave a column of table rows boxed as one tall word, such
+                                      as NNNNN or mmmmm, as it was read, instead of cutting it
+                                      into its rows and reading each.
               --verify-ink           Re-render both files and prove the page image is unchanged.
               --dry-run               Do everything except write the output.
               --overwrite             Replace an existing output file.

@@ -32,6 +32,8 @@ public sealed class PaddleOcrEngine : IOcrEngine
     private readonly RecognitionOptions _uprightOptions;
     private readonly bool _verifyOrientation;
     private readonly bool _rescueOrphans;
+    private readonly bool _splitStacks;
+    private readonly double _dropScore;
     private readonly RecognitionOptions _orphanOptions;
     private readonly IReadOnlyList<OcrLanguage> _languages;
     private readonly ILogger _logger;
@@ -87,13 +89,16 @@ public sealed class PaddleOcrEngine : IOcrEngine
         _uprightOptions = _recognitionOptions with { UseDocOrientation = false };
         _verifyOrientation = options.VerifyPageOrientation;
         _rescueOrphans = options.RescueOrphanGlyphs;
+        _splitStacks = options.SplitTallStacks;
+        _dropScore = options.DropScore;
 
-        // One crop per candidate, already cut to the glyph, so nothing here may turn, pad or
-        // regroup it: a lone character gives the text-line classifier nothing to go on, and
+        // One crop per candidate, already cut to the glyph or table row, so nothing here may turn,
+        // pad or regroup it: a lone character gives the text-line classifier nothing to go on, and
         // padding pulls a table's rules into the crop.
         _orphanOptions = new RecognitionOptions
         {
             Grouping = TextGrouping.Word,
+            ReturnWordBoxes = true,
             BatchSize = options.BatchSize,
             DropScore = 0,
             UseDocOrientation = false,
@@ -112,7 +117,8 @@ public sealed class PaddleOcrEngine : IOcrEngine
             // Everything here changes what recognition returns, so it has to reach the page cache.
             $"server={options.UseServerModels};deskew={options.Deskew};denoise={options.Denoise};" +
             $"drop={options.DropScore};orientation={(options.VerifyPageOrientation ? "verified" : "trusted")};" +
-            $"orphans={(options.RescueOrphanGlyphs ? "rescued" : "left")}");
+            $"orphans={(options.RescueOrphanGlyphs ? "rescued" : "left")};" +
+            $"stacks={(options.SplitTallStacks ? "split" : "left")}");
 
         _logger.LogInformation(
             "OCR engine ready: provider {Provider}, GPU {UsingGpu}, models in {ModelCache}",
@@ -154,8 +160,16 @@ public sealed class PaddleOcrEngine : IOcrEngine
 
         // Not on a page the classifier turned and was believed: its boxes then belong to the
         // turned page, and the ink being searched is the page as it stands.
-        if (_rescueOrphans && result.DetectedOrientation == 0)
-            lines.AddRange(await RescueOrphansAsync(imageBytes, lines, cancellationToken).ConfigureAwait(false));
+        if ((_splitStacks || _rescueOrphans) && result.DetectedOrientation == 0 && OrphanGlyphs.LineHeight(lines) is not null)
+        {
+            using var page = InkPage.Load(imageBytes);
+            // Stacks first: a stack's box covers its column, and the orphan search has to see
+            // the rows it really holds.
+            if (_splitStacks)
+                lines = await SplitStacksAsync(page, lines, cancellationToken).ConfigureAwait(false);
+            if (_rescueOrphans)
+                lines.AddRange(await RescueOrphansAsync(page, lines, cancellationToken).ConfigureAwait(false));
+        }
         stopwatch.Stop();
 
         return new RecognisedPage(
@@ -192,52 +206,23 @@ public sealed class PaddleOcrEngine : IOcrEngine
     /// collapse to a sliver a fraction of a point tall.
     /// </remarks>
     private async Task<List<RecognisedLine>> RescueOrphansAsync(
-        byte[] imageBytes,
+        InkPage page,
         IReadOnlyList<RecognisedLine> found,
         CancellationToken cancellationToken)
     {
         if (OrphanGlyphs.LineHeight(found) is not { } lineHeight)
             return [];
 
-        using var image = EasyImageSharp.Image.Load<EasyImageSharp.PixelFormats.Rgb24>(imageBytes);
-        int width = image.Width, height = image.Height;
-        var ink = new bool[width * height];
-        image.ProcessPixelRows(pixels =>
-        {
-            for (int y = 0; y < height; y++)
-            {
-                var row = pixels.GetRowSpan(y);
-                for (int x = 0; x < width; x++)
-                    ink[y * width + x] = row[x].R < 128;
-            }
-        });
-
-        var candidates = OrphanGlyphs.Find(ink, width, height, found);
+        var candidates = OrphanGlyphs.Find(page.Ink, page.Width, page.Height, found);
         if (candidates.Count == 0)
             return [];
 
-        var crops = candidates.Select(c => OrphanGlyphs.CropFor(c, lineHeight, width, height)).ToList();
-        var polygons = crops.Select(r => (IReadOnlyList<OcrPoint>)
-        [
-            new OcrPoint(r.Left, r.Top), new OcrPoint(r.Right, r.Top),
-            new OcrPoint(r.Right, r.Bottom), new OcrPoint(r.Left, r.Bottom),
-        ]);
-
-        var read = await _service
-            .RecognizeRegionsAsync(image, polygons, _languages, _orphanOptions, cancellationToken)
-            .ConfigureAwait(false);
-
+        var crops = candidates.Select(c => OrphanGlyphs.CropFor(c, lineHeight, page.Width, page.Height)).ToList();
         var rescued = new List<RecognisedLine>();
-        foreach (var line in read.Lines)
+        foreach (var (k, line) in await ReadCropsAsync(page, crops, cancellationToken).ConfigureAwait(false))
         {
             var text = line.Text.Trim();
             if (!OrphanGlyphs.Keep(text, line.Confidence))
-                continue;
-
-            double cx = (line.BoundingBox.MinX + line.BoundingBox.MaxX) / 2;
-            double cy = (line.BoundingBox.MinY + line.BoundingBox.MaxY) / 2;
-            int k = crops.FindIndex(r => cx >= r.Left && cx <= r.Right && cy >= r.Top && cy <= r.Bottom);
-            if (k < 0)
                 continue;
 
             var box = candidates[k];
@@ -247,6 +232,187 @@ public sealed class PaddleOcrEngine : IOcrEngine
         _logger.LogDebug(
             "{Candidates} orphan glyph candidates, {Kept} kept", candidates.Count, rescued.Count);
         return rescued;
+    }
+
+    /// <summary>
+    /// Replaces each stack - a column of table rows boxed and read as one word - with its rows,
+    /// each read on its own. See <see cref="TallStacks"/>.
+    /// </summary>
+    /// <remarks>
+    /// A row's words keep the recogniser's horizontal positions but take the row's own top and
+    /// bottom: across a short crop the timestep boxes can collapse to a sliver, and the text layer
+    /// sizes its glyphs from the box height. A stack whose rows cannot be found is left as it was.
+    /// </remarks>
+    private async Task<List<RecognisedLine>> SplitStacksAsync(
+        InkPage page,
+        List<RecognisedLine> lines,
+        CancellationToken cancellationToken)
+    {
+        if (OrphanGlyphs.LineHeight(lines) is not { } lineHeight)
+            return lines;
+
+        // By the time a stack has been read, it is several words each claiming part of the
+        // column, and nothing says they were one region. So the regions are asked for again -
+        // the detector alone - but only on a page that shows the symptom.
+        if (!lines.SelectMany(l => l.Words).Any(w => w.BoxPx.Height > 2 * lineHeight && w.BoxPx.Height >= w.BoxPx.Width))
+            return lines;
+
+        var regions = (await _service
+            .DetectRegionsAsync(page.Image, _recognitionOptions, cancellationToken)
+            .ConfigureAwait(false))
+            .Select(r => ToRect(r.BoundingBox))
+            .ToList();
+        var regionHeights = regions.Where(r => r.Width > r.Height).Select(r => r.Height).Order().ToList();
+        double rowHeight = regionHeights.Count >= 5 ? regionHeights[regionHeights.Count / 2] : lineHeight;
+
+        // Horizontal words of ordinary height: what a stack's rows have to line up with. A table's
+        // stacked column sits beside its part numbers; a label set sideways on a drawing does not.
+        var rowWords = lines.SelectMany(l => l.Words).Select(w => w.BoxPx)
+            .Where(b => b.Width > b.Height && b.Height > 0.3 * rowHeight && b.Height <= 2 * rowHeight)
+            .ToList();
+
+        var stackBoxes = new List<RectD>();
+        var rows = new List<RectD>();
+        foreach (var region in regions.Where(r => TallStacks.IsStack(r, rowHeight)))
+        {
+            var found = TallStacks.Rows(page.Ink, page.Width, page.Height, region, rowHeight);
+            if (found.Count == 0 || 2 * found.Count(r => OrphanGlyphs.OnTextRow(r, rowWords, rowHeight)) < found.Count)
+                continue;
+            stackBoxes.Add(RectD.FromEdges(region.Left - 2, region.Top - 2, region.Right + 2, region.Bottom + 2));
+            rows.AddRange(found);
+        }
+
+        if (stackBoxes.Count == 0)
+            return lines;
+
+        bool InStack(RecognisedWord w)
+        {
+            double cx = (w.BoxPx.Left + w.BoxPx.Right) / 2, cy = (w.BoxPx.Top + w.BoxPx.Bottom) / 2;
+            return stackBoxes.Any(s => cx >= s.Left && cx <= s.Right && cy >= s.Top && cy <= s.Bottom);
+        }
+
+        var stacks = new HashSet<RecognisedWord>(
+            lines.SelectMany(l => l.Words).Where(InStack), ReferenceEqualityComparer.Instance);
+
+        var crops = rows.Select(r => OrphanGlyphs.CropFor(r, rowHeight, page.Width, page.Height)).ToList();
+        var split = new List<RecognisedLine>();
+        foreach (var (k, line) in await ReadCropsAsync(page, crops, cancellationToken).ConfigureAwait(false))
+        {
+            if (line.Confidence < _dropScore || !line.Text.Any(char.IsLetterOrDigit))
+                continue;
+
+            var row = rows[k];
+            var words = line.Words is { Count: > 0 }
+                ? line.Words
+                    .Where(w => !string.IsNullOrWhiteSpace(w.Text))
+                    .Select(w => new RecognisedWord(
+                        w.Text,
+                        RectD.FromEdges(Math.Max(row.Left, w.BoundingBox.MinX), row.Top, Math.Min(row.Right, w.BoundingBox.MaxX), row.Bottom),
+                        w.Confidence))
+                    .Where(w => !w.BoxPx.IsDegenerate)
+                    .ToList()
+                : [];
+            if (words.Count == 0)
+                words = [new RecognisedWord(line.Text.Trim(), row, line.Confidence)];
+
+            split.Add(new RecognisedLine(line.Text.Trim(), row, line.Confidence, words));
+        }
+
+        _logger.LogDebug(
+            "{Stacks} stacked regions ({Words} words) split into {Rows} rows, {Read} read",
+            stackBoxes.Count, stacks.Count, rows.Count, split.Count);
+
+        var kept = new List<RecognisedLine>(lines.Count + split.Count);
+        foreach (var line in lines)
+        {
+            if (!line.Words.Any(stacks.Contains))
+            {
+                kept.Add(line);
+                continue;
+            }
+
+            // The stack was chained into a line with the rows beside it; what is left of that
+            // line is those rows' words, and its box has to shrink to them.
+            var rest = line.Words.Where(w => !stacks.Contains(w)).ToList();
+            if (rest.Count > 0)
+                kept.Add(new RecognisedLine(
+                    string.Join(' ', rest.Select(w => w.Text)),
+                    RectD.FromEdges(rest.Min(w => w.BoxPx.Left), rest.Min(w => w.BoxPx.Top), rest.Max(w => w.BoxPx.Right), rest.Max(w => w.BoxPx.Bottom)),
+                    line.Confidence,
+                    rest));
+        }
+
+        kept.AddRange(split);
+        return kept;
+    }
+
+    /// <summary>
+    /// Recognises each crop on its own, detection skipped, and pairs every reading with the index
+    /// of the crop it came from.
+    /// </summary>
+    private async Task<List<(int Crop, OcrLine Line)>> ReadCropsAsync(
+        InkPage page,
+        IReadOnlyList<RectD> crops,
+        CancellationToken cancellationToken)
+    {
+        var polygons = crops.Select(r => (IReadOnlyList<OcrPoint>)
+        [
+            new OcrPoint(r.Left, r.Top), new OcrPoint(r.Right, r.Top),
+            new OcrPoint(r.Right, r.Bottom), new OcrPoint(r.Left, r.Bottom),
+        ]);
+
+        var read = await _service
+            .RecognizeRegionsAsync(page.Image, polygons, _languages, _orphanOptions, cancellationToken)
+            .ConfigureAwait(false);
+
+        var paired = new List<(int, OcrLine)>(read.Lines.Count);
+        foreach (var line in read.Lines)
+        {
+            double cx = (line.BoundingBox.MinX + line.BoundingBox.MaxX) / 2;
+            double cy = (line.BoundingBox.MinY + line.BoundingBox.MaxY) / 2;
+            int k = -1;
+            for (int i = 0; i < crops.Count && k < 0; i++)
+                if (cx >= crops[i].Left && cx <= crops[i].Right && cy >= crops[i].Top && cy <= crops[i].Bottom)
+                    k = i;
+            if (k >= 0)
+                paired.Add((k, line));
+        }
+
+        return paired;
+    }
+
+    /// <summary>The page as the recogniser takes it, and as a map of where it is dark.</summary>
+    private sealed class InkPage : IDisposable
+    {
+        private InkPage(EasyImageSharp.Image<EasyImageSharp.PixelFormats.Rgb24> image, bool[] ink)
+        {
+            Image = image;
+            Ink = ink;
+        }
+
+        public EasyImageSharp.Image<EasyImageSharp.PixelFormats.Rgb24> Image { get; }
+        public bool[] Ink { get; }
+        public int Width => Image.Width;
+        public int Height => Image.Height;
+
+        public static InkPage Load(byte[] imageBytes)
+        {
+            var image = EasyImageSharp.Image.Load<EasyImageSharp.PixelFormats.Rgb24>(imageBytes);
+            int width = image.Width, height = image.Height;
+            var ink = new bool[width * height];
+            image.ProcessPixelRows(pixels =>
+            {
+                for (int y = 0; y < height; y++)
+                {
+                    var row = pixels.GetRowSpan(y);
+                    for (int x = 0; x < width; x++)
+                        ink[y * width + x] = row[x].R < 128;
+                }
+            });
+            return new InkPage(image, ink);
+        }
+
+        public void Dispose() => Image.Dispose();
     }
 
     private static List<RecognisedLine> ToLines(OcrResult result)

@@ -77,16 +77,35 @@ foreach (var config in configs)
     var ours = new Dictionary<int, List<W>>();
     const double k = 72.0 / Dpi;
     var sw = System.Diagnostics.Stopwatch.StartNew();
-    if (config is "engine" or "engine-off")
+    if (config is "engine" or "engine-off" or "engine-rescue")
     {
-        // The shipped engine, production settings throughout, rescue on or off.
+        // The shipped engine, production settings throughout: everything on, everything off, or
+        // the orphan rescue without the stack split.
         await using var engine = new PaddleOcrEngine(new OcrEngineOptions
         {
-            Accelerator = OcrAccelerator.Cuda, OfflineModels = true, RescueOrphanGlyphs = config == "engine",
+            Accelerator = OcrAccelerator.Cuda, OfflineModels = true,
+            RescueOrphanGlyphs = config != "engine-off", SplitTallStacks = config == "engine",
         });
         foreach (var p in pages)
         {
-            var page = await engine.RecognisePageAsync(File.ReadAllBytes(Path.Combine(outDir, "png", $"p{p:D3}.png")), p);
+            var png = File.ReadAllBytes(Path.Combine(outDir, "png", $"p{p:D3}.png"));
+            var page = await engine.RecognisePageAsync(png, p);
+            if (Environment.GetEnvironmentVariable("STACK_DIAG") == "1" && OrphanGlyphs.LineHeight(page.Lines) is { } lh)
+            {
+                // Which stack-shaped words can be cut, and why the rest cannot.
+                using var img = EasyImageSharp.Image.Load<EasyImageSharp.PixelFormats.Rgb24>(png);
+                int iw = img.Width, ih = img.Height;
+                var inkMap = new bool[iw * ih];
+                img.ProcessPixelRows(acc => { for (int y = 0; y < ih; y++) { var s = acc.GetRowSpan(y); for (int x = 0; x < iw; x++) inkMap[y * iw + x] = s[x].R < 128; } });
+                foreach (var w in page.Lines.SelectMany(l => l.Words))
+                {
+                    var b = w.BoxPx;
+                    bool tallNarrow = b.Height > 2 * lh && b.Height > b.Width;
+                    if (!tallNarrow) continue;
+                    var rows = TallStacks.Rows(inkMap, iw, ih, b, lh);
+                    Console.WriteLine($"STACK\t{p}\t{b.Left * k:F1}\t{b.Top * k:F1}\t{b.Width * k:F1}\t{b.Height * k:F1}\t{b.Height / lh:F1}\t{TallStacks.IsStack(b, lh)}\t{rows.Count}\t{w.Text}");
+                }
+            }
             ours[p] = page.Lines.SelectMany(l => l.Words)
                 .Select(w => new W(Strip(w.Text), w.BoxPx.Left * k, w.BoxPx.Top * k, w.BoxPx.Right * k, w.BoxPx.Bottom * k))
                 .Where(w => contentRx.IsMatch(w.T)).ToList();

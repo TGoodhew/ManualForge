@@ -199,6 +199,7 @@ namespace ManualForge.Cli
                 UseServerModels = arguments.Has("server-models"),
                 VerifyPageOrientation = !arguments.Has("trust-orientation"),
                 RescueOrphanGlyphs = !arguments.Has("no-orphan-rescue"),
+                SplitTallStacks = !arguments.Has("no-stack-split"),
             };
 
             Console.WriteLine($"Source : {input}");

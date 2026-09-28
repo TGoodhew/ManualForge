@@ -107,6 +107,18 @@ public sealed class OcrEngineOptions
     public bool RescueOrphanGlyphs { get; init; } = true;
 
     /// <summary>
+    /// Cut words the detector boxed across several rows of a table back into rows, and read each.
+    ///
+    /// <para>
+    /// A column of short aligned entries - designator prefixes, check digits - is sometimes boxed
+    /// as one tall region and read on its side as <c>NNNNN</c> or <c>mmmmm</c>. Such a word is cut
+    /// at the blank rows of its own ink and each row read on its own crop. Issue #22;
+    /// docs/measurements/single-characters.md.
+    /// </para>
+    /// </summary>
+    public bool SplitTallStacks { get; init; } = true;
+
+    /// <summary>
     /// Cap on the threads ONNX Runtime uses for a single operator. Null leaves it to the runtime,
     /// which takes every core.
     ///

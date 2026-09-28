@@ -110,11 +110,47 @@ candidates. +6% on the table book; +22% on the typical book in a single run, not
 on a page the orientation classifier turned and was believed, whose boxes do not sit on the ink as
 it stands.
 
+## Cutting stacks back into rows
+
+919 of Acrobat's singles sat under a **stack**: a column of short aligned entries - designator
+prefixes, check digits - boxed by the detector as one tall region and read on its side as
+`NNNNN`, `mmmmm`, `MONMM`. Cut at the blank rows of its own ink and read row by row, it gives the
+rows back. In the harness, cutting the detector's regions before recognition read 1,780 more of
+Acrobat's tokens than the same path uncut.
+
+In the engine it took three attempts:
+
+| | tables: singles read | tables: all tokens read | typical: all tokens read | typical: ours on no Acrobat token |
+|---|---|---|---|---|
+| rescue only | 4,065 | 32,623 | 17,470 | 11,107 |
+| cut the engine's own tall words | 4,377 | 32,939 | 17,477 | 11,125 |
+| cut the detector's tall regions | 4,920 | 33,484 | 17,494 | 11,232 |
+| **... where rows stand apart and sit on text rows** | **4,640** | **33,200** | **17,472** | **11,106** |
+
+- **The engine's own words are the wrong unit.** Once a stack has been read it is several words, each
+  claiming part of the column - `R5` and `A2` with boxes 20-35 pt tall - and only 71 of them could be
+  cut. On a page that shows a tall, narrow word, the detector is asked for its regions again, and
+  the words whose middles fall inside a cut region are replaced by its rows.
+- **Words set sideways look the same.** Unguarded, on typical pages the cut went mostly into labels
+  written up the side of drawings - `FUER`, `R934`, `X6` - which the recogniser had read correctly,
+  and turned them into loose letters; it removed 112 words there, a rotated table caption among them.
+  A region is now cut only where the median gap between its rows is at least 0.3 of a line (a
+  sideways word's letters are a pixel or two apart) and at least half its rows line up with
+  horizontal words of ordinary height. On typical pages it then changes almost nothing.
+
+The guards cost a third of the table gain. The 270 words the cut removes on table pages are the
+stacks' own readings and single digits the rescue had already found, now read again as rows. The
+extra detector pass runs only on pages with a tall, narrow word: 100 table pages took 172 s, as
+without it.
+
+`SplitTallStacks` is on by default; `--no-stack-split` leaves stacks as they were read.
+
 ## What this does not settle
 
-- **919 singles are still under tall stacks**, a column read as one word. Splitting tall boxes at
-  the blank rows of their own ink is written (`split` in the harness) but not measured.
-- **1,130 singles still have nothing there.** Not diagnosed individually.
+- **505 singles are still under stacks.** Some are regions whose rows touch - no gap to cut at - and
+  some fail the guards. The harness's first version shared an unbroken run evenly into rows; that
+  has not been tried in the engine.
+- **999 singles still have nothing there.** Not diagnosed individually.
 - **Schematic pin numbers** standing alone are mostly not rescued: the column test drops them with
   the drawing strokes they look like. Pin numbers that happen to line up are kept.
 - **Nothing already in the library is re-read** by this change.
