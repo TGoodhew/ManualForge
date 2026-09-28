@@ -36,6 +36,7 @@ public sealed class TallStackTests
     [InlineData(20, 75, true)]     // exactly two and a half lines
     [InlineData(20, 60, false)]    // two lines: an ordinary tall word, not a stack
     [InlineData(100, 90, false)]   // wider than tall: a block of text, not a column
+    [InlineData(80, 200, false)]   // tall, but a block of a component layout: no column is that wide
     public void AStackIsTallAndNarrow(double width, double height, bool stack)
     {
         Assert.Equal(stack, TallStacks.IsStack(new RectD(0, 0, width, height), Line));

@@ -271,37 +271,34 @@ public sealed class PaddleOcrEngine : IOcrEngine
             .Where(b => b.Width > b.Height && b.Height > 0.3 * rowHeight && b.Height <= 2 * rowHeight)
             .ToList();
 
-        var stackBoxes = new List<RectD>();
-        var rows = new List<RectD>();
+        var cutRegions = new List<RectD>();
+        var rows = new List<(RectD Box, int Region)>();
         foreach (var region in regions.Where(r => TallStacks.IsStack(r, rowHeight)))
         {
-            var found = TallStacks.Rows(page.Ink, page.Width, page.Height, region, rowHeight);
-            if (found.Count == 0 || 2 * found.Count(r => OrphanGlyphs.OnTextRow(r, rowWords, rowHeight)) < found.Count)
+            var found = TallStacks.Rows(page.Ink, page.Width, page.Height, region, rowHeight, out var verdict);
+            int onRows = found.Count(r => OrphanGlyphs.OnTextRow(r, rowWords, rowHeight));
+            if (found.Count > 0 && 2 * onRows < found.Count)
+                verdict = $"off the text rows: {onRows} of {found.Count}";
+            _logger.LogDebug(
+                "Stack at {Left:F0},{Top:F0} {Width:F0}x{Height:F0} px, line {Line:F0} px: {Verdict}",
+                region.Left, region.Top, region.Width, region.Height, rowHeight, verdict);
+            if (verdict != "cut")
                 continue;
-            stackBoxes.Add(RectD.FromEdges(region.Left - 2, region.Top - 2, region.Right + 2, region.Bottom + 2));
-            rows.AddRange(found);
+            rows.AddRange(found.Select(r => (r, cutRegions.Count)));
+            cutRegions.Add(RectD.FromEdges(region.Left - 2, region.Top - 2, region.Right + 2, region.Bottom + 2));
         }
 
-        if (stackBoxes.Count == 0)
+        if (cutRegions.Count == 0)
             return lines;
 
-        bool InStack(RecognisedWord w)
-        {
-            double cx = (w.BoxPx.Left + w.BoxPx.Right) / 2, cy = (w.BoxPx.Top + w.BoxPx.Bottom) / 2;
-            return stackBoxes.Any(s => cx >= s.Left && cx <= s.Right && cy >= s.Top && cy <= s.Bottom);
-        }
-
-        var stacks = new HashSet<RecognisedWord>(
-            lines.SelectMany(l => l.Words).Where(InStack), ReferenceEqualityComparer.Instance);
-
-        var crops = rows.Select(r => OrphanGlyphs.CropFor(r, rowHeight, page.Width, page.Height)).ToList();
-        var split = new List<RecognisedLine>();
+        var crops = rows.Select(r => OrphanGlyphs.CropFor(r.Box, rowHeight, page.Width, page.Height)).ToList();
+        var readings = new List<(int Region, RecognisedLine Line)>();
         foreach (var (k, line) in await ReadCropsAsync(page, crops, cancellationToken).ConfigureAwait(false))
         {
             if (line.Confidence < _dropScore || !line.Text.Any(char.IsLetterOrDigit))
                 continue;
 
-            var row = rows[k];
+            var row = rows[k].Box;
             var words = line.Words is { Count: > 0 }
                 ? line.Words
                     .Where(w => !string.IsNullOrWhiteSpace(w.Text))
@@ -315,12 +312,32 @@ public sealed class PaddleOcrEngine : IOcrEngine
             if (words.Count == 0)
                 words = [new RecognisedWord(line.Text.Trim(), row, line.Confidence)];
 
-            split.Add(new RecognisedLine(line.Text.Trim(), row, line.Confidence, words));
+            readings.Add((rows[k].Region, new RecognisedLine(line.Text.Trim(), row, line.Confidence, words)));
         }
 
+        // A region is replaced only when at least half its rows came back readable. Otherwise
+        // what it held stays as it was read: removing words is only worth it for words in return.
+        var replaced = Enumerable.Range(0, cutRegions.Count)
+            .Where(i => 2 * readings.Count(r => r.Region == i) >= rows.Count(r => r.Region == i))
+            .ToHashSet();
+        var stackBoxes = replaced.Select(i => cutRegions[i]).ToList();
+        var split = readings.Where(r => replaced.Contains(r.Region)).Select(r => r.Line).ToList();
+
+        bool InStack(RecognisedWord w)
+        {
+            double cx = (w.BoxPx.Left + w.BoxPx.Right) / 2, cy = (w.BoxPx.Top + w.BoxPx.Bottom) / 2;
+            return stackBoxes.Any(s => cx >= s.Left && cx <= s.Right && cy >= s.Top && cy <= s.Bottom);
+        }
+
+        var stacks = new HashSet<RecognisedWord>(
+            lines.SelectMany(l => l.Words).Where(InStack), ReferenceEqualityComparer.Instance);
+
         _logger.LogDebug(
-            "{Stacks} stacked regions ({Words} words) split into {Rows} rows, {Read} read",
-            stackBoxes.Count, stacks.Count, rows.Count, split.Count);
+            "{Cut} stacked regions cut into {Rows} rows, {Read} read; {Replaced} replaced, taking {Words} words",
+            cutRegions.Count, rows.Count, readings.Count, replaced.Count, stacks.Count);
+
+        if (replaced.Count == 0)
+            return lines;
 
         var kept = new List<RecognisedLine>(lines.Count + split.Count);
         foreach (var line in lines)

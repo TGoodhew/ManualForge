@@ -59,15 +59,18 @@ foreach (var p in pages)
     File.WriteAllBytes(png, r.EncodePng());
 }
 
-CudaLibraries.Ensure();
-await using var service = new PaddleOcrService(new PaddleOcrServiceOptions
+// "file:NAME" re-scores a saved ours-NAME.tsv without recognising anything: no GPU. Anything else
+// needs the models loaded.
+bool needsGpu = configs.Any(c => !c.StartsWith("file:"));
+if (needsGpu) CudaLibraries.Ensure();
+await using var service = needsGpu ? new PaddleOcrService(new PaddleOcrServiceOptions
 {
     ModelCachePath = new OcrEngineOptions().ModelCachePath,
     ExecutionProvider = OcrExecutionProvider.Cuda,
     UseGpu = true,
     Download = new ModelDownloadOptions { Offline = true },
     MaxImagePixels = 120_000_000,
-}, logger: null);
+}, logger: null) : null;
 
 var summary = new StringBuilder();
 summary.AppendLine("config\tacro_tokens\thit\tnot_hit_under\tmissed\tsingles\ts_hit\ts_stack\ts_merged\ts_misread\ts_missed\ts_present\tours_tokens\tours_extra\tseconds");
@@ -77,17 +80,30 @@ foreach (var config in configs)
     var ours = new Dictionary<int, List<W>>();
     const double k = 72.0 / Dpi;
     var sw = System.Diagnostics.Stopwatch.StartNew();
-    if (config is "engine" or "engine-off" or "engine-rescue")
+    if (config.StartsWith("file:"))
+    {
+        foreach (var p in pages) ours[p] = [];
+        foreach (var f in File.ReadLines(Path.Combine(outDir, $"ours-{config[5..]}.tsv")).Select(l => l.Split('\t')))
+            if (ours.TryGetValue(int.Parse(f[0]), out var list))
+                list.Add(new W(f[5], double.Parse(f[1], inv), double.Parse(f[2], inv), double.Parse(f[3], inv), double.Parse(f[4], inv)));
+    }
+    else if (config is "engine" or "engine-off" or "engine-rescue")
     {
         // The shipped engine, production settings throughout: everything on, everything off, or
         // the orphan rescue without the stack split.
+        // ENGINE_LOG=<path> writes the engine's debug log there, each page headed by a PAGE line.
+        Serilog.ILogger? serilog = Environment.GetEnvironmentVariable("ENGINE_LOG") is { } logPath
+            ? Serilog.FileLoggerConfigurationExtensions.File(new Serilog.LoggerConfiguration().MinimumLevel.Debug().WriteTo, logPath).CreateLogger()
+            : null;
+        using var logFactory = serilog is null ? null : new Serilog.Extensions.Logging.SerilogLoggerFactory(serilog);
         await using var engine = new PaddleOcrEngine(new OcrEngineOptions
         {
             Accelerator = OcrAccelerator.Cuda, OfflineModels = true,
             RescueOrphanGlyphs = config != "engine-off", SplitTallStacks = config == "engine",
-        });
+        }, logFactory is null ? null : Microsoft.Extensions.Logging.LoggerFactoryExtensions.CreateLogger<PaddleOcrEngine>(logFactory));
         foreach (var p in pages)
         {
+            serilog?.Information("PAGE {Page}", p);
             var png = File.ReadAllBytes(Path.Combine(outDir, "png", $"p{p:D3}.png"));
             var page = await engine.RecognisePageAsync(png, p);
             if (Environment.GetEnvironmentVariable("STACK_DIAG") == "1" && OrphanGlyphs.LineHeight(page.Lines) is { } lh)
@@ -114,14 +130,15 @@ foreach (var config in configs)
     else
     {
         var options = Options(config);
+        var ocr = service!;
         foreach (var p in pages)
         {
             var bytes = File.ReadAllBytes(Path.Combine(outDir, "png", $"p{p:D3}.png"));
             var lines = config is "regions" or "split" or "splitpad"
-                ? await ViaRegions(service, bytes, config)
-                : (await service.ExtractTextFromImage(bytes, [OcrLanguage.English], options)).Lines;
+                ? await ViaRegions(ocr, bytes, config)
+                : (await ocr.ExtractTextFromImage(bytes, [OcrLanguage.English], options)).Lines;
             if (config.StartsWith("rescue"))
-                lines = [.. lines, .. await RescueOrphans(service, bytes, lines, config == "rescue7" ? 0.7 : 0.9)];
+                lines = [.. lines, .. await RescueOrphans(ocr, bytes, lines, config == "rescue7" ? 0.7 : 0.9)];
             ours[p] = lines.SelectMany(l => l.Words is { Count: > 0 } ? l.Words.Select(w => (w.Text, w.BoundingBox)) : [(l.Text, l.BoundingBox)])
                 .Select(w => new W(Strip(w.Text), w.BoundingBox.MinX * k, w.BoundingBox.MinY * k, w.BoundingBox.MaxX * k, w.BoundingBox.MaxY * k))
                 .Where(w => contentRx.IsMatch(w.T)).ToList();
@@ -129,15 +146,19 @@ foreach (var config in configs)
     }
     sw.Stop();
 
-    using (var tsv = new StreamWriter(Path.Combine(outDir, $"ours-{config}.tsv")))
-        foreach (var (p, ws) in ours) foreach (var w in ws)
-            tsv.WriteLine(string.Join('\t', p, w.X0.ToString("F1", inv), w.Y0.ToString("F1", inv), w.X1.ToString("F1", inv), w.Y1.ToString("F1", inv), w.T));
+    var tag = config.Replace(':', '_');
+    if (!config.StartsWith("file:"))
+        using (var tsv = new StreamWriter(Path.Combine(outDir, $"ours-{tag}.tsv")))
+            foreach (var (p, ws) in ours) foreach (var w in ws)
+                tsv.WriteLine(string.Join('\t', p, w.X0.ToString("F1", inv), w.Y0.ToString("F1", inv), w.X1.ToString("F1", inv), w.Y1.ToString("F1", inv), w.T));
 
     int all = 0, hit = 0, mis = 0, miss = 0, s = 0, sHit = 0, sMis = 0, sMiss = 0, sStack = 0, sMerged = 0, sPresent = 0, oursAll = 0, extra = 0;
-    using var detail = new StreamWriter(Path.Combine(outDir, $"singles-{config}.tsv"));
+    using var detail = new StreamWriter(Path.Combine(outDir, $"singles-{tag}.tsv"));
+    using var calibration = new StreamWriter(Path.Combine(outDir, $"calibration-{tag}.tsv"));
     foreach (var p in pages)
     {
         var (dx, dy) = Calibrate(acro[p], ours[p]);
+        calibration.WriteLine($"{p}\t{dx.ToString("F2", inv)}\t{dy.ToString("F2", inv)}");
         var used = new HashSet<W>();
         foreach (var a in acro[p])
         {

@@ -125,7 +125,8 @@ In the engine it took three attempts:
 | rescue only | 4,065 | 32,623 | 17,470 | 11,107 |
 | cut the engine's own tall words | 4,377 | 32,939 | 17,477 | 11,125 |
 | cut the detector's tall regions | 4,920 | 33,484 | 17,494 | 11,232 |
-| **... where rows stand apart and sit on text rows** | **4,640** | **33,200** | **17,472** | **11,106** |
+| ... where rows stand apart (0.3 line) and sit on text rows | 4,640 | 33,200 | 17,472 | 11,106 |
+| **... gap 0.15 line, at most 2.5 lines wide, replaced only if read** | **4,916** | **33,480** | **17,482** | **11,108** |
 
 - **The engine's own words are the wrong unit.** Once a stack has been read it is several words, each
   claiming part of the column - `R5` and `A2` with boxes 20-35 pt tall - and only 71 of them could be
@@ -134,23 +135,37 @@ In the engine it took three attempts:
 - **Words set sideways look the same.** Unguarded, on typical pages the cut went mostly into labels
   written up the side of drawings - `FUER`, `R934`, `X6` - which the recogniser had read correctly,
   and turned them into loose letters; it removed 112 words there, a rotated table caption among them.
-  A region is now cut only where the median gap between its rows is at least 0.3 of a line (a
-  sideways word's letters are a pixel or two apart) and at least half its rows line up with
-  horizontal words of ordinary height. On typical pages it then changes almost nothing.
+  A region is now cut only where at least half its rows line up with horizontal words of ordinary
+  height, and the median gap between its rows is at least 0.15 of a line.
+- **Gap size alone does not separate them.** At 0.3 of a line the gap test refused 117 real table
+  stacks, tightly set tables whose rows stand 0.2-0.3 of a line apart - a third of the gain - while
+  sideways labels on typical pages run up to 0.25. The row test separates them: it refused no table
+  stack and 44 typical-page regions. The gap test is kept at 0.15 for the words it catches first.
+- **A block is not a column.** On a component layout a region 6 lines wide holding `Q14`, `U6`,
+  `Q16` and `R27` passed both tests, was cut into two rows that read as nothing, and took eight
+  correct words with it. Every table stack was under 2 lines wide, so stacks are capped at 2.5; and
+  a region is replaced only when at least half its rows come back readable.
 
-The guards cost a third of the table gain. The 270 words the cut removes on table pages are the
-stacks' own readings and single digits the rescue had already found, now read again as rows. The
-extra detector pass runs only on pages with a tall, narrow word: 100 table pages took 172 s, as
-without it.
+The engine logs a verdict for every tall region at debug level (`cut`, `no gap to cut at`, `rows too
+close`, `off the text rows`). On the table pages 319 of 335 are cut. The words the cut removes there
+are the stacks' own readings and single digits the rescue had already found, now read again as rows.
+The extra detector pass runs only on pages with a tall, narrow word: 100 table pages took 175-181 s,
+against 172 s without it.
 
 `SplitTallStacks` is on by default; `--no-stack-split` leaves stacks as they were read.
 
 ## What this does not settle
 
-- **505 singles are still under stacks.** Some are regions whose rows touch - no gap to cut at - and
-  some fail the guards. The harness's first version shared an unbroken run evenly into rows; that
-  has not been tried in the engine.
-- **999 singles still have nothing there.** Not diagnosed individually.
+- **257 singles are still under stacks.**
+- **984 singles still have nothing there, and many of them are not missing.** On page 75 our
+  words sit about 3 pt right of their ink, while Acrobat's sit on it. The harness aligns each
+  page from long words, so it follows our shift, and a correctly placed single character then
+  falls outside its target. 25 of the 100 pages are shifted by more than 1 pt, up to 6.5 pt.
+  This looks like deskew: its word boxes may not be mapped back from the rotated canvas. It is a
+  text-layer placement fault on its own account, not measured yet.
+- **Split rows with one word are placed on the recogniser's word box**, which across a single
+  character collapses to a sliver a point wide. They should take the row's ink box, as rescued
+  glyphs do.
 - **Schematic pin numbers** standing alone are mostly not rescued: the column test drops them with
   the drawing strokes they look like. Pin numbers that happen to line up are kept.
 - **Nothing already in the library is re-read** by this change.
