@@ -135,7 +135,13 @@ internal sealed class CommandLine
               --text <path>           Also write a plain-text dump of what was recognised.
               --no-deskew             Skip deskewing before recognition.
               --no-denoise            Skip despeckling before recognition.
-              --verify-ink            Re-render both files and prove the page image is unchanged.
+              --server-models         PP-OCRv5's larger networks. About 6% more text on tables
+                                      for 9.4x the runtime. Off by default.
+              --trust-orientation     Turn every page the way the orientation classifier says,
+                                      without reading it again as it stands. The classifier
+                                      misfires on about a third of upright pages; this is how
+                                      pages were read before that was measured.
+              --verify-ink           Re-render both files and prove the page image is unchanged.
               --dry-run               Do everything except write the output.
               --overwrite             Replace an existing output file.
 

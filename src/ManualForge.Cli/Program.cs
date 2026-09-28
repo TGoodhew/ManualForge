@@ -197,6 +197,7 @@ namespace ManualForge.Cli
                 // likely to matter on a page read badly could not be tried. See #19.
                 DropScore = arguments.GetDouble("drop-score") ?? new OcrEngineOptions().DropScore,
                 UseServerModels = arguments.Has("server-models"),
+                VerifyPageOrientation = !arguments.Has("trust-orientation"),
             };
 
             Console.WriteLine($"Source : {input}");

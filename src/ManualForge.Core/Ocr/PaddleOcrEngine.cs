@@ -29,6 +29,8 @@ public sealed class PaddleOcrEngine : IOcrEngine
 {
     private readonly PaddleOcrService _service;
     private readonly RecognitionOptions _recognitionOptions;
+    private readonly RecognitionOptions _uprightOptions;
+    private readonly bool _verifyOrientation;
     private readonly IReadOnlyList<OcrLanguage> _languages;
     private readonly ILogger _logger;
 
@@ -80,6 +82,9 @@ public sealed class PaddleOcrEngine : IOcrEngine
             },
         };
 
+        _uprightOptions = _recognitionOptions with { UseDocOrientation = false };
+        _verifyOrientation = options.VerifyPageOrientation;
+
         _languages = [OcrLanguage.English];
 
         Runtime = new OcrRuntimeSummary(
@@ -90,7 +95,7 @@ public sealed class PaddleOcrEngine : IOcrEngine
             cudaLibraries,
             // Everything here changes what recognition returns, so it has to reach the page cache.
             $"server={options.UseServerModels};deskew={options.Deskew};denoise={options.Denoise};" +
-            $"drop={options.DropScore}");
+            $"drop={options.DropScore};orientation={(options.VerifyPageOrientation ? "verified" : "trusted")}");
 
         _logger.LogInformation(
             "OCR engine ready: provider {Provider}, GPU {UsingGpu}, models in {ModelCache}",
@@ -110,8 +115,53 @@ public sealed class PaddleOcrEngine : IOcrEngine
         var result = await _service
             .ExtractTextFromImage(imageBytes, _languages, _recognitionOptions, cancellationToken)
             .ConfigureAwait(false);
+        var lines = ToLines(result);
+
+        if (_verifyOrientation && result.DetectedOrientation != 0)
+        {
+            var upright = await _service
+                .ExtractTextFromImage(imageBytes, _languages, _uprightOptions, cancellationToken)
+                .ConfigureAwait(false);
+            var uprightLines = ToLines(upright);
+
+            int turned = ConfidentCharacters(lines), asItStands = ConfidentCharacters(uprightLines);
+            if (asItStands >= turned)
+            {
+                _logger.LogDebug(
+                    "Page {Page}: classifier said {Degrees} degrees; read as it stands instead ({Upright} confident characters against {Turned})",
+                    pageNumber, result.DetectedOrientation, asItStands, turned);
+                result = upright;
+                lines = uprightLines;
+            }
+        }
         stopwatch.Stop();
 
+        return new RecognisedPage(
+            pageNumber,
+            result.SourceWidth,
+            result.SourceHeight,
+            lines,
+            result.ExecutionProvider.ToString(),
+            stopwatch.Elapsed);
+    }
+
+    /// <summary>
+    /// How much of a reading the recogniser was sure of: letters and digits in words at 0.8 or
+    /// above. A page read the wrong way round comes back long but unsure - vertical stacks read
+    /// as <c>NNNNN</c> and <c>55555</c> - so length alone would favour it.
+    /// </summary>
+    /// <remarks>
+    /// Checked on both kinds of error. Three clean pages turned by 90, 180 and 270 degrees kept
+    /// the classifier's reading all nine times; on the table book it overruled the classifier on
+    /// 24 of the 26 pages it fired on, and all 26 were upright.
+    /// </remarks>
+    internal static int ConfidentCharacters(IEnumerable<RecognisedLine> lines) =>
+        lines.SelectMany(l => l.Words)
+            .Where(w => w.Confidence >= 0.8)
+            .Sum(w => w.Text.Count(char.IsLetterOrDigit));
+
+    private static List<RecognisedLine> ToLines(OcrResult result)
+    {
         var lines = new List<RecognisedLine>(result.Lines.Count);
         foreach (var line in result.Lines)
         {
@@ -140,13 +190,7 @@ public sealed class PaddleOcrEngine : IOcrEngine
             lines.Add(new RecognisedLine(line.Text, ToRect(line.BoundingBox), line.Confidence, words));
         }
 
-        return new RecognisedPage(
-            pageNumber,
-            result.SourceWidth,
-            result.SourceHeight,
-            lines,
-            result.ExecutionProvider.ToString(),
-            stopwatch.Elapsed);
+        return lines;
     }
 
     /// <summary>

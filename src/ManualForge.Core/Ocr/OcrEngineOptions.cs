@@ -71,6 +71,26 @@ public sealed class OcrEngineOptions
     /// </summary>
     public bool UseServerModels { get; init; }
 
+    /// <summary>
+    /// Check the page-orientation classifier before believing it.
+    ///
+    /// <para>
+    /// PaddleOcrNet runs a whole-page classifier before detection and turns the page by whatever it
+    /// says. On these scans it is wrong far more often than it is right: it called 26 of 100
+    /// upright parts lists rotated, and 39 of 100 typical pages, every one of them checked by eye.
+    /// A page turned by 90 degrees before detection reads as vertical stacks of characters, and on
+    /// page 60 of the table book that left 273 words of 819. Yet on a page that really is sideways
+    /// it is right every time, and without it a fold-out loses up to 43% of its text.
+    /// </para>
+    ///
+    /// <para>
+    /// So when it claims a rotation, the page is read again as it stands and the reading with more
+    /// confidently recognised characters is kept. The second pass costs only on the pages the
+    /// classifier fires on. False trusts the classifier outright, which is how every page before
+    /// this was recognised. Issue #22; docs/measurements/page-orientation.md.
+    /// </para>
+    /// </summary>
+    public bool VerifyPageOrientation { get; init; } = true;
 
     /// <summary>
     /// Cap on the threads ONNX Runtime uses for a single operator. Null leaves it to the runtime,
