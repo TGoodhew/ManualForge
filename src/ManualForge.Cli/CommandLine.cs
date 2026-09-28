@@ -133,7 +133,9 @@ internal sealed class CommandLine
                                       readings, which is worth trying on material that reads
                                       as noise.
               --text <path>           Also write a plain-text dump of what was recognised.
-              --no-deskew             Skip deskewing before recognition.
+              --deskew                Straighten skewed pages before recognition. Off by default:
+                                      it places the text layer 3-5 pt off the ink on every page
+                                      it straightens, and reads no more for it.
               --no-denoise            Skip despeckling before recognition.
               --server-models         PP-OCRv5's larger networks. About 6% more text on tables
                                       for 9.4x the runtime. Off by default.

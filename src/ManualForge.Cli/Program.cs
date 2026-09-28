@@ -189,7 +189,9 @@ namespace ManualForge.Cli
                 Accelerator = arguments.Accelerator(),
                 ModelCachePath = arguments.Get("models") ?? new OcrEngineOptions().ModelCachePath,
                 BatchSize = arguments.GetInt("batch") ?? 8,
-                Deskew = !arguments.Has("no-deskew"),
+                // Off unless asked for: it misplaces the text layer (docs/measurements/deskew-offset.md).
+                // --no-deskew, the old way to turn it off, is still accepted and changes nothing.
+                Deskew = arguments.Has("deskew"),
                 Denoise = !arguments.Has("no-denoise"),
                 // The recogniser's own floor, which is a different thing from the writer's
                 // --min-confidence below: this decides what comes back at all, that decides what

@@ -87,10 +87,11 @@ foreach (var config in configs)
             if (ours.TryGetValue(int.Parse(f[0]), out var list))
                 list.Add(new W(f[5], double.Parse(f[1], inv), double.Parse(f[2], inv), double.Parse(f[3], inv), double.Parse(f[4], inv)));
     }
-    else if (config is "engine" or "engine-off" or "engine-rescue")
+    else if (config is "engine" or "engine-off" or "engine-rescue" or "engine-deskew")
     {
-        // The shipped engine, production settings throughout: everything on, everything off, or
-        // the orphan rescue without the stack split.
+        // The shipped engine, production settings throughout: as shipped (engine), with the rescue
+        // and split off (engine-off), rescue without split (engine-rescue), or with the old deskew
+        // default back on (engine-deskew). Before 28 Sep deskew was on in all of these.
         // ENGINE_LOG=<path> writes the engine's debug log there, each page headed by a PAGE line.
         Serilog.ILogger? serilog = Environment.GetEnvironmentVariable("ENGINE_LOG") is { } logPath
             ? Serilog.FileLoggerConfigurationExtensions.File(new Serilog.LoggerConfiguration().MinimumLevel.Debug().WriteTo, logPath).CreateLogger()
@@ -99,7 +100,8 @@ foreach (var config in configs)
         await using var engine = new PaddleOcrEngine(new OcrEngineOptions
         {
             Accelerator = OcrAccelerator.Cuda, OfflineModels = true,
-            RescueOrphanGlyphs = config != "engine-off", SplitTallStacks = config == "engine",
+            RescueOrphanGlyphs = config != "engine-off", SplitTallStacks = config is "engine" or "engine-deskew",
+            Deskew = config == "engine-deskew",
         }, logFactory is null ? null : Microsoft.Extensions.Logging.LoggerFactoryExtensions.CreateLogger<PaddleOcrEngine>(logFactory));
         foreach (var p in pages)
         {

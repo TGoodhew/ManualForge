@@ -161,8 +161,9 @@ against 172 s without it.
   words sit about 3 pt right of their ink, while Acrobat's sit on it. The harness aligns each
   page from long words, so it follows our shift, and a correctly placed single character then
   falls outside its target. 25 of the 100 pages are shifted by more than 1 pt, up to 6.5 pt.
-  This looks like deskew: its word boxes may not be mapped back from the rotated canvas. It is a
-  text-layer placement fault on its own account, not measured yet.
+  It was deskew, and it is now off by default: `deskew-offset.md`. With it off the table pages
+  read 33,587 of Acrobat's tokens and 5,047 of its single characters, with 835 of those still
+  showing nothing there.
 - **Split rows with one word are placed on the recogniser's word box**, which across a single
   character collapses to a sliver a point wide. They should take the row's ink box, as rescued
   glyphs do.

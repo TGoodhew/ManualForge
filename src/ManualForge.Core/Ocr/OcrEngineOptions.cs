@@ -37,8 +37,24 @@ public sealed class OcrEngineOptions
     /// </summary>
     public int BatchSize { get; init; } = 8;
 
-    /// <summary>Deskew the page before recognition. The main lever on 1950s-80s scan quality.</summary>
-    public bool Deskew { get; init; } = true;
+    /// <summary>
+    /// Straighten a skewed page before recognition. Off by default, because it misplaces the text.
+    ///
+    /// <para>
+    /// PaddleOcrNet 2.2.0 rotates a skewed page onto an enlarged canvas and maps what it reads back
+    /// onto the original, and the mapping comes back several points out: on the table book every
+    /// page it straightened had its words 3-5 pt right and 1-3 pt down of their ink, lines and words
+    /// alike, a quarter of the pages. Search still finds the words; selecting them highlights the
+    /// space beside them. Nothing reports the angle it applied, so the shift cannot be undone here.
+    /// </para>
+    ///
+    /// <para>
+    /// And it was not earning its keep. With it off the same pages read slightly more - 33,587 of
+    /// Acrobat's tokens against 33,480 on 100 tables, 17,493 against 17,483 on 100 typical pages -
+    /// and 12% faster. docs/measurements/deskew-offset.md.
+    /// </para>
+    /// </summary>
+    public bool Deskew { get; init; }
 
     /// <summary>Despeckle before recognition.</summary>
     public bool Denoise { get; init; } = true;
