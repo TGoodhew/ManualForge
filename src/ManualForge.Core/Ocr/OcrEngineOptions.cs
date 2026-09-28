@@ -93,6 +93,20 @@ public sealed class OcrEngineOptions
     public bool VerifyPageOrientation { get; init; } = true;
 
     /// <summary>
+    /// Read the lone characters the text detector never boxed.
+    ///
+    /// <para>
+    /// The detector answers weakly to one glyph with nothing beside it, so the check-digit and
+    /// quantity columns of a parts list come back empty: on 100 captioned tables it found 3,653
+    /// of Acrobat's 8,100 lone characters, and no detector setting moved that by more than 1%. With
+    /// this on, ink standing clear of every word, in a column of such ink on a row of text, is
+    /// read on its own; that took the tables to 4,048, and added about one stray character per
+    /// ordinary page. Issue #22; docs/measurements/single-characters.md.
+    /// </para>
+    /// </summary>
+    public bool RescueOrphanGlyphs { get; init; } = true;
+
+    /// <summary>
     /// Cap on the threads ONNX Runtime uses for a single operator. Null leaves it to the runtime,
     /// which takes every core.
     ///

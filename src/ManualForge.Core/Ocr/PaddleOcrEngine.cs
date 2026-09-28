@@ -31,6 +31,8 @@ public sealed class PaddleOcrEngine : IOcrEngine
     private readonly RecognitionOptions _recognitionOptions;
     private readonly RecognitionOptions _uprightOptions;
     private readonly bool _verifyOrientation;
+    private readonly bool _rescueOrphans;
+    private readonly RecognitionOptions _orphanOptions;
     private readonly IReadOnlyList<OcrLanguage> _languages;
     private readonly ILogger _logger;
 
@@ -84,6 +86,20 @@ public sealed class PaddleOcrEngine : IOcrEngine
 
         _uprightOptions = _recognitionOptions with { UseDocOrientation = false };
         _verifyOrientation = options.VerifyPageOrientation;
+        _rescueOrphans = options.RescueOrphanGlyphs;
+
+        // One crop per candidate, already cut to the glyph, so nothing here may turn, pad or
+        // regroup it: a lone character gives the text-line classifier nothing to go on, and
+        // padding pulls a table's rules into the crop.
+        _orphanOptions = new RecognitionOptions
+        {
+            Grouping = TextGrouping.Word,
+            BatchSize = options.BatchSize,
+            DropScore = 0,
+            UseDocOrientation = false,
+            UseTextLineOrientation = false,
+            CropPadding = 0,
+        };
 
         _languages = [OcrLanguage.English];
 
@@ -95,7 +111,8 @@ public sealed class PaddleOcrEngine : IOcrEngine
             cudaLibraries,
             // Everything here changes what recognition returns, so it has to reach the page cache.
             $"server={options.UseServerModels};deskew={options.Deskew};denoise={options.Denoise};" +
-            $"drop={options.DropScore};orientation={(options.VerifyPageOrientation ? "verified" : "trusted")}");
+            $"drop={options.DropScore};orientation={(options.VerifyPageOrientation ? "verified" : "trusted")};" +
+            $"orphans={(options.RescueOrphanGlyphs ? "rescued" : "left")}");
 
         _logger.LogInformation(
             "OCR engine ready: provider {Provider}, GPU {UsingGpu}, models in {ModelCache}",
@@ -134,6 +151,11 @@ public sealed class PaddleOcrEngine : IOcrEngine
                 lines = uprightLines;
             }
         }
+
+        // Not on a page the classifier turned and was believed: its boxes then belong to the
+        // turned page, and the ink being searched is the page as it stands.
+        if (_rescueOrphans && result.DetectedOrientation == 0)
+            lines.AddRange(await RescueOrphansAsync(imageBytes, lines, cancellationToken).ConfigureAwait(false));
         stopwatch.Stop();
 
         return new RecognisedPage(
@@ -159,6 +181,73 @@ public sealed class PaddleOcrEngine : IOcrEngine
         lines.SelectMany(l => l.Words)
             .Where(w => w.Confidence >= 0.8)
             .Sum(w => w.Text.Count(char.IsLetterOrDigit));
+
+    /// <summary>
+    /// Reads the lone characters the detector left unboxed, each from a crop of its own. See
+    /// <see cref="OrphanGlyphs"/> for which ink qualifies.
+    /// </summary>
+    /// <remarks>
+    /// Each reading is placed on the glyph's own ink box rather than the recogniser's word box:
+    /// word positions come from the recogniser's timesteps, and across a single character those
+    /// collapse to a sliver a fraction of a point tall.
+    /// </remarks>
+    private async Task<List<RecognisedLine>> RescueOrphansAsync(
+        byte[] imageBytes,
+        IReadOnlyList<RecognisedLine> found,
+        CancellationToken cancellationToken)
+    {
+        if (OrphanGlyphs.LineHeight(found) is not { } lineHeight)
+            return [];
+
+        using var image = EasyImageSharp.Image.Load<EasyImageSharp.PixelFormats.Rgb24>(imageBytes);
+        int width = image.Width, height = image.Height;
+        var ink = new bool[width * height];
+        image.ProcessPixelRows(pixels =>
+        {
+            for (int y = 0; y < height; y++)
+            {
+                var row = pixels.GetRowSpan(y);
+                for (int x = 0; x < width; x++)
+                    ink[y * width + x] = row[x].R < 128;
+            }
+        });
+
+        var candidates = OrphanGlyphs.Find(ink, width, height, found);
+        if (candidates.Count == 0)
+            return [];
+
+        var crops = candidates.Select(c => OrphanGlyphs.CropFor(c, lineHeight, width, height)).ToList();
+        var polygons = crops.Select(r => (IReadOnlyList<OcrPoint>)
+        [
+            new OcrPoint(r.Left, r.Top), new OcrPoint(r.Right, r.Top),
+            new OcrPoint(r.Right, r.Bottom), new OcrPoint(r.Left, r.Bottom),
+        ]);
+
+        var read = await _service
+            .RecognizeRegionsAsync(image, polygons, _languages, _orphanOptions, cancellationToken)
+            .ConfigureAwait(false);
+
+        var rescued = new List<RecognisedLine>();
+        foreach (var line in read.Lines)
+        {
+            var text = line.Text.Trim();
+            if (!OrphanGlyphs.Keep(text, line.Confidence))
+                continue;
+
+            double cx = (line.BoundingBox.MinX + line.BoundingBox.MaxX) / 2;
+            double cy = (line.BoundingBox.MinY + line.BoundingBox.MaxY) / 2;
+            int k = crops.FindIndex(r => cx >= r.Left && cx <= r.Right && cy >= r.Top && cy <= r.Bottom);
+            if (k < 0)
+                continue;
+
+            var box = candidates[k];
+            rescued.Add(new RecognisedLine(text, box, line.Confidence, [new RecognisedWord(text, box, line.Confidence)]));
+        }
+
+        _logger.LogDebug(
+            "{Candidates} orphan glyph candidates, {Kept} kept", candidates.Count, rescued.Count);
+        return rescued;
+    }
 
     private static List<RecognisedLine> ToLines(OcrResult result)
     {

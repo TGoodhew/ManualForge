@@ -74,21 +74,39 @@ summary.AppendLine("config\tacro_tokens\thit\tnot_hit_under\tmissed\tsingles\ts_
 
 foreach (var config in configs)
 {
-    var options = Options(config);
     var ours = new Dictionary<int, List<W>>();
+    const double k = 72.0 / Dpi;
     var sw = System.Diagnostics.Stopwatch.StartNew();
-    foreach (var p in pages)
+    if (config is "engine" or "engine-off")
     {
-        var bytes = File.ReadAllBytes(Path.Combine(outDir, "png", $"p{p:D3}.png"));
-        var lines = config is "regions" or "split" or "splitpad"
-            ? await ViaRegions(service, bytes, config)
-            : (await service.ExtractTextFromImage(bytes, [OcrLanguage.English], options)).Lines;
-        if (config.StartsWith("rescue"))
-            lines = [.. lines, .. await RescueOrphans(service, bytes, lines, config == "rescue7" ? 0.7 : 0.9)];
-        const double k = 72.0 / Dpi;
-        ours[p] = lines.SelectMany(l => l.Words is { Count: > 0 } ? l.Words.Select(w => (w.Text, w.BoundingBox)) : [(l.Text, l.BoundingBox)])
-            .Select(w => new W(Strip(w.Text), w.BoundingBox.MinX * k, w.BoundingBox.MinY * k, w.BoundingBox.MaxX * k, w.BoundingBox.MaxY * k))
-            .Where(w => contentRx.IsMatch(w.T)).ToList();
+        // The shipped engine, production settings throughout, rescue on or off.
+        await using var engine = new PaddleOcrEngine(new OcrEngineOptions
+        {
+            Accelerator = OcrAccelerator.Cuda, OfflineModels = true, RescueOrphanGlyphs = config == "engine",
+        });
+        foreach (var p in pages)
+        {
+            var page = await engine.RecognisePageAsync(File.ReadAllBytes(Path.Combine(outDir, "png", $"p{p:D3}.png")), p);
+            ours[p] = page.Lines.SelectMany(l => l.Words)
+                .Select(w => new W(Strip(w.Text), w.BoxPx.Left * k, w.BoxPx.Top * k, w.BoxPx.Right * k, w.BoxPx.Bottom * k))
+                .Where(w => contentRx.IsMatch(w.T)).ToList();
+        }
+    }
+    else
+    {
+        var options = Options(config);
+        foreach (var p in pages)
+        {
+            var bytes = File.ReadAllBytes(Path.Combine(outDir, "png", $"p{p:D3}.png"));
+            var lines = config is "regions" or "split" or "splitpad"
+                ? await ViaRegions(service, bytes, config)
+                : (await service.ExtractTextFromImage(bytes, [OcrLanguage.English], options)).Lines;
+            if (config.StartsWith("rescue"))
+                lines = [.. lines, .. await RescueOrphans(service, bytes, lines, config == "rescue7" ? 0.7 : 0.9)];
+            ours[p] = lines.SelectMany(l => l.Words is { Count: > 0 } ? l.Words.Select(w => (w.Text, w.BoundingBox)) : [(l.Text, l.BoundingBox)])
+                .Select(w => new W(Strip(w.Text), w.BoundingBox.MinX * k, w.BoundingBox.MinY * k, w.BoundingBox.MaxX * k, w.BoundingBox.MaxY * k))
+                .Where(w => contentRx.IsMatch(w.T)).ToList();
+        }
     }
     sw.Stop();
 

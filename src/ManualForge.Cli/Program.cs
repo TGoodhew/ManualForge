@@ -198,6 +198,7 @@ namespace ManualForge.Cli
                 DropScore = arguments.GetDouble("drop-score") ?? new OcrEngineOptions().DropScore,
                 UseServerModels = arguments.Has("server-models"),
                 VerifyPageOrientation = !arguments.Has("trust-orientation"),
+                RescueOrphanGlyphs = !arguments.Has("no-orphan-rescue"),
             };
 
             Console.WriteLine($"Source : {input}");

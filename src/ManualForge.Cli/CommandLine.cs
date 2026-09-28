@@ -141,6 +141,9 @@ internal sealed class CommandLine
                                       without reading it again as it stands. The classifier
                                       misfires on about a third of upright pages; this is how
                                       pages were read before that was measured.
+              --no-orphan-rescue      Leave lone characters the detector never boxed, such as
+                                      a parts list's check digits and quantities, unread.
+                                      This is how pages were read before that was measured.
               --verify-ink           Re-render both files and prove the page image is unchanged.
               --dry-run               Do everything except write the output.
               --overwrite             Replace an existing output file.
