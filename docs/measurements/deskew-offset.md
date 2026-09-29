@@ -63,5 +63,7 @@ on clean type and cost a fifth of the throughput. Repair already ran with both o
 - **Nine table pages are still more than 1 pt from Acrobat**, at most 2.3 pt. Whose layer that is
   has not been looked at.
 - **Denoise is still on.** Not measured here.
-- **Not reported upstream.** PaddleOcrNet is FarhanLodi/PaddleOcrNet on GitHub; the probe above is
-  the reproduction.
+- **Reported upstream** on 28 Sep 2026 as
+  [FarhanLodi/PaddleOcrNet#9](https://github.com/FarhanLodi/PaddleOcrNet/issues/9), with the probe
+  above as the reproduction. If a fixed release lands, re-run the probe before turning deskew back
+  on: it has to earn its keep on recognition as well as stop moving the text.
