@@ -114,6 +114,31 @@ public sealed class TallStackTests
     }
 
     [Fact]
+    public void WordsInARowSitOnTheirOwnInk()
+    {
+        // A2 at 52-64 and R45 at 70-90. The recogniser's centres come from collapsed boxes - one
+        // off to the right of A2 - but they still tell which ink belongs to which word.
+        var row = RectD.FromEdges(52, 20, 90, 40);
+        var ink = Page(RectD.FromEdges(52, 20, 64, 40), RectD.FromEdges(70, 20, 90, 40));
+
+        var boxes = TallStacks.WordBoxes(ink, Width, row, [63.5, 81]);
+
+        Assert.Equal([RectD.FromEdges(52, 20, 64, 40), RectD.FromEdges(70, 20, 90, 40)], boxes);
+    }
+
+    [Fact]
+    public void AWordWithNoInkInItsShareKeepsTheShare()
+    {
+        var row = RectD.FromEdges(52, 20, 90, 40);
+
+        var boxes = TallStacks.WordBoxes(Page(RectD.FromEdges(52, 20, 64, 40)), Width, row, [58, 80]);
+
+        Assert.Equal(RectD.FromEdges(52, 20, 64, 40), boxes[0]);
+        // The cut falls in the middle of the blank run between the centres, 64 to 80.
+        Assert.Equal(RectD.FromEdges(72.5, 20, 90, 40), boxes[1]);
+    }
+
+    [Fact]
     public void ABoxOverTheEdgeOfThePageIsClamped()
     {
         var marks = new[] { RectD.FromEdges(190, 250, 200, 270), RectD.FromEdges(190, 280, 200, 300) };

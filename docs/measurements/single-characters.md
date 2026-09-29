@@ -154,19 +154,52 @@ against 172 s without it.
 
 `SplitTallStacks` is on by default; `--no-stack-split` leaves stacks as they were read.
 
+## After deskew: measuring the line, and the rows' own words
+
+With deskew off (`deskew-offset.md`) the table harness stopped following our shift, and what was
+left of the "nothing there" singles could be looked at one by one. The rescue now logs every
+candidate the row and column tests drop, and every reading it rejects.
+
+- **Most of the rest never reached those tests.** Of 826 singles still showing nothing, 736 were
+  lost before them - and every one looked at was a clean glyph of its own, 12 x 20 px, not joined
+  to a rule. They were **blocked by uncut stacks**: on page 75 words read `9000` and `UNUNE`, 19-25 pt
+  tall, still sat over the check-digit column, and the clearance gap, sized by the word's height,
+  took the quantity column beside it too.
+- **Those stacks were never cut because the line height was measured on lines.** A line chains a
+  table row together with the tall stack beside it, and the median swelled until a stack 2.7 lines
+  tall no longer looked tall. The line height is now the median of words of three or more
+  characters that are wider than tall; a word taller than wide gets only the ordinary clearance.
+- **That let drawing symbols through on typical pages** - terminal circles as `O`, strokes as `1` -
+  about half of what it added there. A table's orphan sits *between* words on its row, part
+  number to the left and description to the right; a rescued glyph must now have both.
+- **A split row with one word is placed on the row's ink**, and several words share the row out at
+  the widest blank gaps between the recogniser's word centres. Its own boxes for a check digit
+  came back a point wide, beside the ink.
+
+| | tables: tokens read | tables: singles read | tables: singles, nothing there | typical: tokens read | typical: ours on no Acrobat token |
+|---|---|---|---|---|---|
+| deskew off | 33,587 | 5,047 | 835 | 17,493 | 11,135 |
+| rows' words on their ink | 33,594 | 5,054 | 826 | 17,493 | 11,135 |
+| line height from words | 34,089 | 5,445 | 662 | 17,600 | 11,244 |
+| **... and words on both sides** | **34,067** | **5,434** | **674** | **17,555** | **11,167** |
+
+The last step gives back 22 tokens on the tables and 45 on typical pages for 87 fewer stray
+tokens; the loss is mostly a column at the right edge of a page, which has no word beyond it
+(page 99 of the typical book, 24 check digits). Kept, because in a text layer stray characters
+from drawings cost more than a missing check digit. On the 100 tables that is 34,067 of Acrobat's
+43,944 content tokens, from 32,194 before any of this.
+
 ## What this does not settle
 
-- **257 singles are still under stacks.**
-- **984 singles still have nothing there, and many of them are not missing.** On page 75 our
-  words sit about 3 pt right of their ink, while Acrobat's sit on it. The harness aligns each
-  page from long words, so it follows our shift, and a correctly placed single character then
-  falls outside its target. 25 of the 100 pages are shifted by more than 1 pt, up to 6.5 pt.
-  It was deskew, and it is now off by default: `deskew-offset.md`. With it off the table pages
-  read 33,587 of Acrobat's tokens and 5,047 of its single characters, with 835 of those still
-  showing nothing there.
-- **Split rows with one word are placed on the recogniser's word box**, which across a single
-  character collapses to a sliver a point wide. They should take the row's ink box, as rescued
-  glyphs do.
+- **77 singles are still under stacks; 674 still have nothing there.** About half of a sample of
+  the latter are Acrobat splitting a word we read whole (`1%`, `0±100`), which the metric scores
+  as a miss.
+- **A table's right-hand column of single characters is not rescued**: nothing lies beyond it.
+- **Sideways labels on drawings are still sometimes cut as stacks** (`CABLE` read on its side,
+  then cut and read as `CAAE`). The both-sides test cannot guard the cut: a table's leftmost
+  designator column has no word to its left.
+- **Readings between 0.8 and 0.9 are dropped** - 46 of the misses, most of them right (`8` at
+  0.82-0.89). Not tried lower.
 - **Schematic pin numbers** standing alone are mostly not rescued: the column test drops them with
   the drawing strokes they look like. Pin numbers that happen to line up are kept.
 - **Nothing already in the library is re-read** by this change.

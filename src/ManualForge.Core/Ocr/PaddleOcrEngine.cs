@@ -213,7 +213,10 @@ public sealed class PaddleOcrEngine : IOcrEngine
         if (OrphanGlyphs.LineHeight(found) is not { } lineHeight)
             return [];
 
-        var candidates = OrphanGlyphs.Find(page.Ink, page.Width, page.Height, found);
+        var candidates = OrphanGlyphs.Find(
+            page.Ink, page.Width, page.Height, found,
+            (c, why) => _logger.LogDebug(
+                "Orphan at {Left:F0},{Top:F0} {Width:F0}x{Height:F0} px dropped: {Why}", c.Left, c.Top, c.Width, c.Height, why));
         if (candidates.Count == 0)
             return [];
 
@@ -223,7 +226,12 @@ public sealed class PaddleOcrEngine : IOcrEngine
         {
             var text = line.Text.Trim();
             if (!OrphanGlyphs.Keep(text, line.Confidence))
+            {
+                _logger.LogDebug(
+                    "Orphan at {Left:F0},{Top:F0} {Width:F0}x{Height:F0} px dropped: read '{Text}' at {Confidence:F2}",
+                    candidates[k].Left, candidates[k].Top, candidates[k].Width, candidates[k].Height, text, line.Confidence);
                 continue;
+            }
 
             var box = candidates[k];
             rescued.Add(new RecognisedLine(text, box, line.Confidence, [new RecognisedWord(text, box, line.Confidence)]));
@@ -239,9 +247,10 @@ public sealed class PaddleOcrEngine : IOcrEngine
     /// each read on its own. See <see cref="TallStacks"/>.
     /// </summary>
     /// <remarks>
-    /// A row's words keep the recogniser's horizontal positions but take the row's own top and
-    /// bottom: across a short crop the timestep boxes can collapse to a sliver, and the text layer
-    /// sizes its glyphs from the box height. A stack whose rows cannot be found is left as it was.
+    /// A row read as one word is placed on the row's ink. Several words share the row out between
+    /// them (<see cref="TallStacks.WordBoxes"/>): across a short crop the recogniser's own boxes
+    /// collapse to a sliver, and the text layer sizes its glyphs from the box. A stack whose rows
+    /// cannot be found or read is left as it was.
     /// </remarks>
     private async Task<List<RecognisedLine>> SplitStacksAsync(
         InkPage page,
@@ -299,18 +308,21 @@ public sealed class PaddleOcrEngine : IOcrEngine
                 continue;
 
             var row = rows[k].Box;
-            var words = line.Words is { Count: > 0 }
-                ? line.Words
-                    .Where(w => !string.IsNullOrWhiteSpace(w.Text))
-                    .Select(w => new RecognisedWord(
-                        w.Text,
-                        RectD.FromEdges(Math.Max(row.Left, w.BoundingBox.MinX), row.Top, Math.Min(row.Right, w.BoundingBox.MaxX), row.Bottom),
-                        w.Confidence))
-                    .Where(w => !w.BoxPx.IsDegenerate)
-                    .ToList()
-                : [];
-            if (words.Count == 0)
+            var read = (line.Words ?? [])
+                .Where(w => !string.IsNullOrWhiteSpace(w.Text))
+                .OrderBy(w => w.BoundingBox.MinX + w.BoundingBox.MaxX)
+                .ToList();
+            List<RecognisedWord> words;
+            if (read.Count <= 1)
+            {
                 words = [new RecognisedWord(line.Text.Trim(), row, line.Confidence)];
+            }
+            else
+            {
+                var boxes = TallStacks.WordBoxes(
+                    page.Ink, page.Width, row, read.Select(w => (w.BoundingBox.MinX + w.BoundingBox.MaxX) / 2).ToList());
+                words = read.Select((w, i) => new RecognisedWord(w.Text, boxes[i], w.Confidence)).ToList();
+            }
 
             readings.Add((rows[k].Region, new RecognisedLine(line.Text.Trim(), row, line.Confidence, words)));
         }

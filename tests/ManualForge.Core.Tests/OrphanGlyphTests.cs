@@ -106,6 +106,16 @@ public sealed class OrphanGlyphTests
     }
 
     [Fact]
+    public void AColumnBesideTheTextButNotWithinItIsLeftAlone()
+    {
+        // Terminal circles on a drawing, lined up to the right of their labels: on a row of text,
+        // in a column, but with words on one side only.
+        var found = OrphanGlyphs.Find(Page(Column(450, 0, 1, 2, 3, 4, 5)), Width, Height, PartsList);
+
+        Assert.Empty(found);
+    }
+
+    [Fact]
     public void GlyphsSideBySideAreReadTogether()
     {
         // A quantity of 10: two glyphs three pixels apart are one candidate, not two.
@@ -120,9 +130,24 @@ public sealed class OrphanGlyphTests
     [Fact]
     public void WithoutEnoughTextToMeasureALineNothingIsRescued()
     {
-        var found = OrphanGlyphs.Find(Page(Column(180, 0, 1, 2, 3, 4, 5)), Width, Height, PartsList.Take(4).ToList());
+        // Two rows, four words: too few to say what a line is.
+        var found = OrphanGlyphs.Find(Page(Column(180, 0, 1, 2, 3, 4, 5)), Width, Height, PartsList.Take(2).ToList());
 
         Assert.Empty(found);
+    }
+
+    [Fact]
+    public void TheLineHeightIgnoresStacksAndSlivers()
+    {
+        // Page 75 of the table book: rows chained into lines beside a stack read as 9000, 79 px
+        // tall, and single characters whose boxes collapsed to slivers. Neither is a line of text.
+        var stack = new RecognisedWord("9000", RectD.FromEdges(180, 20, 206, 99), 0.4);
+        var sliver = new RecognisedWord("0", RectD.FromEdges(210, 20, 250, 28), 0.9);
+        var lines = PartsList
+            .Select(l => l with { Words = [.. l.Words, stack, sliver], BoxPx = RectD.FromEdges(20, 20, 400, 99) })
+            .ToList();
+
+        Assert.Equal(Row, OrphanGlyphs.LineHeight(lines));
     }
 
     [Fact]

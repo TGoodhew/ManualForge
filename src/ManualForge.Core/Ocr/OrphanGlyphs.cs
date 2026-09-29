@@ -16,9 +16,9 @@ namespace ManualForge.Core.Ocr;
 ///
 /// <para>
 /// A candidate here is a connected run of ink, shaped like a character at the page's line height,
-/// standing clear of every recognised word, on a row of text, and in a column with at least two
-/// others. The last two are what keep strokes of a drawing out: a table's orphans line up, a
-/// schematic's lines do not.
+/// standing clear of every recognised word, between words on its own row, and in a column with at
+/// least two others. The last two are what keep a drawing out: a table's orphans line up between a
+/// part number and a description; a schematic's strokes and terminal circles do not.
 /// </para>
 /// </summary>
 public static class OrphanGlyphs
@@ -50,14 +50,22 @@ public static class OrphanGlyphs
     public const double MinimumConfidence = 0.9;
 
     /// <summary>
-    /// The typical line height on the page: the median height of recognised lines at least twice
-    /// as wide as they are tall. Null when there are too few to say, and then nothing is rescued.
+    /// The typical line height on the page: the median height of recognised words of three or more
+    /// characters that are wider than they are tall. Null when there are too few to say, and then
+    /// nothing is rescued.
     /// </summary>
+    /// <remarks>
+    /// Words, not lines. A line chains a table row together with any tall stack beside it, and on
+    /// page 75 of the table book that swelled the median until a stack 2.7 lines tall no longer
+    /// looked tall. A stack's own words are taller than wide and a single character's box can
+    /// collapse to a sliver, so neither is counted.
+    /// </remarks>
     public static double? LineHeight(IReadOnlyList<RecognisedLine> lines)
     {
         var heights = lines
-            .Where(l => l.BoxPx.Width > 2 * l.BoxPx.Height)
-            .Select(l => l.BoxPx.Height)
+            .SelectMany(l => l.Words)
+            .Where(w => w.Text.Length >= 3 && w.BoxPx.Width > w.BoxPx.Height && w.BoxPx.Height > 0)
+            .Select(w => w.BoxPx.Height)
             .Order()
             .ToList();
         return heights.Count < 5 ? null : heights[heights.Count / 2];
@@ -67,7 +75,12 @@ public static class OrphanGlyphs
     /// Candidate boxes, in image pixels, for ink on the page that no word covers.
     /// </summary>
     /// <param name="ink">Row-major, one entry per pixel, true where the page is dark.</param>
-    public static IReadOnlyList<RectD> Find(bool[] ink, int width, int height, IReadOnlyList<RecognisedLine> found)
+    /// <param name="dropped">
+    /// Told of each candidate the row and column tests turn away, and why. Glyphs too close to a
+    /// word are not reported: every letter of every word is one.
+    /// </param>
+    public static IReadOnlyList<RectD> Find(
+        bool[] ink, int width, int height, IReadOnlyList<RecognisedLine> found, Action<RectD, string>? dropped = null)
     {
         ArgumentNullException.ThrowIfNull(ink);
         ArgumentNullException.ThrowIfNull(found);
@@ -81,9 +94,11 @@ public static class OrphanGlyphs
         var words = found
             .SelectMany(l => l.Words.Count > 0 ? l.Words.Select(w => w.BoxPx) : [l.BoxPx])
             .ToList();
+        // Big lettering gets a gap to match its size. A word taller than it is wide is not big
+        // lettering but a stack left uncut, and sized by its height it would claim the next column.
         var clearances = words.Select(b =>
         {
-            double size = Math.Max(row, b.Height);
+            double size = b.Width > b.Height ? Math.Max(row, b.Height) : row;
             return Inflate(b, ClearanceFraction * size, 0.15 * size);
         }).ToList();
         // Some word boxes come back a fraction of a point tall; they still block, but cannot
@@ -95,13 +110,26 @@ public static class OrphanGlyphs
             .Where(c => !clearances.Any(w => Intersects(w, c)))
             .ToList();
 
-        var candidates = JoinAlongBaseline(glyphs, row)
-            .Where(c => OnTextRow(c, rowWords, row))
-            .ToList();
+        var candidates = new List<RectD>();
+        foreach (var c in JoinAlongBaseline(glyphs, row))
+        {
+            if (BetweenWords(c, rowWords, row))
+                candidates.Add(c);
+            else
+                dropped?.Invoke(c, OnTextRow(c, rowWords, row) ? "words on one side only" : "off the text rows");
+        }
 
-        return candidates
-            .Where(c => candidates.Count(o => o != c && Math.Abs(CentreX(o) - CentreX(c)) < 0.5 * row) >= 2)
-            .ToList();
+        var kept = new List<RectD>(candidates.Count);
+        foreach (var c in candidates)
+        {
+            int column = candidates.Count(o => o != c && Math.Abs(CentreX(o) - CentreX(c)) < 0.5 * row);
+            if (column >= 2)
+                kept.Add(c);
+            else
+                dropped?.Invoke(c, $"not in a column ({column} others)");
+        }
+
+        return kept;
     }
 
     /// <summary>The region to hand the recogniser for a candidate: padded, and never too narrow.</summary>
@@ -187,13 +215,24 @@ public static class OrphanGlyphs
     /// A real orphan shares a row with recognised words: its middle lies inside a word of about its
     /// size, somewhere along the same line of the page.
     /// </summary>
-    internal static bool OnTextRow(RectD c, IReadOnlyList<RectD> words, double row)
+    internal static bool OnTextRow(RectD c, IReadOnlyList<RectD> words, double row) =>
+        words.Any(w => RowMate(c, w, row));
+
+    /// <summary>
+    /// A table's orphan sits between words on its row: a check digit has its part number to the
+    /// left and its description to the right, and so does a quantity. A terminal circle or a stroke
+    /// of a drawing, beside one label at most, does not.
+    /// </summary>
+    internal static bool BetweenWords(RectD c, IReadOnlyList<RectD> words, double row) =>
+        words.Any(w => RowMate(c, w, row) && w.Right <= c.Left) &&
+        words.Any(w => RowMate(c, w, row) && w.Left >= c.Right);
+
+    private static bool RowMate(RectD c, RectD w, double row)
     {
         double middle = (c.Top + c.Bottom) / 2;
-        return words.Any(w =>
-            middle > w.Top && middle < w.Bottom &&
+        return middle > w.Top && middle < w.Bottom &&
             w.Height >= 0.8 * c.Height && w.Height <= 2.2 * c.Height &&
-            Math.Min(Math.Abs(w.Left - c.Right), Math.Abs(c.Left - w.Right)) < 15 * row);
+            Math.Min(Math.Abs(w.Left - c.Right), Math.Abs(c.Left - w.Right)) < 15 * row;
     }
 
     private static double CentreX(RectD r) => (r.Left + r.Right) / 2;

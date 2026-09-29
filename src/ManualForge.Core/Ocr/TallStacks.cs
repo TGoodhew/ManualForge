@@ -41,6 +41,76 @@ public static class TallStacks
         region.Width <= MaximumWidthInLines * lineHeight;
 
     /// <summary>
+    /// Where each word read from a row sits: the row divided at the widest blank gap between each
+    /// pair of the recogniser's word centres, each share shrunk to the ink it holds.
+    /// </summary>
+    /// <remarks>
+    /// The recogniser's own word boxes come from its timesteps, and across a crop a few characters
+    /// wide they collapse - a check digit came back a point wide, beside its ink. They are good
+    /// enough to say where one word ends and the next begins, and no better.
+    /// </remarks>
+    /// <param name="centres">The recogniser's word centres, left to right.</param>
+    public static IReadOnlyList<RectD> WordBoxes(bool[] ink, int width, RectD row, IReadOnlyList<double> centres)
+    {
+        ArgumentNullException.ThrowIfNull(ink);
+        ArgumentNullException.ThrowIfNull(centres);
+
+        int top = Math.Max(0, (int)row.Top), bottom = Math.Min(ink.Length / width, (int)Math.Ceiling(row.Bottom));
+        bool Inked(int x)
+        {
+            for (int y = top; y < bottom; y++)
+                if (ink[y * width + x])
+                    return true;
+            return false;
+        }
+
+        // Between two centres the words meet at the widest run of blank columns; the centres
+        // themselves can sit off their words, so halfway between them can land inside one.
+        var cuts = new List<double>(centres.Count - 1);
+        for (int i = 1; i < centres.Count; i++)
+        {
+            int from = Math.Max(0, (int)Math.Ceiling(Math.Min(centres[i - 1], centres[i])));
+            int to = Math.Min(width - 1, (int)Math.Floor(Math.Max(centres[i - 1], centres[i])));
+            int bestStart = -1, bestLength = 0, runStart = -1;
+            for (int x = from; x <= to + 1; x++)
+            {
+                if (x <= to && !Inked(x))
+                {
+                    if (runStart < 0) runStart = x;
+                    continue;
+                }
+                if (runStart >= 0 && x - runStart > bestLength)
+                    (bestStart, bestLength) = (runStart, x - runStart);
+                runStart = -1;
+            }
+            cuts.Add(bestLength > 0 ? bestStart + bestLength / 2.0 : (centres[i - 1] + centres[i]) / 2);
+        }
+
+        var boxes = new List<RectD>(centres.Count);
+        for (int i = 0; i < centres.Count; i++)
+        {
+            double from = i == 0 ? row.Left : cuts[i - 1];
+            double to = i == centres.Count - 1 ? row.Right : cuts[i];
+
+            int left = int.MaxValue, right = int.MinValue;
+            for (int x = Math.Max(0, (int)Math.Floor(from)); x < Math.Min(width, (int)Math.Ceiling(to)); x++)
+                for (int y = top; y < bottom; y++)
+                    if (ink[y * width + x])
+                    {
+                        left = Math.Min(left, x);
+                        right = Math.Max(right, x);
+                        break;
+                    }
+
+            boxes.Add(left <= right
+                ? RectD.FromEdges(left, row.Top, right + 1, row.Bottom)
+                : RectD.FromEdges(from, row.Top, to, row.Bottom));
+        }
+
+        return boxes;
+    }
+
+    /// <summary>
     /// The rows of ink inside <paramref name="box"/>, each as the box of its own ink. Empty unless
     /// there are at least two, so a single large glyph - a big <c>8</c> on a drawing - is left whole.
     /// </summary>
