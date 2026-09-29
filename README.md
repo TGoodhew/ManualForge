@@ -636,6 +636,13 @@ manualforge repair <library> --redo-before "<when step 3 starts>" --include-scan
 manualforge index  <library>
 ```
 
+`tools/reread-library.ps1` runs all four unattended - start it at bedtime. It keeps the PC from
+sleeping while it works, stops only if a step crashes (one failed file in 93 is reported, not
+fatal), logs to `%LOCALAPPDATA%\ManualForge\reread`, and can be started again after any
+interruption: progress is kept in `_Originals\reread-progress.json`, so finished steps are not
+repeated and the repair keeps the cutoff it first chose. `-Plan` shows what it would do and when
+it should finish, and runs nothing.
+
 `--redo-completed` reads each finished file again from the untouched original in `_Originals`,
 verifies the result exactly as a first run does, and only then replaces the library copy; the copy
 it replaces is kept under `_Originals\_superseded\`, not deleted. With `--dry-run` it does the work
