@@ -35,6 +35,24 @@ public static class TallStacks
     /// </summary>
     public const double MaximumWidthInLines = 2.5;
 
+    /// <summary>A stack's rows are no taller than this many lines; a word set sideways can be.</summary>
+    public const double MaximumRowHeightInLines = 1.15;
+
+    /// <summary>
+    /// Whether rows cut from a region belong to a table: every row lines up with a row of ordinary
+    /// text - one may miss in a column of four or more - and the rows are no taller than a line.
+    /// </summary>
+    /// <remarks>
+    /// Measured on 416 table stacks and 41 typical-page regions. 398 table stacks had every row on
+    /// a text row, and nearly every wrong cut on the typical pages - <c>CABLE</c>, <c>-C3-</c>, a
+    /// German sentence set sideways - had two or more rows off, or rows taller than a line. The one
+    /// miss allowed keeps garbage columns like <c>NNNOI</c> and <c>OCONN</c> that fell one row short.
+    /// </remarks>
+    public static bool BelongsToTable(int rowsOnTextRows, int rows, double medianRowHeight, double lineHeight) =>
+        rows > 0 &&
+        rowsOnTextRows >= rows - (rows >= 4 ? 1 : 0) &&
+        medianRowHeight <= MaximumRowHeightInLines * lineHeight;
+
     /// <summary>Whether a detected region is a stack of rows read as one.</summary>
     public static bool IsStack(RectD region, double lineHeight) =>
         region.Height >= MinimumHeightInLines * lineHeight && region.Height >= region.Width &&

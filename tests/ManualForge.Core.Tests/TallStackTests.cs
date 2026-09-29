@@ -42,6 +42,19 @@ public sealed class TallStackTests
         Assert.Equal(stack, TallStacks.IsStack(new RectD(0, 0, width, height), Line));
     }
 
+    [Theory]
+    [InlineData(5, 5, 18, true)]    // a parts-list column, every row beside a part number
+    [InlineData(3, 4, 18, true)]    // NNNOI: one row short in a column of four
+    [InlineData(2, 3, 18, false)]   // short column, one row off: not enough to go on
+    [InlineData(2, 4, 12, false)]   // -C3- set sideways on a drawing: two rows off
+    [InlineData(1, 2, 54, false)]   // IWI CABLE: half off, rows taller than a line
+    [InlineData(2, 2, 36, false)]   // every row on a text row, but each taller than a line
+    [InlineData(2, 2, 33, true)]    // a hair over the line, as a tight table's rows can be
+    public void ATablesRowsLineUpWithItsText(int onTextRows, int rows, double medianRow, bool table)
+    {
+        Assert.Equal(table, TallStacks.BelongsToTable(onTextRows, rows, medianRow, Line));
+    }
+
     [Fact]
     public void AColumnIsCutAtTheGapsBetweenItsRows()
     {

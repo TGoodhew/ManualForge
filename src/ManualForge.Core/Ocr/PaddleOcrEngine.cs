@@ -288,8 +288,9 @@ public sealed class PaddleOcrEngine : IOcrEngine
         {
             var found = TallStacks.Rows(page.Ink, page.Width, page.Height, region, rowHeight, out var verdict);
             int onRows = found.Count(r => OrphanGlyphs.OnTextRow(r, rowWords, rowHeight));
-            if (found.Count > 0 && 2 * onRows < found.Count)
-                verdict = $"off the text rows: {onRows} of {found.Count}";
+            var medianRow = found.Select(r => r.Height).Order().ElementAtOrDefault(found.Count / 2);
+            if (found.Count > 0 && !TallStacks.BelongsToTable(onRows, found.Count, medianRow, rowHeight))
+                verdict = $"not a table's rows: {onRows} of {found.Count} on text rows, median row {medianRow:F0} px";
             if (_logger.IsEnabled(LogLevel.Debug))
             {
                 // What it had been read as, and the shape of its rows: evidence for telling a real

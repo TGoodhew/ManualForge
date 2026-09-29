@@ -189,6 +189,32 @@ tokens; the loss is mostly a column at the right edge of a page, which has no wo
 from drawings cost more than a missing check digit. On the 100 tables that is 34,067 of Acrobat's
 43,944 content tokens, from 32,194 before any of this.
 
+## Telling a stack from a word set sideways
+
+The row and gap tests still let some labels set sideways on drawings through: `CABLE`, read
+correctly on its side, was cut into rows and came back `CAAE`, and on a table page a sideways
+sentence - "96-pin female DIN connector (on the DIN-to-D cable)" - was cut into 28 rows. Each tall
+region's log line now records what it had been read as, how many of its rows sit on text rows,
+and how tall they are, and one run over both books settled it:
+
+- **Distinct letters do not separate them.** Real stacks often read short and varied - `A2`,
+  `N0664` - as often as they read `NNNNN`.
+- **Where the rows sit does.** 398 of 416 table stacks had every row beside a row of ordinary
+  text; nearly every wrong cut on typical pages had two or more rows off, or rows taller than a
+  line.
+
+A region is now cut only when every row lines up with a text row - one may miss in a column of
+four or more, which keeps garbage columns like `NNNOI` that fell one short - and its rows are no
+taller than 1.15 lines.
+
+| | tables: tokens read | tables: ours on no Acrobat token | typical: tokens read | typical: ours on no Acrobat token | typical regions cut |
+|---|---|---|---|---|---|
+| before | 34,067 | 5,583 | 17,555 | 11,167 | 41 |
+| **rows must belong to a table** | **34,050** | **5,568** | **17,555** | **11,143** | **20** |
+
+`CABLE` is back, the DIN sentence is whole, and what is still cut on typical pages is a parts list
+(page 69), a column of pin numbers (page 21) and two short digit columns.
+
 ## Two settings that stay as they are
 
 Both against the engine above, over both books:
@@ -213,9 +239,6 @@ Both against the engine above, over both books:
   the latter are Acrobat splitting a word we read whole (`1%`, `0±100`), which the metric scores
   as a miss.
 - **A table's right-hand column of single characters is not rescued**: nothing lies beyond it.
-- **Sideways labels on drawings are still sometimes cut as stacks** (`CABLE` read on its side,
-  then cut and read as `CAAE`). The both-sides test cannot guard the cut: a table's leftmost
-  designator column has no word to its left.
 - **Readings between 0.8 and 0.9 are dropped** - 46 of the misses, most of them right (`8` at
   0.82-0.89). Keeping them was tried and gains 5 tokens; not worth it.
 - **Schematic pin numbers** standing alone are mostly not rescued: the column test drops them with
