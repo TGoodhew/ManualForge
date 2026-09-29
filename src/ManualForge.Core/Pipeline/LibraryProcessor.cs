@@ -65,6 +65,13 @@ public sealed class LibraryOptions
     public bool RetrySkipped { get; init; }
 
     /// <summary>
+    /// Recognise every finished file again, from the untouched original kept in the originals tree,
+    /// replacing the searchable copy an earlier run made. The copy it replaces is kept under
+    /// <c>_superseded</c> in the originals tree rather than deleted.
+    /// </summary>
+    public bool ReadCompletedAgain { get; init; }
+
+    /// <summary>
     /// Recognise each distinct document once, copying the result to any byte-identical twins.
     /// On a library assembled over years this is not a marginal saving.
     /// </summary>
@@ -129,6 +136,12 @@ public sealed class LibraryProcessor(
         {
             var reset = store.ResetSkipped();
             _logger.LogInformation("Reconsidering {Count} previously skipped file(s)", reset);
+        }
+
+        if (options.ReadCompletedAgain)
+        {
+            var reopened = store.ReopenCompletedForReading();
+            _logger.LogInformation("Reading {Count} finished file(s) again from their originals", reopened);
         }
 
         var discovered = Discover(options).ToArray();
@@ -277,7 +290,7 @@ public sealed class LibraryProcessor(
         {
             var byKey = prefetched.ToDictionary(r => Path.GetFullPath(r.Path), StringComparer.OrdinalIgnoreCase);
             var jobs = prefetched
-                .Select(r => new RecognitionJob(r.Path, Path.GetFullPath(r.Path), r.PageCount))
+                .Select(r => new RecognitionJob(SourceFor(r), Path.GetFullPath(r.Path), r.PageCount))
                 .ToArray();
 
             var completed = Channel.CreateUnbounded<RecognitionJob>(new UnboundedChannelOptions
@@ -331,9 +344,17 @@ public sealed class LibraryProcessor(
     /// recognised from a flattened rebuild.
     /// </summary>
     private static bool CanRecogniseAhead(FileRecord record)
-        => record.Action == ClassAction.Ocr
+        => (record.Action == ClassAction.Ocr
+            || (record.Action == ClassAction.ReadAgain && record.OriginalPath is not null))
            && record.PageCount > 0
            && record.Blocker is ModificationBlocker.None or ModificationBlocker.Signature;
+
+    /// <summary>
+    /// The file whose pages are recognised: the library file, or for a file being read again, the
+    /// original it was made from - the library copy already carries the text layer being replaced.
+    /// </summary>
+    private static string SourceFor(FileRecord record)
+        => record.Action == ClassAction.ReadAgain ? record.OriginalPath! : record.Path;
 
     private FileOutcome ProcessOne(
         JobStore store, LibraryOptions options, FileRecord record, CancellationToken cancellationToken)
@@ -355,12 +376,21 @@ public sealed class LibraryProcessor(
             if (record.Action == ClassAction.CopyFromDuplicate)
                 return CopyFromPrimary(store, options, record, stopwatch);
 
-            var source = path;
+            // A file being read again is read from its original: the library copy already carries
+            // the text layer that is being replaced.
+            var readAgain = record.Action == ClassAction.ReadAgain;
+            var source = readAgain ? record.OriginalPath : path;
+            if (source is null || !File.Exists(source))
+            {
+                var reason = $"The original to read again from is not at {record.OriginalPath ?? "(none recorded)"}.";
+                store.SetStatus(path, FileStatus.Failed, reason);
+                return Outcome(record, FileStatus.Failed, 0, 0, false, stopwatch.Elapsed, reason);
+            }
 
             // Step 1: if the file refuses modification, rebuild it into one that does not. The
             // flattened copy is verified against the original's page geometry and image streams
             // before it is used for anything.
-            var capabilities = PdfInspector.Inspect(path);
+            var capabilities = PdfInspector.Inspect(source);
             if (capabilities.IsHopeless)
             {
                 store.SetStatus(path, FileStatus.Failed, $"Cannot be opened: {capabilities.Detail}");
@@ -388,7 +418,7 @@ public sealed class LibraryProcessor(
             if (capabilities.NeedsFlattening)
             {
                 var flattenedPath = Path.Combine(workingDirectory, "flattened.pdf");
-                var flattenResult = new PdfFlattener().Flatten(path, flattenedPath);
+                var flattenResult = new PdfFlattener().Flatten(source, flattenedPath);
                 if (!flattenResult.IsVerified)
                 {
                     var detail = string.Join(" ", flattenResult.Discrepancies.Take(3));
@@ -404,8 +434,10 @@ public sealed class LibraryProcessor(
             }
 
             // Step 2: if we are replacing an existing text layer, remove it first so that
-            // extraction does not return the old and the new interleaved.
-            if (record.Action == ClassAction.StripAndRedo)
+            // extraction does not return the old and the new interleaved. An original being read
+            // again was stripped the first time too, if it had a layer of its own.
+            if (record.Action == ClassAction.StripAndRedo
+                || (readAgain && TextLayerProbe.PagesWithText(source).Count > 0))
             {
                 var strippedPath = Path.Combine(workingDirectory, "stripped.pdf");
                 using (var document = PdfReader.Open(source, PdfDocumentOpenMode.Modify))
@@ -501,10 +533,24 @@ public sealed class LibraryProcessor(
 
             if (options.DryRun)
             {
-                store.SetStatus(path, FileStatus.Classified, null);
+                // A file being read again goes back to finished: a dry run changes nothing, and
+                // leaving it queued would have the next real run redo it unasked.
+                if (readAgain)
+                {
+                    store.SetAction(path, ClassAction.Ocr);
+                    store.SetStatus(path, FileStatus.Completed, null);
+                }
+                else
+                {
+                    store.SetStatus(path, FileStatus.Classified, null);
+                }
                 _logger.LogInformation("Dry run: {Path} would gain {Words} words", path, report.TotalWordsWritten);
                 return Outcome(record, FileStatus.Classified, report.TotalWordsWritten, worstDeviation, flattened, stopwatch.Elapsed, null);
             }
+
+            if (readAgain)
+                return ReplaceEarlierCopy(store, options, record, outputPath, report.TotalWordsWritten, worstDeviation,
+                    flattened, stopwatch, signatureInvalidated);
 
             // Step 5: move the original aside, then put the new file in its place. Both are moves
             // on the same volume, so each is atomic, and the original exists in exactly one place
@@ -572,6 +618,54 @@ public sealed class LibraryProcessor(
                 // A leftover temp directory is untidy, not dangerous.
             }
         }
+    }
+
+    /// <summary>
+    /// Puts a file read again in place of the searchable copy an earlier run made. The original is
+    /// already in the originals tree and stays there; the copy being replaced is moved under
+    /// <c>_superseded</c> beside it, not deleted, so a reading that turns out worse can be undone.
+    /// </summary>
+    private FileOutcome ReplaceEarlierCopy(
+        JobStore store, LibraryOptions options, FileRecord record, string outputPath, int words,
+        double worstDeviation, bool flattened, Stopwatch stopwatch, bool signatureInvalidated)
+    {
+        var path = record.Path;
+        var superseded = SupersededPathFor(options, path);
+        Directory.CreateDirectory(Path.GetDirectoryName(superseded)!);
+        File.Move(path, superseded, overwrite: true);
+
+        try
+        {
+            File.Move(outputPath, path, overwrite: false);
+        }
+        catch (Exception ex)
+        {
+            // Put the earlier copy back, so the library is never left without the file.
+            File.Move(superseded, path, overwrite: false);
+            _logger.LogError(ex, "Could not put the new reading of {Path} in place; the earlier copy is back", path);
+            store.SetStatus(path, FileStatus.Failed, $"Could not replace the earlier copy: {ex.Message}");
+            return Outcome(record, FileStatus.Failed, words, worstDeviation, flattened, stopwatch.Elapsed, ex.Message);
+        }
+
+        store.UpdateFingerprint(path);
+        store.SetAction(path, ClassAction.Ocr);
+        store.SetStatus(path, FileStatus.Completed);
+        _pageCache.Clear(path);
+
+        _logger.LogInformation(
+            "Read {Path} again: {Words} words, worst deviation {Deviation:F3} pt, earlier copy kept at {Superseded}",
+            path, words, worstDeviation, superseded);
+
+        return Outcome(record, FileStatus.Completed, words, worstDeviation, flattened, stopwatch.Elapsed, null,
+            signatureInvalidated);
+    }
+
+    /// <summary>Where the searchable copy a re-read replaces is kept: under the originals tree.</summary>
+    public static string SupersededPathFor(LibraryOptions options, string path)
+    {
+        var root = Path.GetFullPath(options.Root);
+        var relative = Path.GetRelativePath(root, Path.GetFullPath(path));
+        return Path.Combine(root, options.OriginalsFolderName, "_superseded", relative);
     }
 
     /// <summary>

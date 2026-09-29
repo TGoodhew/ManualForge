@@ -50,6 +50,13 @@ public enum ClassAction
     /// result rather than recognising the same pages twice.
     /// </summary>
     CopyFromDuplicate,
+
+    /// <summary>
+    /// Already processed once: recognise it again from the untouched original kept in the
+    /// originals tree, and replace the searchable copy made last time. For when the recogniser has
+    /// improved enough that what an earlier run wrote is worth writing again.
+    /// </summary>
+    ReadAgain,
 }
 
 public sealed class ClassifierOptions

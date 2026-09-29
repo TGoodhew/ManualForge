@@ -43,6 +43,17 @@ public sealed record RepairOptions
     /// <summary>Re-recognise pages that have already been repaired.</summary>
     public bool Force { get; init; }
 
+    /// <summary>
+    /// Re-recognise pages repaired before this moment, and leave alone those repaired since.
+    ///
+    /// <para>
+    /// <see cref="Force"/> re-reads everything every time, so a pass over the whole corpus - ten
+    /// hours - interrupted at the eighth starts again from nothing. Given the moment the pass began,
+    /// a restart skips every page it already did.
+    /// </para>
+    /// </summary>
+    public DateTimeOffset? RedoBefore { get; init; }
+
     /// <summary>Stop after this many documents. The audit's own ranking decides which.</summary>
     public int? Limit { get; init; }
 
@@ -120,6 +131,15 @@ public sealed class PageRepairer(IOcrEngine engine, ILogger<PageRepairer>? logge
     private readonly IOcrEngine _engine = engine ?? throw new ArgumentNullException(nameof(engine));
     private readonly ILogger _logger = (ILogger?)logger ?? NullLogger.Instance;
 
+    /// <summary>
+    /// Whether a flagged page is to be recognised: always if it has never been repaired; again if
+    /// asked to redo everything, or if its repair predates <see cref="RepairOptions.RedoBefore"/>.
+    /// </summary>
+    internal static bool ShouldRead(PageRepair? earlier, RepairOptions options) =>
+        earlier is null
+        || options.Force
+        || (options.RedoBefore is { } cutoff && earlier.RepairedUtc < cutoff);
+
     public async Task<RepairReport> RepairAsync(
         DoctorStore store,
         RepairOptions? options = null,
@@ -139,7 +159,7 @@ public sealed class PageRepairer(IOcrEngine engine, ILogger<PageRepairer>? logge
                 DocumentVerdict.ScannedGaps => options.IncludeScannedPages,
                 _ => false,
             })
-            .Where(d => options.Force || d.OutstandingPages > 0)
+            .Where(d => options.Force || options.RedoBefore is not null || d.OutstandingPages > 0)
             .Where(d => options.Paths.Count == 0
                         || options.Paths.Contains(d.Path, StringComparer.OrdinalIgnoreCase))
             .ToArray();
@@ -200,7 +220,7 @@ public sealed class PageRepairer(IOcrEngine engine, ILogger<PageRepairer>? logge
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                if (!options.Force && existing.ContainsKey(finding.PageNumber))
+                if (!ShouldRead(existing.GetValueOrDefault(finding.PageNumber), options))
                 {
                     alreadyDone++;
                     continue;

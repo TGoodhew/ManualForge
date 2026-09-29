@@ -682,9 +682,18 @@ internal static class RepairCommand
             MaximumDpi = arguments.GetInt("max-dpi") ?? new RepairOptions().MaximumDpi,
             MinimumConfidence = arguments.GetDouble("min-confidence") ?? new RepairOptions().MinimumConfidence,
             Force = arguments.Has("redo"),
+            RedoBefore = arguments.Get("redo-before") is { } before
+                ? DateTimeOffset.Parse(before, System.Globalization.CultureInfo.CurrentCulture)
+                : null,
             Limit = arguments.GetInt("limit"),
             IncludeFigurePages = !arguments.Has("worst-only"),
             IncludeScannedPages = arguments.Has("include-scans"),
+            // One path per line. The audit's worst-first order is the right default, and the wrong
+            // sample for timing a redo: it front-loads one kind of page.
+            Paths = arguments.Get("documents") is { } list
+                ? File.ReadLines(list).Select(l => l.Trim()).Where(l => l.Length > 0 && !l.StartsWith('#'))
+                    .Select(Path.GetFullPath).ToList()
+                : [],
         };
 
         Console.WriteLine($"Library  : {root}");
@@ -716,7 +725,7 @@ internal static class RepairCommand
 
         Console.WriteLine();
 
-        if (summary.OutstandingPages == 0 && !options.Force)
+        if (summary.OutstandingPages == 0 && !options.Force && options.RedoBefore is null)
         {
             Console.WriteLine("Every flagged page has already been recovered. --redo does them again.");
             return 0;

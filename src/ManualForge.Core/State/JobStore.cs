@@ -365,6 +365,45 @@ public sealed class JobStore : IDisposable
     }
 
     /// <summary>
+    /// Puts every finished file whose original was kept back in the queue, to be recognised again
+    /// from that original. Returns how many.
+    ///
+    /// <para>
+    /// A finished file is not wrong, but it is only as good as the recogniser that read it, and the
+    /// recogniser improves. Only files this library produced by recognition qualify: a copy taken
+    /// from a duplicate follows its primary, and a file with no original on record has nothing to be
+    /// read again from.
+    /// </para>
+    /// </summary>
+    public int ReopenCompletedForReading()
+    {
+        using var transaction = _connection.BeginTransaction();
+
+        using (var pages = _connection.CreateCommand())
+        {
+            pages.Transaction = transaction;
+            pages.CommandText =
+                "DELETE FROM pages WHERE path IN (SELECT path FROM files WHERE status = 'Completed' " +
+                "AND action IN ('Ocr', 'StripAndRedo') AND original_path IS NOT NULL)";
+            pages.ExecuteNonQuery();
+        }
+
+        int reopened;
+        using (var files = _connection.CreateCommand())
+        {
+            files.Transaction = transaction;
+            files.CommandText =
+                "UPDATE files SET status = 'Classified', action = 'ReadAgain', error = NULL, updated_utc = $u " +
+                "WHERE status = 'Completed' AND action IN ('Ocr', 'StripAndRedo') AND original_path IS NOT NULL";
+            files.Parameters.AddWithValue("$u", Now());
+            reopened = files.ExecuteNonQuery();
+        }
+
+        transaction.Commit();
+        return reopened;
+    }
+
+    /// <summary>
     /// Records the full content hash of a file, and, when it is a byte-for-byte copy of another,
     /// which file it duplicates.
     /// </summary>

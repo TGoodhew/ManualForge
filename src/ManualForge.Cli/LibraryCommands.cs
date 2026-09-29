@@ -211,6 +211,7 @@ internal static class RunCommand
             OriginalsFolderName = arguments.Get("originals") ?? "_Originals",
             RefuseSignedFiles = arguments.Has("refuse-signed"),
             RetrySkipped = arguments.Has("retry-skipped"),
+            ReadCompletedAgain = arguments.Has("redo-completed"),
             Deduplicate = !arguments.Has("no-dedup"),
         };
 

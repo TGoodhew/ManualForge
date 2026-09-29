@@ -162,6 +162,10 @@ internal sealed class CommandLine
               --limit <n>             Stop after n files (run only).
               --survey-only           Classify and report, then stop (run only).
               --retry-skipped         Reconsider files skipped by an earlier run.
+              --redo-completed        Recognise every finished file again from its kept original,
+                                      replacing the searchable copy an earlier run made. That copy
+                                      is kept under _superseded in the originals folder. With
+                                      --dry-run it times the work and changes nothing.
               --no-dedup              Recognise every copy separately instead of once per document.
               --refuse-signed         Skip digitally signed files. By default they are processed,
                                       which invalidates their signatures; every one is reported.
@@ -219,7 +223,11 @@ internal sealed class CommandLine
                                       readings, which is worth trying on material that reads
                                       as noise.
               --redo                  Re-recognise pages an earlier run already did.
+              --redo-before <time>    Re-recognise only pages repaired before <time>, e.g.
+                                      "2026-09-28 20:00". Unlike --redo it can be restarted with
+                                      the same time and carries on where it stopped.
               --limit <n>             Stop after n documents, worst first.
+              --documents <file>      Repair only the PDFs listed in <file>, one path per line.
               --worst-only            Skip documents the audit called merely figure-heavy.
               --include-scans         Also redo scanned pages whose existing OCR missed lettering.
                                       A different problem from the one the audit was built to find,

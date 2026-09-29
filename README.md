@@ -623,6 +623,43 @@ Two habits that make a before-and-after mean anything here:
 * **Measure on the full library.** The same code scores 33 of 33 on the development library and 27
   of 33 here. A figure from the smaller corpus will flatter a change by about six queries.
 
+## Reading the library again when the recogniser improves
+
+A finished file is only as good as the recogniser that read it. After the September 2026 changes -
+the orientation check, deskew off, the single-character rescue and stack splitting - everything this
+library recognised is worth reading again. It takes four steps, in this order:
+
+```
+manualforge run    <library> --redo-completed        # 93 files recognised end to end, from their originals
+manualforge doctor <library>                         # re-audit the files that just changed
+manualforge repair <library> --redo-before "<when step 3 starts>" --include-scans
+manualforge index  <library>
+```
+
+`--redo-completed` reads each finished file again from the untouched original in `_Originals`,
+verifies the result exactly as a first run does, and only then replaces the library copy; the copy
+it replaces is kept under `_Originals\_superseded\`, not deleted. With `--dry-run` it does the work
+and changes nothing, which is how the timing below was taken. The audit has to come after it,
+because repair refuses to attach text to a file that has changed since it was audited.
+
+`--redo-before` re-reads repaired pages whose repair is older than the time given. Unlike `--redo`
+it can be interrupted and restarted with the same time and will carry on where it stopped - the
+difference between losing a minute and losing a night.
+
+Timed on 28 September 2026 on seeded random samples, nothing in the library written:
+
+| step | pages | sampled at | estimate |
+|---|---|---|---|
+| `run --redo-completed` | 9,172 | 63 pages/min over 465 pages in 14 files, model load included | 2.4 h |
+| `repair` at 300 dpi | 4,819 | 48 pages/min over 59 pages | 1.7 h |
+| `repair` at 400 dpi | 5,294 | 28 pages/min over 100 pages | 3.2 h |
+| `repair` at 600 dpi | 10,649 | 33 pages/min over 149 pages | 5.4 h |
+| `doctor` and `index` | | minutes each | |
+
+About **13 hours** in all, most of it the repair. The repair samples are small - four documents at
+400 dpi, which came out slower than 600 - so read that part as plus or minus a fifth: 10½ to 15
+hours overall.
+
 ## Recognising each document once
 
 A collection assembled over years accumulates copies: a manual filed under two model numbers, a

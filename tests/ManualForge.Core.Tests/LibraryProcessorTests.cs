@@ -224,6 +224,92 @@ public class LibraryProcessorTests : IDisposable
         Assert.Contains("HEWLETT", ExtractText(path), StringComparison.Ordinal);
     }
 
+    // ---------------------------------------------------------------- reading a finished file again
+
+    private static FakeOcrEngine EngineReading(string word) =>
+        new(_ => [new RecognisedWord(word, new RectD(150, 200, 260, 31), 0.98)]);
+
+    [Fact]
+    public void AFinishedFileIsReadAgainFromItsOriginal()
+    {
+        var path = TestPdf.Scanned(InRoot("hp", "8340B.pdf"), pages: 2);
+        var original = InRoot("_Originals", "hp", "8340B.pdf");
+        var options = NewOptions();
+
+        var (first, _) = NewProcessor(EngineReading("HEWLETT"));
+        first.Survey(options);
+        first.Run(options);
+        var originalBytes = File.ReadAllBytes(original);
+
+        var redo = new LibraryOptions { Root = _root, ReadCompletedAgain = true };
+        var (second, engine) = NewProcessor(EngineReading("AGILENT"));
+        second.Survey(redo);
+        var outcome = Assert.Single(second.Run(redo));
+
+        Assert.Equal(FileStatus.Completed, outcome.Status);
+        Assert.Equal(2, engine.PagesRecognised);
+
+        // The library file carries the new reading, and only the new reading.
+        var text = ExtractText(path);
+        Assert.Contains("AGILENT", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("HEWLETT", text, StringComparison.Ordinal);
+
+        // The original is untouched and still where it was; the copy it replaced is kept.
+        Assert.Equal(originalBytes, File.ReadAllBytes(original));
+        var superseded = LibraryProcessor.SupersededPathFor(redo, path);
+        Assert.Contains("HEWLETT", ExtractText(superseded), StringComparison.Ordinal);
+
+        using var store = LibraryProcessor.OpenStore(redo);
+        var record = store.Find(path)!;
+        Assert.Equal(FileStatus.Completed, record.Status);
+        Assert.Equal(ClassAction.Ocr, record.Action);
+        Assert.Equal(original, record.OriginalPath);
+    }
+
+    [Fact]
+    public void ADryRunOfReadingAgainChangesNothingAndLeavesNothingQueued()
+    {
+        var path = TestPdf.Scanned(InRoot("scan.pdf"), pages: 1);
+        var options = NewOptions();
+
+        var (first, _) = NewProcessor(EngineReading("HEWLETT"));
+        first.Survey(options);
+        first.Run(options);
+        var before = File.ReadAllBytes(path);
+
+        var dryRedo = new LibraryOptions { Root = _root, ReadCompletedAgain = true, DryRun = true };
+        var (second, engine) = NewProcessor(EngineReading("AGILENT"));
+        second.Survey(dryRedo);
+        second.Run(dryRedo);
+
+        // It did the work - that is what a dry run is for, timing it - and kept none of it.
+        Assert.Equal(1, engine.PagesRecognised);
+        Assert.Equal(before, File.ReadAllBytes(path));
+        Assert.False(File.Exists(LibraryProcessor.SupersededPathFor(dryRedo, path)));
+
+        // And an ordinary run afterwards has nothing to do.
+        var (third, idle) = NewProcessor(EngineReading("NOTHING"));
+        third.Survey(options);
+        Assert.Empty(third.Run(options));
+        Assert.Equal(0, idle.PagesRecognised);
+    }
+
+    [Fact]
+    public void WithoutBeingAskedAFinishedFileIsNotReadAgain()
+    {
+        TestPdf.Scanned(InRoot("scan.pdf"), pages: 1);
+        var options = NewOptions();
+
+        var (first, _) = NewProcessor();
+        first.Survey(options);
+        first.Run(options);
+
+        var (second, engine) = NewProcessor();
+        second.Survey(options);
+        Assert.Empty(second.Run(options));
+        Assert.Equal(0, engine.PagesRecognised);
+    }
+
     [Fact]
     public void TheReplacementKeepsThePageCountAndTheScannedImage()
     {
