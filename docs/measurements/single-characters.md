@@ -189,6 +189,24 @@ tokens; the loss is mostly a column at the right edge of a page, which has no wo
 from drawings cost more than a missing check digit. On the 100 tables that is 34,067 of Acrobat's
 43,944 content tokens, from 32,194 before any of this.
 
+## Two settings that stay as they are
+
+Both against the engine above, over both books:
+
+| | tables: tokens read | tables: ours on no Acrobat token | typical: tokens read | typical: ours on no Acrobat token | seconds (tables / typical) |
+|---|---|---|---|---|---|
+| as shipped | 34,067 | 5,583 | 17,555 | 11,167 | 165 / 163 |
+| rescued reads kept from 0.8 | 34,072 | 5,584 | 17,563 | 11,174 | 162 / 157 |
+| denoise off | 34,039 | 5,652 | 17,666 | 11,642 | 151 / 155 |
+
+- **Keeping rescued readings from 0.8** changes 5 and 8 tokens. The 0.9 bar stays; it is now
+  `OcrEngineOptions.OrphanConfidence`, so it can be measured without a rebuild.
+- **Denoise off** is 7% faster, and on typical pages reads 111 more of Acrobat's tokens and 475
+  more that land on none of them; on tables it is slightly worse. Compared as text, it changes
+  which words come out right in both directions - on typical pages 4,436 token texts gained and
+  3,773 lost, each list a mix of right and wrong (`CAPACITOR-FXD`, `RESISTOA-THMR` gained;
+  `TRANSFORMER`, `RESI5TOR` lost). Not a clear improvement, so it stays on.
+
 ## What this does not settle
 
 - **77 singles are still under stacks; 674 still have nothing there.** About half of a sample of
@@ -199,7 +217,7 @@ from drawings cost more than a missing check digit. On the 100 tables that is 34
   then cut and read as `CAAE`). The both-sides test cannot guard the cut: a table's leftmost
   designator column has no word to its left.
 - **Readings between 0.8 and 0.9 are dropped** - 46 of the misses, most of them right (`8` at
-  0.82-0.89). Not tried lower.
+  0.82-0.89). Keeping them was tried and gains 5 tokens; not worth it.
 - **Schematic pin numbers** standing alone are mostly not rescued: the column test drops them with
   the drawing strokes they look like. Pin numbers that happen to line up are kept.
 - **Nothing already in the library is re-read** by this change.

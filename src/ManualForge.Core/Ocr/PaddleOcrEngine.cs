@@ -34,6 +34,7 @@ public sealed class PaddleOcrEngine : IOcrEngine
     private readonly bool _rescueOrphans;
     private readonly bool _splitStacks;
     private readonly double _dropScore;
+    private readonly double _orphanConfidence;
     private readonly RecognitionOptions _orphanOptions;
     private readonly IReadOnlyList<OcrLanguage> _languages;
     private readonly ILogger _logger;
@@ -91,6 +92,7 @@ public sealed class PaddleOcrEngine : IOcrEngine
         _rescueOrphans = options.RescueOrphanGlyphs;
         _splitStacks = options.SplitTallStacks;
         _dropScore = options.DropScore;
+        _orphanConfidence = options.OrphanConfidence;
 
         // One crop per candidate, already cut to the glyph or table row, so nothing here may turn,
         // pad or regroup it: a lone character gives the text-line classifier nothing to go on, and
@@ -117,7 +119,7 @@ public sealed class PaddleOcrEngine : IOcrEngine
             // Everything here changes what recognition returns, so it has to reach the page cache.
             $"server={options.UseServerModels};deskew={options.Deskew};denoise={options.Denoise};" +
             $"drop={options.DropScore};orientation={(options.VerifyPageOrientation ? "verified" : "trusted")};" +
-            $"orphans={(options.RescueOrphanGlyphs ? "rescued" : "left")};" +
+            $"orphans={(options.RescueOrphanGlyphs ? $"rescued@{options.OrphanConfidence}" : "left")};" +
             $"stacks={(options.SplitTallStacks ? "split" : "left")}");
 
         _logger.LogInformation(
@@ -225,7 +227,7 @@ public sealed class PaddleOcrEngine : IOcrEngine
         foreach (var (k, line) in await ReadCropsAsync(page, crops, cancellationToken).ConfigureAwait(false))
         {
             var text = line.Text.Trim();
-            if (!OrphanGlyphs.Keep(text, line.Confidence))
+            if (!OrphanGlyphs.Keep(text, line.Confidence, _orphanConfidence))
             {
                 _logger.LogDebug(
                     "Orphan at {Left:F0},{Top:F0} {Width:F0}x{Height:F0} px dropped: read '{Text}' at {Confidence:F2}",
@@ -288,9 +290,23 @@ public sealed class PaddleOcrEngine : IOcrEngine
             int onRows = found.Count(r => OrphanGlyphs.OnTextRow(r, rowWords, rowHeight));
             if (found.Count > 0 && 2 * onRows < found.Count)
                 verdict = $"off the text rows: {onRows} of {found.Count}";
-            _logger.LogDebug(
-                "Stack at {Left:F0},{Top:F0} {Width:F0}x{Height:F0} px, line {Line:F0} px: {Verdict}",
-                region.Left, region.Top, region.Width, region.Height, rowHeight, verdict);
+            if (_logger.IsEnabled(LogLevel.Debug))
+            {
+                // What it had been read as, and the shape of its rows: evidence for telling a real
+                // stack from a word set sideways, which both pass the tests above.
+                var inside = lines.SelectMany(l => l.Words).Where(w =>
+                {
+                    double cx = (w.BoxPx.Left + w.BoxPx.Right) / 2, cy = (w.BoxPx.Top + w.BoxPx.Bottom) / 2;
+                    return cx >= region.Left && cx <= region.Right && cy >= region.Top && cy <= region.Bottom;
+                }).ToList();
+                var rowHeights = found.Select(r => r.Height).Order().ToList();
+                _logger.LogDebug(
+                    "Stack at {Left:F0},{Top:F0} {Width:F0}x{Height:F0} px, line {Line:F0} px: {Verdict} | read '{Read}' at {Confidence:F2}; {OnRows} of {Rows} rows on text rows; median row {RowHeight:F0} px",
+                    region.Left, region.Top, region.Width, region.Height, rowHeight, verdict,
+                    string.Join(' ', inside.Select(w => w.Text)),
+                    inside.Count == 0 ? 0 : inside.Min(w => w.Confidence),
+                    onRows, found.Count, rowHeights.Count == 0 ? 0 : rowHeights[rowHeights.Count / 2]);
+            }
             if (verdict != "cut")
                 continue;
             rows.AddRange(found.Select(r => (r, cutRegions.Count)));

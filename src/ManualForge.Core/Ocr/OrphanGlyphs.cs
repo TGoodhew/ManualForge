@@ -46,7 +46,10 @@ public static class OrphanGlyphs
     /// </summary>
     public const double MinimumWidthFraction = 0.8;
 
-    /// <summary>The recogniser's score a rescued reading must reach to be kept.</summary>
+    /// <summary>
+    /// The recogniser's score a rescued reading must reach to be kept, unless the engine is told
+    /// otherwise (<see cref="OcrEngineOptions.OrphanConfidence"/>).
+    /// </summary>
     public const double MinimumConfidence = 0.9;
 
     /// <summary>
@@ -145,10 +148,10 @@ public static class OrphanGlyphs
     }
 
     /// <summary>Whether a rescued reading is worth keeping: confident, and letters or digits only.</summary>
-    public static bool Keep(string text, double confidence)
+    public static bool Keep(string text, double confidence, double minimum = MinimumConfidence)
     {
         var trimmed = text.Trim();
-        return confidence >= MinimumConfidence && trimmed.Length > 0 && trimmed.All(char.IsLetterOrDigit);
+        return confidence >= minimum && trimmed.Length > 0 && trimmed.All(char.IsLetterOrDigit);
     }
 
     /// <summary>Bounding boxes of the 8-connected runs of ink.</summary>

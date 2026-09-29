@@ -135,6 +135,13 @@ public sealed class OcrEngineOptions
     public bool SplitTallStacks { get; init; } = true;
 
     /// <summary>
+    /// The score a rescued lone character must reach to be kept (see <see cref="RescueOrphanGlyphs"/>).
+    /// A lone glyph read from a tight crop mostly scores 0.95 or more when it is right; below 0.9 the
+    /// readings are a mix of right answers and drawing symbols.
+    /// </summary>
+    public double OrphanConfidence { get; init; } = OrphanGlyphs.MinimumConfidence;
+
+    /// <summary>
     /// Cap on the threads ONNX Runtime uses for a single operator. Null leaves it to the runtime,
     /// which takes every core.
     ///
