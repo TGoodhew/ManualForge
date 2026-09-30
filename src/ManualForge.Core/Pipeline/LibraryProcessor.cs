@@ -140,6 +140,10 @@ public sealed class LibraryProcessor(
 
         if (options.ReadCompletedAgain)
         {
+            var relinked = RelinkLostOriginals(store, options, cancellationToken);
+            if (relinked > 0)
+                _logger.LogInformation("Relinked {Count} finished file(s) to originals their records had lost", relinked);
+
             var reopened = store.ReopenCompletedForReading();
             _logger.LogInformation("Reading {Count} finished file(s) again from their originals", reopened);
         }
@@ -180,6 +184,63 @@ public sealed class LibraryProcessor(
             DeduplicateOutstanding(store, cancellationToken);
 
         return store.All();
+    }
+
+    /// <summary>
+    /// Finds library files whose record no longer says where their original is, although the
+    /// original is plainly there in the originals tree, and records them as finished again so they
+    /// can be read again from it. Returns how many.
+    ///
+    /// <para>
+    /// A record loses that history when its file is reset as changed. Before 30 September 2026 a
+    /// changed modification time alone was enough, and a restore from backup reset every finished
+    /// file in the library that way. The originals were all kept; only the link was gone.
+    /// </para>
+    ///
+    /// <para>
+    /// An original counts only if it sits where this library would have put it, has the same number
+    /// of pages as the library file, and is not the same bytes - a searchable copy always differs
+    /// from what it was made from. Files that are finished, in flight or failed are left alone.
+    /// </para>
+    /// </summary>
+    private int RelinkLostOriginals(JobStore store, LibraryOptions options, CancellationToken cancellationToken)
+    {
+        var relinked = 0;
+
+        foreach (var record in store.All())
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (record.OriginalPath is not null
+                || record.Status is not (FileStatus.Skipped or FileStatus.Classified or FileStatus.Discovered)
+                || !File.Exists(record.Path))
+                continue;
+
+            var original = OriginalsPathFor(options, record.Path);
+            if (!File.Exists(original))
+                continue;
+
+            var kept = FileFingerprint.Of(original);
+            var current = FileFingerprint.Of(record.Path);
+            if (kept.SizeBytes == current.SizeBytes && kept.ContentHash == current.ContentHash)
+                continue;
+
+            var originalPages = PdfInspector.Inspect(original);
+            var libraryPages = PdfInspector.Inspect(record.Path);
+            if (originalPages.IsHopeless || libraryPages.IsHopeless
+                || originalPages.PageCount != libraryPages.PageCount)
+            {
+                _logger.LogWarning(
+                    "{Path} has a file at {Original} in the originals tree, but not one it could have been made from; left alone",
+                    record.Path, original);
+                continue;
+            }
+
+            store.RelinkOriginal(record.Path, original);
+            relinked++;
+        }
+
+        return relinked;
     }
 
     /// <summary>

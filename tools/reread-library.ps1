@@ -44,7 +44,7 @@ $ErrorActionPreference = 'Stop'
 
 # Minutes per step, from the timed samples in the README. Only used to say when it should finish.
 $steps = @(
-    [pscustomobject]@{ Name = 'redo';   Title = 'Read the 93 finished files again from their originals'; Minutes = 145 }
+    [pscustomobject]@{ Name = 'redo';   Title = 'Read every finished file again from its original';      Minutes = 350 }
     [pscustomobject]@{ Name = 'doctor'; Title = 'Re-audit the files that changed';                     Minutes = 5 }
     [pscustomobject]@{ Name = 'repair'; Title = 'Read every repaired page again';                      Minutes = 620 }
     [pscustomobject]@{ Name = 'index';  Title = 'Rebuild the search index';                            Minutes = 10 }
@@ -150,7 +150,7 @@ $timings = [ordered]@{}
 $partial = [System.Collections.Generic.List[string]]::new()
 
 # manualforge exits 1 both when a command crashed and when it finished with some files or pages
-# failed - one bad PDF in 93. Only a crash prints an "error: " line, and only a crash stops the
+# failed - one bad PDF in a hundred. Only a crash prints an "error: " line, and only a crash stops the
 # night; a partial failure is reported at the end and the rest carries on. 130 is Ctrl+C, 2 a
 # mistyped command.
 function Invoke-Step([string] $name, [string[]] $arguments) {

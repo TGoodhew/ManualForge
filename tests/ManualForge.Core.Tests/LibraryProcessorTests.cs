@@ -266,6 +266,73 @@ public class LibraryProcessorTests : IDisposable
         Assert.Equal(original, record.OriginalPath);
     }
 
+    /// <summary>What a reset left behind: a finished file recorded as skipped, with no original.</summary>
+    private void ForgetOriginal(string path)
+    {
+        using var store = LibraryProcessor.OpenStore(NewOptions());
+        store.SetPaths(path, null, null);
+        store.SetAction(path, ClassAction.Skip);
+        store.SetStatus(path, FileStatus.Skipped);
+    }
+
+    [Fact]
+    public void AFinishedFileWhoseRecordLostItsOriginalIsStillReadAgain()
+    {
+        // A restore from backup changed every file's modification time, which then counted as a
+        // change: 93 finished files were reset, reclassified as carrying text, and skipped, and the
+        // redo that followed read none of them. Their originals were all still kept.
+        var path = TestPdf.Scanned(InRoot("hp", "8340B.pdf"), pages: 2);
+        var original = InRoot("_Originals", "hp", "8340B.pdf");
+        var options = NewOptions();
+
+        var (first, _) = NewProcessor(EngineReading("HEWLETT"));
+        first.Survey(options);
+        first.Run(options);
+        ForgetOriginal(path);
+
+        var redo = new LibraryOptions { Root = _root, ReadCompletedAgain = true };
+        var (second, engine) = NewProcessor(EngineReading("AGILENT"));
+        second.Survey(redo);
+        var outcome = Assert.Single(second.Run(redo));
+
+        Assert.Equal(FileStatus.Completed, outcome.Status);
+        Assert.Equal(2, engine.PagesRecognised);
+        Assert.Contains("AGILENT", ExtractText(path), StringComparison.Ordinal);
+        Assert.Contains("HEWLETT", ExtractText(LibraryProcessor.SupersededPathFor(redo, path)), StringComparison.Ordinal);
+
+        using var store = LibraryProcessor.OpenStore(redo);
+        Assert.Equal(original, store.Find(path)!.OriginalPath);
+    }
+
+    [Fact]
+    public void AFileInTheOriginalsTreeThatCannotBeTheOriginalIsNotRelinked()
+    {
+        var path = TestPdf.Scanned(InRoot("scan.pdf"), pages: 2);
+        var options = NewOptions();
+
+        var (first, _) = NewProcessor(EngineReading("HEWLETT"));
+        first.Survey(options);
+        first.Run(options);
+        ForgetOriginal(path);
+
+        // Something else is at the original's path now: a different document, with more pages.
+        var original = InRoot("_Originals", "scan.pdf");
+        File.Delete(original);
+        TestPdf.Scanned(original, pages: 3);
+        var before = File.ReadAllBytes(path);
+
+        var redo = new LibraryOptions { Root = _root, ReadCompletedAgain = true };
+        var (second, engine) = NewProcessor(EngineReading("AGILENT"));
+        second.Survey(redo);
+
+        Assert.Empty(second.Run(redo));
+        Assert.Equal(0, engine.PagesRecognised);
+        Assert.Equal(before, File.ReadAllBytes(path));
+
+        using var store = LibraryProcessor.OpenStore(redo);
+        Assert.Null(store.Find(path)!.OriginalPath);
+    }
+
     [Fact]
     public void ADryRunOfReadingAgainChangesNothingAndLeavesNothingQueued()
     {

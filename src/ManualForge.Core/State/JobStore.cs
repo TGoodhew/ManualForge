@@ -222,6 +222,17 @@ public sealed class JobStore : IDisposable
             if (existing.Fingerprint == fingerprint)
                 return existing;
 
+            // Same size and same bytes at both ends, but a different modification time: the file
+            // was copied or restored, not changed. The time is only a hint - a restore from backup
+            // on 17 September 2026 rounded every file's time to the whole second, and treating that
+            // as a change reset 93 finished files and forgot where their originals were kept.
+            if (existing.Fingerprint.SizeBytes == fingerprint.SizeBytes
+                && existing.Fingerprint.ContentHash == fingerprint.ContentHash)
+            {
+                UpdateFingerprint(full);
+                return Find(full)!;
+            }
+
             // The source changed since we last saw it. Anything recorded about it is now stale.
             ClearPages(full);
             Upsert(full, FileStatus.Discovered, fingerprint, 0, TextClass.Unreadable, 0, 0, 0,
@@ -362,6 +373,23 @@ public sealed class JobStore : IDisposable
             "WHERE status = 'Skipped'";
         command.Parameters.AddWithValue("$u", Now());
         return command.ExecuteNonQuery();
+    }
+
+    /// <summary>
+    /// Records that the file at <paramref name="path"/> is a finished searchable copy made from
+    /// <paramref name="originalPath"/>, for a record that has lost that history. The file is not
+    /// touched; only what the store believes about it changes.
+    /// </summary>
+    public void RelinkOriginal(string path, string originalPath)
+    {
+        using var command = _connection.CreateCommand();
+        command.CommandText =
+            "UPDATE files SET status = 'Completed', action = 'Ocr', output_path = $p, original_path = $r, " +
+            "error = NULL, updated_utc = $u WHERE path = $p";
+        command.Parameters.AddWithValue("$p", Path.GetFullPath(path));
+        command.Parameters.AddWithValue("$r", Path.GetFullPath(originalPath));
+        command.Parameters.AddWithValue("$u", Now());
+        command.ExecuteNonQuery();
     }
 
     /// <summary>

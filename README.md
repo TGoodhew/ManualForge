@@ -630,14 +630,14 @@ the orientation check, deskew off, the single-character rescue and stack splitti
 library recognised is worth reading again. It takes four steps, in this order:
 
 ```
-manualforge run    <library> --redo-completed        # 93 files recognised end to end, from their originals
+manualforge run    <library> --redo-completed        # every file recognised end to end, from its original
 manualforge doctor <library>                         # re-audit the files that just changed
 manualforge repair <library> --redo-before "<when step 3 starts>" --include-scans
 manualforge index  <library>
 ```
 
 `tools/reread-library.ps1` runs all four unattended - start it at bedtime. It keeps the PC from
-sleeping while it works, stops only if a step crashes (one failed file in 93 is reported, not
+sleeping while it works, stops only if a step crashes (one failed file in a hundred is reported, not
 fatal), logs to `%LOCALAPPDATA%\ManualForge\reread`, and can be started again after any
 interruption: progress is kept in `_Originals\reread-progress.json`, so finished steps are not
 repeated and the repair keeps the cutoff it first chose. `-Plan` shows what it would do and when
@@ -648,6 +648,13 @@ verifies the result exactly as a first run does, and only then replaces the libr
 it replaces is kept under `_Originals\_superseded\`, not deleted. With `--dry-run` it does the work
 and changes nothing, which is how the timing below was taken. The audit has to come after it,
 because repair refuses to attach text to a file that has changed since it was audited.
+
+A finished file whose record has lost track of its original - moved, renamed, or reset by an older
+build that took a copied file's new modification time for a change - is found again first: if
+`_Originals` holds a file at the mirrored path with the same page count and different bytes, the
+record is relinked to it and the file is read again with the rest. On 30 September 2026 that was
+164 files, 21,909 pages, where the first pass on the 29th reached none: a restore from backup had
+rounded every file's time to the whole second, and every finished record had been reset.
 
 `--redo-before` re-reads repaired pages whose repair is older than the time given. Unlike `--redo`
 it can be interrupted and restarted with the same time and will carry on where it stopped - the

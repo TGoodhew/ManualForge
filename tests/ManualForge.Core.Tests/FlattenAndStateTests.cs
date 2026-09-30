@@ -556,6 +556,38 @@ public class JobStoreTests : IDisposable
     }
 
     [Fact]
+    public void AFileWhoseTimeChangedButNotItsBytesKeepsItsRecord()
+    {
+        // A restore from backup rounded every file's modification time to the whole second. The
+        // files were the same, but each finished one was reset, reclassified as already carrying
+        // text, and skipped - and with the reset went the path of the original it came from.
+        var file = MakeFile("restored.pdf", "the searchable version");
+        using var store = NewStore();
+
+        store.Register(file);
+        store.RecordClassification(file, Classification(file), Capabilities(file), ClassAction.Ocr);
+        store.SetPaths(file, file, Path.Combine(_directory, "_Originals", "restored.pdf"));
+        store.SetStatus(file, FileStatus.Completed);
+        store.RecordPage(file, 1, PageStatus.Completed);
+
+        var written = File.GetLastWriteTimeUtc(file);
+        var rounded = new DateTime(written.Ticks - written.Ticks % TimeSpan.TicksPerSecond, DateTimeKind.Utc);
+        if (rounded == written)
+            rounded = rounded.AddSeconds(-1);
+        File.SetLastWriteTimeUtc(file, rounded);
+
+        var record = store.Register(file);
+
+        Assert.Equal(FileStatus.Completed, record.Status);
+        Assert.Equal(ClassAction.Ocr, record.Action);
+        Assert.Equal(Path.Combine(_directory, "_Originals", "restored.pdf"), record.OriginalPath);
+        Assert.Single(store.CompletedPages(file));
+
+        // And the new time is recorded, so the next run matches it outright.
+        Assert.Equal(rounded.Ticks, record.Fingerprint.ModifiedTicks);
+    }
+
+    [Fact]
     public void AnUnchangedFileKeepsItsProgress()
     {
         var file = MakeFile("g.pdf");
