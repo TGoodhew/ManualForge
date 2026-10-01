@@ -1215,7 +1215,8 @@ Two things it is worth knowing before reading any number this produces:
 
 The order of operations is the guarantee:
 
-0. Refuse outright if the pages already carry text. See below — this is the one that was missing.
+0. Refuse outright if the pages already carry a hidden text layer. See below — this is the one that
+   was missing.
 1. OCR into a temporary file. Nothing in the library has been touched.
 2. Verify: opens cleanly, page count matches, text layer is non-empty, word alignment measured.
 3. Only then move the original into `_Originals`, mirroring the source tree.
@@ -1249,10 +1250,32 @@ Three files were damaged exactly that way during development, because the classi
 could not decode as no text at all. All three were restored from their preserved originals, which is
 what keeping originals is for — and the run summary would have said nothing was wrong.
 
-Two things now prevent it. The classifier tells a text layer it cannot read apart from no text
-layer, as above. And independently of any classification, the processor probes whatever it is about
-to recognise and refuses the file if a sampled page draws a single glyph. That second check runs
-*after* stripping, so it also catches a strip that silently left a page alone.
+Three things now prevent it. The classifier tells a text layer it cannot read apart from no text
+layer, as above. Independently of any classification, the processor probes whatever it is about
+to recognise and refuses the file if a sampled page draws a single hidden glyph (render mode 3,
+spaces included). That check runs *after* stripping, so it also catches a strip that left a page
+alone. And the writer leaves out every recognised word that would land on text the page already
+shows.
+
+**Visible text is ink, not a text layer, and it stays.** Sellers stamp `www.valuetronics.com` on
+every page, Acrobat adds headers from shared form XObjects, and some scans arrive with a contents
+page typeset over the image. Until 1 October 2026 stripping removed every `BT`/`ET` block whatever
+it drew, and the probe refused any glyph at all. The 30 September re-read stripped five originals
+that way: the contents page and running header of `461A Mil Manual`, the stamp on every page of
+`11721A Operating & Service` and `8757 User`, the title footer of `HP419Mod`, and labels on eight
+pages of the 1966 HP 419A manual - the last because PDFsharp's content parser, asked to write back
+what it read, changed how ten pages carrying inline images render. Now:
+
+* Stripping removes only text drawn in render mode 3, in the page and in every form it draws, and
+  cuts the bytes rather than re-serialising them, so inline images and everything else come
+  through untouched. A hidden string inside a block with visible text goes only where the next
+  string is positioned afresh, so nothing visible moves. Text state a removed block set is kept
+  for whatever comes after it.
+* The probe refuses hidden text only. Visible text is recognised around: a recognised word whose
+  box holds the middle of an existing letter is left out, and the run's warnings count them.
+
+On the six originals concerned, every page renders identically before and after stripping, every
+visible letter survives, and HP 419A's 28,590 hidden letters - all spaces - are gone.
 
 ## How the text layer is built
 
@@ -1294,7 +1317,9 @@ src/ManualForge.Core/
   Classification/                 text-quality metrics, classifier, per-class policy
   Pdf/PdfCapabilities.cs          what blocks modification, detected up front
   Pdf/PdfFlattener.cs             lossless rebuild plus before/after verification
-  Pdf/TextLayerStripper.cs        removes an existing text layer for strip-and-redo
+  Pdf/TextLayerStripper.cs        removes an existing hidden text layer for strip-and-redo
+  Pdf/ContentStreamLexer.cs       finds instructions' byte ranges, so edits cut rather than rewrite
+  Text/ExistingText.cs            where a page already shows text, so new words go around it
   State/JobStore.cs               SQLite per-file and per-page progress
   Pipeline/LibraryProcessor.cs    classify, flatten, OCR, verify, replace
   Pipeline/RecognitionPipeline.cs Channels: rasterise and recognise ahead of assembly
@@ -1356,6 +1381,9 @@ dotnet test
 - **`FlattenTests`** - an owner-password document is detected, flattened, and comes out
   modifiable with page count, geometry, rotation and every image stream unchanged. Stripping
   removes text and leaves images alone.
+- **`TextLayerStripperTests`** - only hidden text goes: printed text, stamps in shared forms, text
+  that inherits a removed block's font, and inline image bytes all survive, and every page renders
+  the same before and after.
 - **`JobStoreTests`** - resume, idempotency, and a changed source resetting its own progress.
 - **`RecognitionPipelineTests`** - the invariants rather than the plumbing: every page reaches the
   cache, cached pages are not redone, a document is announced only once its last page is genuinely

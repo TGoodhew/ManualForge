@@ -1,12 +1,14 @@
 using UglyToad.PdfPig;
+using UglyToad.PdfPig.Content;
+using UglyToad.PdfPig.Core;
 
 namespace ManualForge.Core.Classification;
 
 /// <summary>
 /// Asks, structurally, whether a document's pages already draw text.
 ///
-/// This is the check that guards the one thing the OCR path must never do: add a text layer to a
-/// page that already has one. Two layers do not merge — an extractor sorts them together by
+/// This is the check that guards the one thing the OCR path must never do: add a hidden text layer
+/// to a page that already has one. Two layers do not merge — an extractor sorts them together by
 /// position and returns them interleaved character by character, so "Broadband" comes back as
 /// "BBrrooaaddbbaanndd" and the document is less searchable than before it was touched.
 ///
@@ -27,6 +29,18 @@ public static class TextLayerProbe
     /// sampled is one whose text layer is nearly absent anyway.
     /// </param>
     public static IReadOnlyList<int> PagesWithText(string path, int samplePages = 8)
+        => PagesWhere(path, samplePages, _ => true);
+
+    /// <summary>
+    /// Sampled pages, 1-based, that draw text nobody can see - an OCR layer. Empty means a new layer
+    /// can be written: any visible text is ink, which the writer works around word by word, while a
+    /// hidden layer left in place would be a second copy of what the new one says.
+    /// </summary>
+    public static IReadOnlyList<int> PagesWithHiddenText(string path, int samplePages = 8)
+        => PagesWhere(path, samplePages, letter =>
+            letter.RenderingMode is TextRenderingMode.Neither or TextRenderingMode.NeitherClip);
+
+    private static IReadOnlyList<int> PagesWhere(string path, int samplePages, Func<Letter, bool> counts)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
 
@@ -39,7 +53,7 @@ public static class TextLayerProbe
             {
                 try
                 {
-                    if (document.GetPage(pageNumber).Letters.Count > 0)
+                    if (document.GetPage(pageNumber).Letters.Any(counts))
                         found.Add(pageNumber);
                 }
                 catch (Exception)

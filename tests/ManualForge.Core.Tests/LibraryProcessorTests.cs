@@ -276,6 +276,37 @@ public class LibraryProcessorTests : IDisposable
     }
 
     [Fact]
+    public void AFinishedFileThatFailedAfterBeingMovedIsReadAgainFromItsOriginal()
+    {
+        // Two SME manuals were finished in _OCR_QUEUE and then moved. Their records came back as
+        // new files, our own text layer on them was refused as somebody else's, and they sat as
+        // failed while their originals waited at the mirrored path.
+        var path = TestPdf.Scanned(InRoot("hp", "8340B.pdf"), pages: 2);
+        var options = NewOptions();
+
+        var (first, _) = NewProcessor(EngineReading("HEWLETT"));
+        first.Survey(options);
+        first.Run(options);
+
+        using (var store = LibraryProcessor.OpenStore(options))
+        {
+            store.SetPaths(path, null, null);
+            store.SetAction(path, ClassAction.Ocr);
+            store.SetStatus(path, FileStatus.Failed, "Pages 1, 2 already carry a hidden text layer.");
+        }
+
+        var redo = new LibraryOptions { Root = _root, ReadCompletedAgain = true };
+        var (second, engine) = NewProcessor(EngineReading("AGILENT"));
+        second.Survey(redo);
+        var outcome = Assert.Single(second.Run(redo));
+
+        Assert.Equal(FileStatus.Completed, outcome.Status);
+        Assert.Equal(2, engine.PagesRecognised);
+        Assert.Contains("AGILENT", ExtractText(path), StringComparison.Ordinal);
+        Assert.DoesNotContain("HEWLETT", ExtractText(path), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void AFinishedFileWhoseRecordLostItsOriginalIsStillReadAgain()
     {
         // A restore from backup changed every file's modification time, which then counted as a
@@ -597,7 +628,7 @@ public class LibraryProcessorTests : IDisposable
     [Fact]
     public void AnExistingTextLayerIsRemovedBeforeTheNewOneIsWritten()
     {
-        var path = TestPdf.ScannedWithText(InRoot("oldocr.pdf"), "Thc oId 0CR rcsu1t", pages: 1);
+        var path = TestPdf.ScannedWithText(InRoot("oldocr.pdf"), "Thc oId 0CR rcsu1t", pages: 1, hidden: true);
         Assert.Contains("Thc", ExtractText(path), StringComparison.Ordinal);
 
         var options = NewOptions(PolicyOf(ClassAction.StripAndRedo));
@@ -907,7 +938,7 @@ public class LibraryProcessorTests : IDisposable
         // already there. Two layers do not merge - an extractor sorts them together by position
         // and returns them interleaved character by character, and "Broadband" comes back as
         // "BBrrooaaddbbaanndd".
-        var path = TestPdf.ScannedWithText(InRoot("hastext.pdf"), "Broadband Frequency Response", pages: 2);
+        var path = TestPdf.ScannedWithText(InRoot("hastext.pdf"), "Broadband Frequency Response", pages: 2, hidden: true);
         var before = File.ReadAllBytes(path);
 
         // Ocr, not StripAndRedo: the mistake being guarded against.
@@ -917,7 +948,7 @@ public class LibraryProcessorTests : IDisposable
         var outcome = Assert.Single(processor.Run(options));
 
         Assert.Equal(FileStatus.Failed, outcome.Status);
-        Assert.Contains("already carry a text layer", outcome.Error!, StringComparison.Ordinal);
+        Assert.Contains("already carry a hidden text layer", outcome.Error!, StringComparison.Ordinal);
         Assert.Equal(0, engine.PagesRecognised);
 
         Assert.Equal(before, File.ReadAllBytes(path));
@@ -927,7 +958,7 @@ public class LibraryProcessorTests : IDisposable
     [Fact]
     public void StrippingFirstMakesTheSameFileSafeToProcess()
     {
-        var path = TestPdf.ScannedWithText(InRoot("hastext.pdf"), "Broadband Frequency Response", pages: 2);
+        var path = TestPdf.ScannedWithText(InRoot("hastext.pdf"), "Broadband Frequency Response", pages: 2, hidden: true);
 
         var options = NewOptions(PolicyOf(ClassAction.StripAndRedo));
         var (processor, _) = NewProcessor();
@@ -939,6 +970,73 @@ public class LibraryProcessorTests : IDisposable
         var text = ExtractText(path);
         Assert.Contains("HEWLETT", text, StringComparison.Ordinal);
         Assert.DoesNotContain("Broadband", text, StringComparison.Ordinal);
+    }
+
+    /// <summary>The letters a reader sees on a page, in drawing order.</summary>
+    private static string VisibleLetters(string path, int page = 1)
+    {
+        using var document = UglyToad.PdfPig.PdfDocument.Open(path);
+        return string.Concat(document.GetPage(page).Letters
+            .Where(l => l.RenderingMode is not (UglyToad.PdfPig.Core.TextRenderingMode.Neither
+                or UglyToad.PdfPig.Core.TextRenderingMode.NeitherClip))
+            .Select(l => l.Value));
+    }
+
+    [Fact]
+    public void PrintedTextIsKeptAndTheNewLayerWrittenAroundIt()
+    {
+        // A seller's stamp, an Acrobat header, a contents page typeset over the scan: ink, not a
+        // text layer. The page is recognised; what the recogniser reads of the printed words is
+        // left out rather than layered over them, and everything else is written.
+        var path = TestPdf.ScannedWithText(InRoot("stamped.pdf"), "Broadband Frequency Response", pages: 2);
+
+        // "Broadband" boxed where the printed word is - 72 pt from the left, its baseline 700 pt
+        // up, at 150 dpi - and a word of the scan's own well clear of it.
+        var engine = new FakeOcrEngine(_ =>
+        [
+            new RecognisedWord("Broadband", new RectD(150, 172, 110, 24), 0.98),
+            new RecognisedWord("HEWLETT", new RectD(150, 400, 260, 31), 0.98),
+        ]);
+
+        var options = NewOptions(PolicyOf(ClassAction.Ocr));
+        var (processor, _) = NewProcessor(engine);
+        processor.Survey(options);
+        var outcome = Assert.Single(processor.Run(options));
+
+        Assert.Equal(FileStatus.Completed, outcome.Status);
+
+        var words = ExtractText(path).Split(' ');
+        Assert.Equal(2, words.Count(w => w == "Broadband"));
+        Assert.Equal(2, words.Count(w => w == "HEWLETT"));
+        Assert.DoesNotContain(words, w => w.Contains("BB", StringComparison.Ordinal));
+        Assert.Equal("BroadbandFrequencyResponse", VisibleLetters(path).Replace(" ", ""));
+    }
+
+    [Fact]
+    public void PrintedTextOnTheOriginalSurvivesBeingReadAgain()
+    {
+        // 11721A and 8757 carry www.valuetronics.com on every page. The 30 September re-read
+        // stripped it from both along with everything else in a text block.
+        var path = TestPdf.ScannedWithText(InRoot("hp", "11721A.pdf"), "www.valuetronics.com", pages: 2);
+        var options = NewOptions(PolicyOf(ClassAction.Ocr));
+
+        var (first, _) = NewProcessor(EngineReading("HEWLETT"));
+        first.Survey(options);
+        Assert.Equal(FileStatus.Completed, Assert.Single(first.Run(options)).Status);
+
+        var redo = new LibraryOptions { Root = _root, ReadCompletedAgain = true };
+        var (second, engine) = NewProcessor(EngineReading("AGILENT"));
+        second.Survey(redo);
+        var outcome = Assert.Single(second.Run(redo));
+
+        Assert.Equal(FileStatus.Completed, outcome.Status);
+        Assert.Equal(2, engine.PagesRecognised);
+
+        var text = ExtractText(path);
+        Assert.Contains("AGILENT", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("HEWLETT", text, StringComparison.Ordinal);
+        Assert.Equal("www.valuetronics.com", VisibleLetters(path, 1));
+        Assert.Equal("www.valuetronics.com", VisibleLetters(path, 2));
     }
 
     // ---------------------------------------------------------------- records for files that have gone

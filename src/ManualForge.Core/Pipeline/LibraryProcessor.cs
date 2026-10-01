@@ -200,7 +200,14 @@ public sealed class LibraryProcessor(
     /// <para>
     /// An original counts only if it sits where this library would have put it, has the same number
     /// of pages as the library file, and is not the same bytes - a searchable copy always differs
-    /// from what it was made from. Files that are finished, in flight or failed are left alone.
+    /// from what it was made from. Files that are finished or in flight are left alone.
+    /// </para>
+    ///
+    /// <para>
+    /// A failed file counts too. A finished file moved to another folder comes back as new, and our
+    /// own text layer on it is then refused as somebody else's: two SME manuals failed that way on
+    /// 30 September. A file that failed on its own account has no original kept, or one with the
+    /// same bytes, so it is passed over.
     /// </para>
     /// </summary>
     private int RelinkLostOriginals(JobStore store, LibraryOptions options, CancellationToken cancellationToken)
@@ -212,7 +219,8 @@ public sealed class LibraryProcessor(
             cancellationToken.ThrowIfCancellationRequested();
 
             if (record.OriginalPath is not null
-                || record.Status is not (FileStatus.Skipped or FileStatus.Classified or FileStatus.Discovered)
+                || record.Status is not (FileStatus.Skipped or FileStatus.Classified or FileStatus.Discovered
+                    or FileStatus.Failed)
                 || !File.Exists(record.Path))
                 continue;
 
@@ -496,7 +504,9 @@ public sealed class LibraryProcessor(
 
             // Step 2: if we are replacing an existing text layer, remove it first so that
             // extraction does not return the old and the new interleaved. An original being read
-            // again was stripped the first time too, if it had a layer of its own.
+            // again was stripped the first time too, if it had a layer of its own. Only hidden
+            // text goes; text a reader can see is part of the page.
+            var stripped = false;
             if (record.Action == ClassAction.StripAndRedo
                 || (readAgain && TextLayerProbe.PagesWithText(source).Count > 0))
             {
@@ -506,28 +516,34 @@ public sealed class LibraryProcessor(
                     var stripResult = TextLayerStripper.Strip(document);
                     document.Save(strippedPath);
                     _logger.LogInformation(
-                        "Stripped {Path}: {Blocks} text blocks from {Pages} pages",
-                        path, stripResult.TextBlocksRemoved, stripResult.PagesChanged);
+                        "Stripped {Path}: {Blocks} hidden text blocks from {Pages} pages, {Kept} visible kept",
+                        path, stripResult.TextBlocksRemoved, stripResult.PagesChanged, stripResult.VisibleBlocksKept);
                 }
                 source = strippedPath;
+                stripped = true;
             }
 
-            // The invariant that matters more than any classification: a text layer is only ever
-            // written onto a page that has none. Two layers do not merge - an extractor sorts them
-            // together by position and returns them interleaved character by character, so
-            // "Broadband" comes back as "BBrrooaaddbbaanndd" and the document ends up less
+            // The invariant that matters more than any classification: a hidden text layer is
+            // only ever written onto a page that has none. Two layers do not merge - an extractor
+            // sorts them together by position and returns them interleaved character by character,
+            // so "Broadband" comes back as "BBrrooaaddbbaanndd" and the document ends up less
             // searchable than it was before. Three files in this library were damaged that way by
             // a classifier that read a font it could not decode as no text at all.
             //
+            // Visible text is not refused: it is ink, and the writer leaves out every recognised
+            // word that would land on it, so the two cannot interleave. A hidden layer is refused
+            // because it says what the new one would, and a page whose words are all left out for
+            // landing on it gains nothing.
+            //
             // Checked here, on whatever is about to be recognised, so it covers a stripped
             // document whose strip silently left a page alone as well as a misclassification.
-            var pagesWithText = TextLayerProbe.PagesWithText(source);
+            var pagesWithText = TextLayerProbe.PagesWithHiddenText(source);
             if (pagesWithText.Count > 0)
             {
                 var detail =
-                    $"Pages {string.Join(", ", pagesWithText.Take(5))} already carry a text layer, so adding " +
+                    $"Pages {string.Join(", ", pagesWithText.Take(5))} already carry a hidden text layer, so adding " +
                     "another would leave two interleaved and make the document less searchable. " +
-                    (record.Action == ClassAction.StripAndRedo
+                    (stripped
                         ? "Stripping did not remove it."
                         : "Classify it again, or use StripAndRedo if the existing layer should be replaced.");
 

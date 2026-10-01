@@ -340,7 +340,7 @@ public class FlattenTests : IDisposable
             {
                 var content = page.Contents.AppendContent();
                 content.CreateStream(Encoding.ASCII.GetBytes(
-                    "BT /F1 12 Tf 100 700 Td (some stale ocr text) Tj ET\n"));
+                    "BT /F1 12 Tf 3 Tr 100 700 Td (some stale ocr text) Tj ET\n"));
             }
             document.Save(path);
         }

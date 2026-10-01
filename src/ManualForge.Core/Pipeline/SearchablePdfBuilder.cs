@@ -156,6 +156,8 @@ public sealed class SearchablePdfBuilder(
         }
 
         var font = new InvisibleFont(document);
+        using var existingText = ExistingText.Open(sourceBytes);
+        var wordsOnExistingText = 0;
         var pageNumbers = options.Pages.Count > 0
             ? options.Pages.Where(p => p >= 1 && p <= pageCount).Distinct().Order().ToArray()
             : Enumerable.Range(1, pageCount).ToArray();
@@ -255,7 +257,15 @@ public sealed class SearchablePdfBuilder(
                 ocrWatch.Stop();
 
                 var writeWatch = Stopwatch.StartNew();
-                var layerResult = _textLayerWriter.WritePage(page, geometry, words, font);
+
+                // Text the page already shows stays, and what the recogniser read of it is left
+                // out rather than written over it. Applied here rather than before caching, so a
+                // cached page meets the same rule.
+                var clear = ExistingText.WordsClearOf(words, existingText.LettersOn(pageNumber), geometry);
+                var onExistingText = words.Length - clear.Length;
+                wordsOnExistingText += onExistingText;
+
+                var layerResult = _textLayerWriter.WritePage(page, geometry, clear, font);
                 writeWatch.Stop();
 
                 // Record the words that were actually emitted, not the ones that were offered: the
@@ -286,7 +296,7 @@ public sealed class SearchablePdfBuilder(
                     geometry.Rotation,
                     recognisedWordCount,
                     layerResult.WordsWritten,
-                    layerResult.WordsSkipped,
+                    layerResult.WordsSkipped + onExistingText,
                     meanConfidence,
                     rasterWatch.Elapsed,
                     ocrWatch.Elapsed,
@@ -298,7 +308,7 @@ public sealed class SearchablePdfBuilder(
                 _logger.LogInformation(
                     "Page {Page}/{Total}: {Written} words written, {Skipped} skipped, {Dpi:F0} dpi, " +
                     "raster {Raster}ms, ocr {Ocr}ms{Resumed}",
-                    pageNumber, pageNumbers.Length, layerResult.WordsWritten, layerResult.WordsSkipped,
+                    pageNumber, pageNumbers.Length, layerResult.WordsWritten, layerResult.WordsSkipped + onExistingText,
                     geometry.EffectiveDpiX, rasterWatch.ElapsedMilliseconds, ocrWatch.ElapsedMilliseconds,
                     fromCache ? " (reused from an earlier attempt)" : "");
             }
@@ -309,6 +319,13 @@ public sealed class SearchablePdfBuilder(
         }
 
         font.Finalise();
+
+        if (wordsOnExistingText > 0)
+        {
+            warnings.Add(
+                $"{wordsOnExistingText} recognised word(s) were left out because the page already shows " +
+                "text where they would go.");
+        }
 
         // PDFsharp locks the in-memory document once it is saved, and reading page counts or any
         // other member afterwards throws. Take what the report needs while it is still readable.

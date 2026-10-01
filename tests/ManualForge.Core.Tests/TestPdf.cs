@@ -53,17 +53,17 @@ internal static class TestPdf
     }
 
     /// <summary>
-    /// A scanned page that also carries a text layer, standing in for a manual with poor
-    /// 2000s-era OCR already on it. The text is written as a bare BT/ET block in Helvetica, one of
-    /// the standard fourteen, so nothing has to be embedded.
+    /// A scanned page that also carries text, written as a bare BT/ET block in Helvetica, one of
+    /// the standard fourteen, so nothing has to be embedded. Hidden, it stands in for a manual with
+    /// poor 2000s-era OCR already on it; visible, for a stamp or heading printed over the scan.
     /// </summary>
-    public static string ScannedWithText(string path, string text, int pages = 1)
+    public static string ScannedWithText(string path, string text, int pages = 1, bool hidden = false)
     {
         Scanned(path, pages);
 
         using var document = PdfSharp.Pdf.IO.PdfReader.Open(path, PdfSharp.Pdf.IO.PdfDocumentOpenMode.Modify);
         for (var i = 0; i < document.PageCount; i++)
-            AddTextLayer(document.Pages[i], text);
+            AddTextLayer(document.Pages[i], text, hidden);
 
         var temporary = path + ".tmp";
         document.Save(temporary);
@@ -113,7 +113,30 @@ internal static class TestPdf
         return path;
     }
 
-    private static void AddTextLayer(PdfPage page, string text)
+    /// <summary>
+    /// A scanned page with content of the test's own appended to it, for checks that need a precise
+    /// arrangement of text operators. Helvetica is available to it as /TestF1.
+    /// </summary>
+    public static string ScannedWithContent(string path, string content, int pages = 1)
+    {
+        Scanned(path, pages);
+
+        using var document = PdfSharp.Pdf.IO.PdfReader.Open(path, PdfSharp.Pdf.IO.PdfDocumentOpenMode.Modify);
+        for (var i = 0; i < document.PageCount; i++)
+        {
+            AddTestFont(document.Pages[i]);
+            document.Pages[i].Contents.AppendContent().CreateStream(Encoding.Latin1.GetBytes(content));
+        }
+
+        var temporary = path + ".tmp";
+        document.Save(temporary);
+        document.Dispose();
+        File.Move(temporary, path, overwrite: true);
+        return path;
+    }
+
+    /// <summary>Helvetica, as an indirect font object the page's resources call /TestF1.</summary>
+    public static PdfDictionary AddTestFont(PdfPage page)
     {
         var font = new PdfDictionary(page.Owner);
         font.Elements["/Type"] = new PdfName("/Font");
@@ -136,13 +159,19 @@ internal static class TestPdf
         }
 
         fonts.Elements["/TestF1"] = font.Reference!;
+        return font;
+    }
+
+    private static void AddTextLayer(PdfPage page, string text, bool hidden = false)
+    {
+        AddTestFont(page);
 
         // Parentheses and backslashes delimit and escape a PDF literal string, so they have to be
         // escaped before the text goes into one.
         var escaped = text.Replace(@"\", @"\\").Replace("(", @"\(").Replace(")", @"\)");
         var content = page.Contents.AppendContent();
         content.CreateStream(Encoding.ASCII.GetBytes(
-            $"BT /TestF1 11 Tf 72 700 Td ({escaped}) Tj ET\n"));
+            $"BT /TestF1 11 Tf {(hidden ? "3 Tr " : "")}72 700 Td ({escaped}) Tj ET\n"));
     }
 
     private static PdfDocument NewDocument(string path, int pages, int rotation, out string directory)
