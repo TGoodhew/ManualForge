@@ -3,7 +3,7 @@
     Reads the whole library again with the current recogniser, overnight, unattended.
 
 .DESCRIPTION
-    The four steps in the README's "Reading the library again when the recogniser improves", in
+    The four steps in docs/DEVELOPMENT-HISTORY.md, "Reading the library again when the recogniser improves", in
     order, each only after the one before it succeeded:
 
       1. run --redo-completed    the files ManualForge recognised end to end, from their originals
@@ -42,7 +42,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-# Minutes per step, from the timed samples in the README. Only used to say when it should finish.
+# Minutes per step, from the timed samples in docs/DEVELOPMENT-HISTORY.md. Only used to say when it should finish.
 $steps = @(
     [pscustomobject]@{ Name = 'redo';   Title = 'Read every finished file again from its original';      Minutes = 350 }
     [pscustomobject]@{ Name = 'doctor'; Title = 'Re-audit the files that changed';                     Minutes = 5 }
@@ -52,7 +52,7 @@ $steps = @(
 
 # ---------------------------------------------------------------- where things are
 
-if (-not (Test-Path -LiteralPath $Exe)) { throw "manualforge.exe is not at $Exe. Publish it first (README, 'Installing it')." }
+if (-not (Test-Path -LiteralPath $Exe)) { throw "manualforge.exe is not at $Exe. Publish it first (README, 'Install')." }
 if (-not (Test-Path -LiteralPath $Library -PathType Container)) { throw "No library folder at $Library." }
 
 $originals = Join-Path $Library '_Originals'

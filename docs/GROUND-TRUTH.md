@@ -398,4 +398,4 @@ whose page numbering differs from the copy you corrected against. Check the pair
 **Symbols come out wrong** — the text file is not UTF-8. Re-save it as UTF-8 in your editor.
 
 **The OCR run says it is on CPU** — the CUDA runtime is not on `PATH` for that shell. It still works,
-just slower; see the CUDA section of the README.
+just slower; see "Set up the GPU" in the README.

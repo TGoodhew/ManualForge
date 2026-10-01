@@ -451,7 +451,7 @@ public class JobStoreTests : IDisposable
         // Note what this does and does not prove. It exercises the store's page bookkeeping, which
         // works. It does not show that a run resumes mid-document, because it does not: pages are
         // only recorded once a whole document finishes, so an interrupted document restarts from
-        // page one. See "Known gaps" in the README.
+        // page one. See "Known gaps" in docs/DEVELOPMENT-HISTORY.md.
 
         var file = MakeFile("e.pdf");
         using var store = NewStore();
