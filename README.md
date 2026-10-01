@@ -17,7 +17,9 @@ the rest carry poor OCR from the 2000s. It:
   from the command line, the desktop app, or Claude through MCP.
 
 It never loses a manual. A file is only replaced after its searchable copy has been written and
-verified, and the untouched original is kept in an `_Originals` folder inside your library.
+verified, and the original is then moved, unchanged, into an `_Originals` folder inside your
+library. Files that need no work are never touched. See
+[What happens to your library folder](#what-happens-to-your-library-folder).
 
 It works on any NVIDIA GPU with CUDA 13, at about 100–140 pages a minute on an RTX 3060 Ti. It also
 runs on the CPU alone, about 15 pages a minute.
@@ -131,20 +133,50 @@ Stop-Process -Name ManualForge.Mcp -ErrorAction SilentlyContinue
 
 ## Use
 
-### Your library
+### What happens to your library folder
 
-A library is just a folder of PDFs, with any subfolders you like. ManualForge keeps everything it
-needs in `<library>\_Originals\`:
+A library is just a folder of PDFs, with any subfolders you like. `run` changes it in place: each
+file is either replaced with a searchable copy, or left exactly as it is. **You can always get back
+to the library you started with.**
+
+**A file ManualForge processes** (a scan with no text, for example):
+
+1. A searchable copy is made in a temporary folder. Nothing in your library has changed yet.
+2. The copy is checked: it opens, has the same pages, carries text in the right places, and its
+   page images are unchanged.
+3. Only then is your **original moved, byte for byte, into `<library>\_Originals\`, at the same
+   relative path**. For example, `D:\Manuals\HP\8340B.pdf` goes to
+   `D:\Manuals\_Originals\HP\8340B.pdf`.
+4. The searchable copy takes its place at `D:\Manuals\HP\8340B.pdf`.
+
+If any step fails, the original stays where it was and nothing is replaced.
+
+**A file ManualForge leaves alone**, because it already has good text, stays exactly where it is,
+untouched. It needs no backup, so it is not copied into `_Originals`.
+
+So, after a run:
+- **The PDFs in your library are what you use.** Searchable copies where a file was processed,
+  your own files everywhere else, all at the paths they always had.
+- **`_Originals` holds the untouched original of every file that was replaced, and nothing else of
+  yours.** Together with the files that were left alone, that is your whole library as it was
+  before. Uninstall step 5 shows how to put the originals back.
+
+`_Originals` is also where ManualForge keeps its working files:
 
 | Path | Contents |
 |---|---|
-| `_Originals\<same relative path>` | the untouched original of every file ManualForge replaced |
-| `_Originals\_superseded\` | earlier searchable copies, kept when a file is read again |
+| `_Originals\<same relative path>` | the untouched original of every file that was replaced |
+| `_Originals\_superseded\` | the previous searchable copy, kept whenever a file is read again from its original |
 | `_Originals\manualforge.db` | progress, and recognition cached so an interrupted run resumes |
-| `_Originals\manualforge-doctor.db` | the audit's findings and the text the repair recovered |
+| `_Originals\manualforge-doctor.db` | what the audit found, and the text `repair` recovered |
 | `_Originals\manualforge-index.db` | the search index |
 
-Folders named `_Originals`, `BASELINE` and `_GroundTruth` are never processed or indexed.
+Leave `_Originals` where it is and don't edit what's in it. It is the only copy of every original
+that was replaced.
+
+`doctor`, `repair`, `index` and search never change a PDF. Text that `repair` recovers is kept in
+`manualforge-doctor.db` and added to the search index, not written into the file. Folders named
+`_Originals`, `BASELINE` and `_GroundTruth` are never processed or indexed.
 
 ### Process a library
 
