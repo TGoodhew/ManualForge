@@ -23,8 +23,9 @@ public sealed class RasterOptions
     public bool WithFormFill { get; init; } = false;
 
     /// <summary>
-    /// Refuse to rasterise a page that would exceed this many pixels. A corrupt MediaBox can ask
-    /// for a bitmap of many gigabytes, and the failure should be a clean skip, not an OOM.
+    /// The most pixels a page is rasterised to. A page that would exceed it at <see cref="Dpi"/> is
+    /// drawn at the highest resolution that fits instead, so a fold-out is read rather than refused
+    /// and a corrupt MediaBox asking for gigabytes is never drawn at full size.
     /// </summary>
     public long MaxPixels { get; init; } = 120_000_000;
 }
@@ -84,24 +85,75 @@ public class PageRasteriser(RasterOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(pdfBytes);
 
-        var renderOptions = new RenderOptions(
-            Dpi: _options.Dpi,
-            WithAnnotations: _options.WithAnnotations,
-            WithFormFill: _options.WithFormFill,
-            Grayscale: _options.Grayscale);
-
-        var bitmap = Conversion.ToImage(pdfBytes, pageIndex, password: null, options: renderOptions)
-            ?? throw new InvalidOperationException($"PDFium returned no bitmap for page {pageIndex + 1}.");
+        // A page too large to recognise at the resolution asked for - a 36-inch fold-out at 600 dpi
+        // is 118 M pixels - is read at the highest resolution that fits, rather than refused. Word
+        // positions follow the raster's real size, so the text still lands on the ink; only that
+        // page is read at less than the rest. Sized before rendering, so a corrupt MediaBox asking
+        // for gigabytes is never drawn at all.
+        var dpi = DpiThatFits(pdfBytes, pageIndex);
+        var bitmap = RenderAt(pdfBytes, pageIndex, dpi);
 
         var pixels = (long)bitmap.Width * bitmap.Height;
         if (pixels > _options.MaxPixels)
         {
             bitmap.Dispose();
-            throw new InvalidOperationException(
-                $"Page {pageIndex + 1} rasterises to {bitmap.Width}x{bitmap.Height} " +
-                $"({pixels:N0} pixels) at {_options.Dpi} dpi, over the {_options.MaxPixels:N0} pixel limit.");
+            throw new PageUnreadableException(pageIndex + 1,
+                $"Page {pageIndex + 1} rasterises to {pixels:N0} pixels at {dpi} dpi, over the " +
+                $"{_options.MaxPixels:N0} pixel limit.");
         }
 
         return new RasterisedPage(pageIndex + 1, bitmap, _options.Dpi);
+    }
+
+    /// <summary>The requested resolution, or the highest below it at which the page fits the pixel limit.</summary>
+    private int DpiThatFits(byte[] pdfBytes, int pageIndex)
+    {
+        System.Drawing.SizeF size;
+        try
+        {
+            size = Conversion.GetPageSize(pdfBytes, pageIndex, password: null);
+        }
+        catch (Exception ex) when (ex is PDFtoImage.Exceptions.PdfInvalidFormatException
+                                       or PDFtoImage.Exceptions.PdfPageNotFoundException)
+        {
+            throw new PageUnreadableException(pageIndex + 1, $"PDFium cannot read page {pageIndex + 1}: {ex.Message}", ex);
+        }
+
+        var pixels = size.Width / 72.0 * _options.Dpi * (size.Height / 72.0 * _options.Dpi);
+        if (pixels <= _options.MaxPixels)
+            return _options.Dpi;
+
+        var fitting = (int)Math.Floor(_options.Dpi * Math.Sqrt(_options.MaxPixels / pixels) * 0.99);
+        if (fitting < 1)
+        {
+            throw new PageUnreadableException(pageIndex + 1,
+                $"Page {pageIndex + 1} measures {size.Width:F0} x {size.Height:F0} pt, too large to rasterise at any resolution.");
+        }
+
+        return fitting;
+    }
+
+    /// <summary>
+    /// One render. A page PDFium cannot load or draw is unreadable for good: the same bytes give
+    /// the same answer on every attempt.
+    /// </summary>
+    private SKBitmap RenderAt(byte[] pdfBytes, int pageIndex, int dpi)
+    {
+        var renderOptions = new RenderOptions(
+            Dpi: dpi,
+            WithAnnotations: _options.WithAnnotations,
+            WithFormFill: _options.WithFormFill,
+            Grayscale: _options.Grayscale);
+
+        try
+        {
+            return Conversion.ToImage(pdfBytes, pageIndex, password: null, options: renderOptions)
+                ?? throw new PageUnreadableException(pageIndex + 1, $"PDFium returned no bitmap for page {pageIndex + 1}.");
+        }
+        catch (Exception ex) when (ex is PDFtoImage.Exceptions.PdfInvalidFormatException
+                                       or PDFtoImage.Exceptions.PdfPageNotFoundException)
+        {
+            throw new PageUnreadableException(pageIndex + 1, $"PDFium cannot read page {pageIndex + 1}: {ex.Message}", ex);
+        }
     }
 }

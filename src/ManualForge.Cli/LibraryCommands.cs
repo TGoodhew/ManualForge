@@ -376,6 +376,18 @@ internal static class RunCommand
                 Console.WriteLine($"  {Path.GetFileName(o.Path)}");
         }
 
+        // Finished with pages that could not be read: worth having, and never quietly incomplete.
+        var withGaps = outcomes.Where(o => o.Status == FileStatus.Completed && o.PagesWithoutText.Count > 0).ToArray();
+        if (withGaps.Length > 0)
+        {
+            Console.WriteLine();
+            Console.WriteLine(
+                $"{withGaps.Sum(o => o.PagesWithoutText.Count):N0} page(s) in {withGaps.Length} file(s) could not be read " +
+                "and were left as they were in the scan:");
+            foreach (var o in withGaps.Take(10))
+                Console.WriteLine($"  {Path.GetFileName(o.Path)} — {o.Error}");
+        }
+
         foreach (var failure in outcomes.Where(o => o.Status == FileStatus.Failed).Take(10))
             Console.WriteLine($"  failed: {Path.GetFileName(failure.Path)} — {failure.Error}");
 

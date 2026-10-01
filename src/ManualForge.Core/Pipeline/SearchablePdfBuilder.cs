@@ -61,7 +61,16 @@ public sealed record BuildReport(
 {
     public int TotalWordsWritten => Pages.Sum(p => p.WordsWritten);
     public double PagesPerMinute => TotalTime.TotalMinutes <= 0 ? 0 : Pages.Count / TotalTime.TotalMinutes;
+
+    /// <summary>
+    /// Pages that could not be read for a reason in the page itself, and were left without a text
+    /// layer while the rest of the document was written. Empty for a complete document.
+    /// </summary>
+    public IReadOnlyList<PageGap> PagesWithoutText { get; init; } = [];
 }
+
+/// <summary>A page left without a text layer, and why.</summary>
+public sealed record PageGap(int PageNumber, string Reason);
 
 /// <summary>
 /// Turns one scanned PDF into a searchable one: rasterise, recognise, overlay, verify.
@@ -166,6 +175,7 @@ public sealed class SearchablePdfBuilder(
             warnings.Add($"Some requested pages are outside the document's 1-{pageCount} range and were ignored.");
 
         var reports = new List<PageReport>(pageNumbers.Length);
+        var unreadable = new List<PageGap>();
         var resumedPages = 0;
         var textDump = options.TextDumpPath is null ? null : new List<string>();
 
@@ -195,7 +205,22 @@ public sealed class SearchablePdfBuilder(
             }
             else
             {
-                raster = _rasteriser.Render(sourceBytes, pageNumber - 1);
+                try
+                {
+                    raster = _rasteriser.Render(sourceBytes, pageNumber - 1);
+                }
+                catch (PageUnreadableException ex)
+                {
+                    // This page will fail the same way on every attempt, so it is left as it is -
+                    // no worse than the scan it came from - and the rest of the document goes on.
+                    // Anything not known to be page-specific still fails the document (#21).
+                    unreadable.Add(new PageGap(pageNumber, ex.Message));
+                    warnings.Add($"Page {pageNumber} was left without a text layer: {ex.Message}");
+                    _logger.LogWarning("Page {Page} of {Path} left without a text layer: {Reason}",
+                        pageNumber, full, ex.Message);
+                    continue;
+                }
+
                 pixelWidth = raster.Width;
                 pixelHeight = raster.Height;
             }
@@ -318,6 +343,14 @@ public sealed class SearchablePdfBuilder(
             }
         }
 
+        // Every page unreadable is not a document with gaps, it is a document that cannot be read,
+        // and that fails as a whole like any other.
+        if (pageNumbers.Length > 0 && unreadable.Count == pageNumbers.Length)
+        {
+            throw new InvalidOperationException(
+                $"No page of '{Path.GetFileName(full)}' could be read. Page {unreadable[0].PageNumber}: {unreadable[0].Reason}");
+        }
+
         font.Finalise();
 
         if (wordsOnExistingText > 0)
@@ -356,7 +389,10 @@ public sealed class SearchablePdfBuilder(
             _ocrEngine.Runtime,
             stopwatch.Elapsed,
             warnings,
-            resumedPages);
+            resumedPages)
+        {
+            PagesWithoutText = unreadable,
+        };
     }
 
     private static PdfDocument OpenForModification(byte[] bytes, string path)

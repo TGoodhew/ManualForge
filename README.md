@@ -151,6 +151,18 @@ to the library you started with.**
 
 If any step fails, the original stays where it was and nothing is replaced.
 
+Two exceptions keep one bad page from costing a whole manual:
+- **Oversized pages.** A page too large to read at the chosen resolution, such as a big fold-out,
+  is read at the highest resolution that fits.
+- **Pages that can't be read at all.** A page that can't be read because of something in the page
+  itself is left as it was in the scan, without text, and the rest of the manual goes ahead. The
+  run summary lists those pages, and the file's record notes them. If the file is being read
+  again and its current copy has text on such a page, the current copy is kept instead, so a
+  re-read never makes a page worse.
+
+A failure that isn't about one page, such as the GPU running out of memory, still fails the whole
+file and leaves the original untouched, so running again retries it.
+
 **A file ManualForge leaves alone**, because it already has good text, stays exactly where it is,
 untouched. It needs no backup, so it is not copied into `_Originals`.
 

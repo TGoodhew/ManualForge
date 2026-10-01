@@ -164,13 +164,13 @@ public class LibraryProcessorTests : IDisposable
     };
 
     private (LibraryProcessor Processor, FakeOcrEngine Engine) NewProcessor(
-        FakeOcrEngine? engine = null, IPageOcrCache? cache = null)
+        FakeOcrEngine? engine = null, IPageOcrCache? cache = null, PageRasteriser? rasteriser = null)
     {
         engine ??= new FakeOcrEngine();
 
         var builder = new SearchablePdfBuilder(
             engine,
-            new PageRasteriser(new RasterOptions { Dpi = Dpi }),
+            rasteriser ?? new PageRasteriser(new RasterOptions { Dpi = Dpi }),
             new TextLayerWriter(),
             pageCache: cache);
 
@@ -550,6 +550,117 @@ public class LibraryProcessorTests : IDisposable
         Assert.Contains("the card fell over", outcome.Error!, StringComparison.Ordinal);
         Assert.Equal(before, File.ReadAllBytes(path));
         Assert.False(Directory.Exists(InRoot("_Originals", "scan.pdf")));
+    }
+
+    // ---------------------------------------------------------------- a page that cannot be read (#21)
+
+    /// <summary>Renders like the real rasteriser, except the pages it is told PDFium cannot draw.</summary>
+    private sealed class UnreadablePages(params int[] pages) : PageRasteriser(new RasterOptions { Dpi = Dpi })
+    {
+        public override RasterisedPage Render(byte[] pdfBytes, int pageIndex)
+            => pages.Contains(pageIndex + 1)
+                ? throw new PageUnreadableException(pageIndex + 1, $"stands in for a page PDFium cannot draw")
+                : base.Render(pdfBytes, pageIndex);
+    }
+
+    private static string TextOfPage(string path, int page)
+    {
+        using var document = UglyToad.PdfPig.PdfDocument.Open(path);
+        return string.Join(" ", document.GetPage(page).GetWords().Select(w => w.Text));
+    }
+
+    [Fact]
+    public void OnePageThatCannotBeReadNoLongerCostsTheOthers()
+    {
+        // A 120-page book lost 116 finished pages to one it could not read. That page is now left
+        // as it was in the scan, the rest are written, and the gap is recorded and reported.
+        var path = TestPdf.Scanned(InRoot("book.pdf"), pages: 3);
+
+        var options = NewOptions();
+        var (processor, _) = NewProcessor(rasteriser: new UnreadablePages(2));
+        processor.Survey(options);
+        var outcome = Assert.Single(processor.Run(options));
+
+        Assert.Equal(FileStatus.Completed, outcome.Status);
+        Assert.Equal([2], outcome.PagesWithoutText);
+        Assert.Contains("page 2", outcome.Error!, StringComparison.Ordinal);
+
+        Assert.Contains("HEWLETT", TextOfPage(path, 1), StringComparison.Ordinal);
+        Assert.Equal("", TextOfPage(path, 2));
+        Assert.Contains("HEWLETT", TextOfPage(path, 3), StringComparison.Ordinal);
+        Assert.True(File.Exists(InRoot("_Originals", "book.pdf")));
+
+        using var store = LibraryProcessor.OpenStore(options);
+        var record = store.Find(path)!;
+        Assert.Equal(FileStatus.Completed, record.Status);
+        Assert.Contains("left without a text layer", record.Error!, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AFileNoPageOfWhichCanBeReadStillFailsAndIsLeftAlone()
+    {
+        var path = TestPdf.Scanned(InRoot("unreadable.pdf"), pages: 2);
+        var before = File.ReadAllBytes(path);
+
+        var options = NewOptions();
+        var (processor, _) = NewProcessor(rasteriser: new UnreadablePages(1, 2));
+        processor.Survey(options);
+        var outcome = Assert.Single(processor.Run(options));
+
+        Assert.Equal(FileStatus.Failed, outcome.Status);
+        Assert.Contains("No page", outcome.Error!, StringComparison.Ordinal);
+        Assert.Equal(before, File.ReadAllBytes(path));
+        Assert.False(File.Exists(InRoot("_Originals", "unreadable.pdf")));
+    }
+
+    [Fact]
+    public void AReReadKeepsTheEarlierCopyRatherThanLoseTextOnAPage()
+    {
+        // The earlier copy has text on page 2 and this reading cannot read page 2. Using it would
+        // make that page worse, so the earlier copy stays.
+        var path = TestPdf.Scanned(InRoot("hp", "8340B.pdf"), pages: 3);
+        var options = NewOptions();
+
+        var (first, _) = NewProcessor(EngineReading("HEWLETT"));
+        first.Survey(options);
+        first.Run(options);
+        var earlier = File.ReadAllBytes(path);
+
+        var redo = new LibraryOptions { Root = _root, ReadCompletedAgain = true };
+        var (second, _) = NewProcessor(EngineReading("AGILENT"), rasteriser: new UnreadablePages(2));
+        second.Survey(redo);
+        var outcome = Assert.Single(second.Run(redo));
+
+        Assert.Equal(FileStatus.Completed, outcome.Status);
+        Assert.Equal([2], outcome.PagesWithoutText);
+        Assert.Contains("Kept the earlier copy", outcome.Error!, StringComparison.Ordinal);
+        Assert.Equal(earlier, File.ReadAllBytes(path));
+
+        // Still finished, so the next re-read tries again.
+        using var store = LibraryProcessor.OpenStore(redo);
+        Assert.Equal(FileStatus.Completed, store.Find(path)!.Status);
+        Assert.Equal(ClassAction.Ocr, store.Find(path)!.Action);
+    }
+
+    [Fact]
+    public void AReReadGoesAheadWhenThePageItCannotReadHadNoTextAnyway()
+    {
+        var path = TestPdf.Scanned(InRoot("hp", "8340B.pdf"), pages: 3);
+        var options = NewOptions();
+
+        var (first, _) = NewProcessor(EngineReading("HEWLETT"), rasteriser: new UnreadablePages(2));
+        first.Survey(options);
+        first.Run(options);
+
+        var redo = new LibraryOptions { Root = _root, ReadCompletedAgain = true };
+        var (second, _) = NewProcessor(EngineReading("AGILENT"), rasteriser: new UnreadablePages(2));
+        second.Survey(redo);
+        var outcome = Assert.Single(second.Run(redo));
+
+        Assert.Equal(FileStatus.Completed, outcome.Status);
+        Assert.Contains("AGILENT", TextOfPage(path, 1), StringComparison.Ordinal);
+        Assert.Equal("", TextOfPage(path, 2));
+        Assert.True(File.Exists(LibraryProcessor.SupersededPathFor(redo, path)));
     }
 
     [Fact]

@@ -98,7 +98,15 @@ public sealed record FileOutcome(
     bool WasFlattened,
     TimeSpan Duration,
     string? Error,
-    bool SignatureInvalidated = false);
+    bool SignatureInvalidated = false,
+    IReadOnlyList<int>? PagesWithoutText = null)
+{
+    /// <summary>
+    /// Pages left without a text layer because they could not be read, for a reason in the page
+    /// itself. On a completed file, <see cref="Error"/> then describes them rather than a failure.
+    /// </summary>
+    public IReadOnlyList<int> PagesWithoutText { get; init; } = PagesWithoutText ?? [];
+}
 
 /// <summary>
 /// Walks a manual library and brings each file to its target state: classify, flatten if the file
@@ -620,6 +628,34 @@ public sealed class LibraryProcessor(
                     stopwatch.Elapsed, detail);
             }
 
+            // Pages left without text for a reason in the page itself (#21). The document is still
+            // worth having - those pages are exactly as they were in the scan - so it goes ahead,
+            // and the gaps are recorded against the file and reported.
+            var gaps = report.PagesWithoutText;
+            var gapNote = gaps.Count == 0
+                ? null
+                : $"{gaps.Count} page(s) left without a text layer: " +
+                  string.Join("; ", gaps.Take(5).Select(g => $"page {g.PageNumber}, {g.Reason}"));
+            var gapPages = gaps.Select(g => g.PageNumber).ToArray();
+
+            // A re-read must never make a page worse. If the copy in the library has text on a page
+            // this reading could not read, that copy stays, and the new reading is not used.
+            if (readAgain && gaps.Count > 0 && !options.DryRun)
+            {
+                var wouldLose = PagesCarryingText(path, gapPages);
+                if (wouldLose.Count > 0)
+                {
+                    var kept = $"Kept the earlier copy: page(s) {string.Join(", ", wouldLose)} could not be read " +
+                               "again, and it has text there. " + gapNote;
+                    store.SetAction(path, ClassAction.Ocr);
+                    store.SetStatus(path, FileStatus.Completed, kept);
+                    _pageCache.Clear(path);
+                    _logger.LogWarning("{Path}: {Detail}", path, kept);
+                    return Outcome(record, FileStatus.Completed, 0, worstDeviation, flattened, stopwatch.Elapsed,
+                        kept, signatureInvalidated: false, pagesWithoutText: gapPages);
+                }
+            }
+
             if (options.DryRun)
             {
                 // A file being read again goes back to finished: a dry run changes nothing, and
@@ -639,7 +675,7 @@ public sealed class LibraryProcessor(
 
             if (readAgain)
                 return ReplaceEarlierCopy(store, options, record, outputPath, report.TotalWordsWritten, worstDeviation,
-                    flattened, stopwatch, signatureInvalidated);
+                    flattened, stopwatch, signatureInvalidated, gapNote, gapPages);
 
             // Step 5: move the original aside, then put the new file in its place. Both are moves
             // on the same volume, so each is atomic, and the original exists in exactly one place
@@ -668,7 +704,7 @@ public sealed class LibraryProcessor(
             // describe that rather than the source it replaced. Otherwise restoring the original
             // later matches the stale fingerprint and the file is never reprocessed.
             store.UpdateFingerprint(path);
-            store.SetStatus(path, FileStatus.Completed);
+            store.SetStatus(path, FileStatus.Completed, gapNote);
 
             // The document is finished, so its cached recognition has done its job. Releasing it
             // here keeps the cache to the documents actually in flight rather than the whole
@@ -680,7 +716,7 @@ public sealed class LibraryProcessor(
                 path, report.TotalWordsWritten, worstDeviation, originalDestination);
 
             return Outcome(record, FileStatus.Completed, report.TotalWordsWritten, worstDeviation, flattened,
-                stopwatch.Elapsed, null, signatureInvalidated);
+                stopwatch.Elapsed, gapNote, signatureInvalidated, gapPages);
         }
         catch (OperationCanceledException)
         {
@@ -716,7 +752,8 @@ public sealed class LibraryProcessor(
     /// </summary>
     private FileOutcome ReplaceEarlierCopy(
         JobStore store, LibraryOptions options, FileRecord record, string outputPath, int words,
-        double worstDeviation, bool flattened, Stopwatch stopwatch, bool signatureInvalidated)
+        double worstDeviation, bool flattened, Stopwatch stopwatch, bool signatureInvalidated,
+        string? gapNote, IReadOnlyList<int> gapPages)
     {
         var path = record.Path;
         var superseded = SupersededPathFor(options, path);
@@ -738,15 +775,33 @@ public sealed class LibraryProcessor(
 
         store.UpdateFingerprint(path);
         store.SetAction(path, ClassAction.Ocr);
-        store.SetStatus(path, FileStatus.Completed);
+        store.SetStatus(path, FileStatus.Completed, gapNote);
         _pageCache.Clear(path);
 
         _logger.LogInformation(
             "Read {Path} again: {Words} words, worst deviation {Deviation:F3} pt, earlier copy kept at {Superseded}",
             path, words, worstDeviation, superseded);
 
-        return Outcome(record, FileStatus.Completed, words, worstDeviation, flattened, stopwatch.Elapsed, null,
-            signatureInvalidated);
+        return Outcome(record, FileStatus.Completed, words, worstDeviation, flattened, stopwatch.Elapsed, gapNote,
+            signatureInvalidated, gapPages);
+    }
+
+    /// <summary>Which of these pages of a file draw any text, visible or not.</summary>
+    private static IReadOnlyList<int> PagesCarryingText(string path, IEnumerable<int> pages)
+    {
+        try
+        {
+            using var document = UglyToad.PdfPig.PdfDocument.Open(path, new UglyToad.PdfPig.ParsingOptions { UseLenientParsing = true });
+            return pages
+                .Where(p => p >= 1 && p <= document.NumberOfPages
+                            && document.GetPage(p).Letters.Any(l => !string.IsNullOrWhiteSpace(l.Value)))
+                .ToArray();
+        }
+        catch (Exception)
+        {
+            // If the earlier copy cannot be read to check, assume it has something to lose.
+            return pages.ToArray();
+        }
     }
 
     /// <summary>Where the searchable copy a re-read replaces is kept: under the originals tree.</summary>
@@ -821,9 +876,9 @@ public sealed class LibraryProcessor(
 
     private static FileOutcome Outcome(
         FileRecord record, FileStatus status, int words, double deviation, bool flattened, TimeSpan duration,
-        string? error, bool signatureInvalidated = false)
+        string? error, bool signatureInvalidated = false, IReadOnlyList<int>? pagesWithoutText = null)
         => new(record.Path, record.TextClass, record.Action, status, record.PageCount, words, deviation, flattened,
-            duration, error, signatureInvalidated);
+            duration, error, signatureInvalidated, pagesWithoutText ?? []);
 
     /// <summary>
     /// Where a file's original is kept: one tree under the root, mirroring the source structure.

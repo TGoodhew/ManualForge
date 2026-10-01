@@ -1301,6 +1301,36 @@ dotnet test
   leaves its source untouched, that an owner password is flattened first, that identical copies are
   recognised once, and that an interrupted document resumes from the recognition it already has.
 
+## One page that cannot be read no longer costs the document (1 October 2026, #21)
+
+A 600 dpi pass over a 120-page book died at page 117, an 18000 x 6598 fold-out the recogniser
+refused. 116 finished pages were discarded and nothing was written. `e118e3d` made the rasteriser's
+pixel limit agree with the recogniser's, which only moved the refusal earlier. Both of the obvious
+fixes were wrong:
+- **Fail the document,** as before. Right for a GPU that falls over, which is transient, and wrong
+  for a page that will fail identically on every attempt.
+- **Catch any failure and skip the page.** Breaks the contract that a transient failure leaves the
+  original alone (`ARecognitionFailureLeavesTheSourceWhereItWas`), because it replaces a manual
+  with a copy missing text that a retry would have recovered.
+
+So failures are told apart, and only in one direction:
+- **Too large.** The rasteriser sizes the page first and renders it at the highest resolution under
+  the pixel limit. That is not a gap at all, because word positions follow the raster's real size.
+  The library's largest page, page 104 of `8656B-SM.pdf` at 53 x 69 inches, would be 1.3 billion
+  pixels at 600 dpi; it now renders at 117 M in 2.3 s. Sizing first also means a corrupt MediaBox
+  is never drawn at full size.
+- **Unreadable.** PDFium's `PdfInvalidFormatException` and `PdfPageNotFoundException` on a page,
+  and a page it returns no bitmap for, become `PageUnreadableException`. The builder leaves that
+  page without a text layer and carries on, and reports it in `BuildReport.PagesWithoutText`.
+- **Everything else** still fails the document. A document whose every page is unreadable fails
+  too: that is a broken file, not one with gaps.
+
+`run` replaces a file with gaps as usual and records them, both on the file's record and in the run
+summary. The page is no worse than the scan it came from, and the original is kept. A **re-read** is
+the exception: if the copy in the library has text on a page the new reading cannot read, the
+earlier copy stays, so a re-read never makes a page worse. Tony chose this over never replacing a
+partial document, which would leave a 120-page scan with one bad page entirely unsearchable.
+
 ## Resume
 
 Per-file and per-page state lives in SQLite at `<root>/_Originals/manualforge.db`.
