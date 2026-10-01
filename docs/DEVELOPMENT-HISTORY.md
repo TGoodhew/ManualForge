@@ -1355,16 +1355,47 @@ documents in flight rather than the library.
 ### An estimate is an average, and the work is not evenly spread
 
 `status`, `survey` and `repair` estimate remaining time from measured rates — 104 pages/min on the
-GPU, 46 for a repair — held in one place, `MeasuredThroughput`, so that a figure which goes stale
+GPU, and at first 46 for a repair — held in one place, `MeasuredThroughput`, so that a figure which goes stale
 goes stale once. This section used to say they still quoted 55.9 pages/min, the pre-pipeline serial
 rate; that was fixed in `115d036` and the note outlived it, which is its own small lesson about
 documentation that records a problem rather than a behaviour.
 
-What remains true is that the estimate is a library-wide average applied to work ordered
-smallest-first, so the last hours are the densest material and run longer than the average. The
-commands now say so rather than implying a precision they do not have. Narrowing it properly means
-per-class rates measured over a full run, which is worth doing the next time there is a full run to
-measure.
+What remains true for `status` and `survey` is that the estimate is a library-wide average applied
+to work ordered smallest-first, so the last hours are the densest material and run longer than the
+average. The commands now say so rather than implying a precision they do not have. Narrowing it
+properly means per-class rates measured over a full run, which is worth doing the next time there is
+a full run to measure.
+
+#### The repair estimate, costed page by page (1 October 2026, #15)
+
+`repair` quoted one rate, 46 pages/min, for every outstanding page. It was 15% short on the 29–30
+September pass (451 minutes quoted, 532 taken) and 28% short on the 1 October one (91 against
+127). It also counted every outstanding page in the audit rather than the pages the chosen scope
+would read, so `--redo-before`, `--documents` and `--include-scans` all changed the work without
+changing the estimate.
+
+#15 guessed the cause was resolution, since scanned pages are read at 400–600 dpi. The 21,262
+repairs in the audit database say otherwise. Timed from the gap between consecutive pages of the
+same document, resolution on its own does not even order the rates: 300 dpi ran at 34 pages/min
+and 400 at 43. What matters is the **kind** of page. A drawn page carries a few labels, and a
+scanned one is dense lettering read word by word:
+
+| pages/min | 300 dpi | 400 dpi | 600 dpi |
+|---|---|---|---|
+| Drawn | 77.8 (3,022 pages) | 65.6 (532) | 41.9 (353) |
+| Scanned | 35.1 (13,856) | 39.3 (1,050) | 25.0 (390) |
+
+Each document adds about 2 seconds before its first page. That figure comes from the 1 October run,
+whose records are all intact. The earlier records suggest 15 seconds, but some of their pages were
+repaired again later and their rows replaced, so the gaps around them span whole documents that are
+no longer on record. A measurement taken from a table that later work overwrites needs checking for
+exactly that.
+
+`PageRepairer.Plan` now works out the pages a repair will read, using the same selection code the
+repair itself uses, so the two cannot drift apart. The estimate costs each page at the rate for its
+kind and resolution (`RepairThroughput`). Checked against the two large runs on record: **537
+minutes for the 532 taken, and 125 for the 127**. `repair --plan` prints the plan and stops before
+any model loads.
 
 ### Recall is better than it was, and still known only to within a factor of two
 

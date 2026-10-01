@@ -140,17 +140,9 @@ public sealed class PageRepairer(IOcrEngine engine, ILogger<PageRepairer>? logge
         || options.Force
         || (options.RedoBefore is { } cutoff && earlier.RepairedUtc < cutoff);
 
-    public async Task<RepairReport> RepairAsync(
-        DoctorStore store,
-        RepairOptions? options = null,
-        IProgress<RepairProgress>? progress = null,
-        CancellationToken cancellationToken = default)
+    /// <summary>The documents a repair with these options will visit, in the order it visits them.</summary>
+    private static AuditedDocument[] DocumentsInScope(DoctorStore store, RepairOptions options)
     {
-        ArgumentNullException.ThrowIfNull(store);
-        options ??= new RepairOptions();
-
-        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
-
         var documents = store.Flagged()
             .Where(d => d.Verdict switch
             {
@@ -164,8 +156,62 @@ public sealed class PageRepairer(IOcrEngine engine, ILogger<PageRepairer>? logge
                         || options.Paths.Contains(d.Path, StringComparer.OrdinalIgnoreCase))
             .ToArray();
 
-        if (options.Limit is { } limit)
-            documents = documents.Take(limit).ToArray();
+        return options.Limit is { } limit ? documents.Take(limit).ToArray() : documents;
+    }
+
+    /// <summary>The flagged pages of a document that these options cover.</summary>
+    private static PageFinding[] FlaggedInScope(DoctorStore store, AuditedDocument document, RepairOptions options)
+        => store.Findings(document.Path, PageVerdict.UnderExtracted)
+            .Where(f => options.IncludeScannedPages || f.Kind == PageKind.Drawn
+                        || document.Verdict == DocumentVerdict.Figures)
+            .ToArray();
+
+    private static int DpiFor(PageFinding finding, RepairOptions options)
+        => Math.Min(options.MaximumDpi, options.Dpi ?? finding.SuggestedDpi);
+
+    /// <summary>
+    /// The pages <see cref="RepairAsync"/> would read with these options, without reading any, so
+    /// the work can be costed before it is started. It goes by the files as they were audited:
+    /// a file changed since is counted here and then skipped by the repair as stale.
+    /// </summary>
+    public static RepairPlan Plan(DoctorStore store, RepairOptions? options = null)
+    {
+        ArgumentNullException.ThrowIfNull(store);
+        options ??= new RepairOptions();
+
+        var pages = new List<PlannedRepairPage>();
+        var documents = 0;
+
+        foreach (var document in DocumentsInScope(store, options))
+        {
+            if (!File.Exists(document.Path))
+                continue;
+
+            var existing = store.Repairs(document.Path, document.ContentHash);
+            var before = pages.Count;
+            pages.AddRange(FlaggedInScope(store, document, options)
+                .Where(f => ShouldRead(existing.GetValueOrDefault(f.PageNumber), options))
+                .Select(f => new PlannedRepairPage(document.Path, f.PageNumber, f.Kind, DpiFor(f, options))));
+
+            if (pages.Count > before)
+                documents++;
+        }
+
+        return new RepairPlan(pages, documents);
+    }
+
+    public async Task<RepairReport> RepairAsync(
+        DoctorStore store,
+        RepairOptions? options = null,
+        IProgress<RepairProgress>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(store);
+        options ??= new RepairOptions();
+
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+
+        var documents = DocumentsInScope(store, options);
 
         var totalPages = documents.Sum(d => d.FlaggedPages);
 
@@ -201,10 +247,7 @@ public sealed class PageRepairer(IOcrEngine engine, ILogger<PageRepairer>? logge
                 continue;
             }
 
-            var flagged = store.Findings(document.Path, PageVerdict.UnderExtracted)
-                .Where(f => options.IncludeScannedPages || f.Kind == PageKind.Drawn
-                            || document.Verdict == DocumentVerdict.Figures)
-                .ToArray();
+            var flagged = FlaggedInScope(store, document, options);
 
             if (flagged.Length == 0)
                 continue;
@@ -226,7 +269,7 @@ public sealed class PageRepairer(IOcrEngine engine, ILogger<PageRepairer>? logge
                     continue;
                 }
 
-                var dpi = Math.Min(options.MaximumDpi, options.Dpi ?? finding.SuggestedDpi);
+                var dpi = DpiFor(finding, options);
 
                 try
                 {

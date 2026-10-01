@@ -709,18 +709,29 @@ internal static class RepairCommand
             : "Scope    : drawn pages only. --include-scans also redoes scanned pages whose OCR missed text");
 
         // Before, not after. A repair pass over a corpus backlog is a multi-hour commitment, and
-        // somebody deciding whether to start one now or overnight needs the number at the top.
-        if (summary.OutstandingPages > 0)
+        // somebody deciding whether to start one now or overnight needs the number at the top. It
+        // costs exactly the pages this scope will read, each at the rate measured for its kind and
+        // resolution, because one average rate was wrong by a fifth on the jobs that mattered.
+        var plan = PageRepairer.Plan(store, options);
+        if (plan.Pages.Count > 0)
         {
-            var hours = summary.OutstandingPages / MeasuredThroughput.PagesPerMinuteRepairing / 60.0;
-            var howLong = hours < 1
-                ? $"{hours * 60:F0} minutes"
-                : $"{hours:F1} hours";
+            var estimate = plan.Estimate;
+            var howLong = estimate.TotalHours < 1
+                ? $"{estimate.TotalMinutes:F0} minutes"
+                : $"{estimate.TotalHours:F1} hours";
 
             Console.WriteLine(
-                $"Expect   : up to {summary.OutstandingPages:N0} page(s) at the measured " +
-                $"{MeasuredThroughput.PagesPerMinuteRepairing:F0} pages/min — about {howLong}, " +
-                "less whatever this scope leaves out");
+                $"Expect   : {plan.Pages.Count:N0} page(s) in {plan.Documents:N0} document(s) - about {howLong}");
+
+            foreach (var group in plan.Pages
+                .GroupBy(p => (p.Kind, p.Dpi))
+                .OrderBy(g => g.Key.Kind).ThenBy(g => g.Key.Dpi))
+            {
+                var kind = group.Key.Kind == PageKind.Drawn ? "drawn" : "scanned";
+                Console.WriteLine(
+                    $"           {group.Count(),7:N0} {kind,-7} at {group.Key.Dpi} dpi, " +
+                    $"~{RepairThroughput.PagesPerMinute(group.Key.Kind, group.Key.Dpi):F0} pages/min");
+            }
         }
 
         Console.WriteLine();
@@ -728,6 +739,15 @@ internal static class RepairCommand
         if (summary.OutstandingPages == 0 && !options.Force && options.RedoBefore is null)
         {
             Console.WriteLine("Every flagged page has already been recovered. --redo does them again.");
+            return 0;
+        }
+
+        // Stops before the models load, so the cost of a pass can be read without the GPU.
+        if (arguments.Has("plan"))
+        {
+            Console.WriteLine(plan.Pages.Count == 0
+                ? "--plan given: nothing in this scope to read, and nothing was run."
+                : "--plan given: nothing was run.");
             return 0;
         }
 

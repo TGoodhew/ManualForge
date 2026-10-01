@@ -204,7 +204,8 @@ manualforge index  D:\Manuals     # build or update the search index
 - **`repair`:** it never writes to a PDF. Its text goes into the audit database and reaches search
   at the next `index`. By default it does pages whose content was drawn as graphics.
   `--include-scans` also does scanned pages whose existing OCR missed lettering, which on a large
-  library is hours of work.
+  library is hours of work. Before it starts, it says how many pages it will read and how long that
+  should take. `repair <library> --plan` prints just that and stops, without using the GPU.
 - **`manualforge status D:\Manuals`:** shows the work queue and an estimate at any time, without
   changing anything.
 

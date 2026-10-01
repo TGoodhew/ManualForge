@@ -230,7 +230,9 @@ internal sealed class CommandLine
                                       the same time and carries on where it stopped.
               --limit <n>             Stop after n documents, worst first.
               --documents <file>      Repair only the PDFs listed in <file>, one path per line.
-              --worst-only            Skip documents the audit called merely figure-heavy.
+              --plan                  Say which pages this would read and how long it should
+                                      take, then stop. Loads no models and uses no GPU.
+              --worst-only           Skip documents the audit called merely figure-heavy.
               --include-scans         Also redo scanned pages whose existing OCR missed lettering.
                                       A different problem from the one the audit was built to find,
                                       and on a corpus this size, hours of work. Off by default.
