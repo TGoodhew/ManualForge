@@ -213,6 +213,11 @@ internal static class RunCommand
             RetrySkipped = arguments.Has("retry-skipped"),
             ReadCompletedAgain = arguments.Has("redo-completed"),
             Deduplicate = !arguments.Has("no-dedup"),
+            // One path per line, as for repair: reading a few files again without the rest.
+            Documents = arguments.Get("documents") is { } list
+                ? File.ReadLines(list).Select(l => l.Trim()).Where(l => l.Length > 0 && !l.StartsWith('#'))
+                    .Select(Path.GetFullPath).ToList()
+                : [],
         };
 
         var engineOptions = new OcrEngineOptions

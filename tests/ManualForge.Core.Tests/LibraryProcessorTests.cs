@@ -276,6 +276,33 @@ public class LibraryProcessorTests : IDisposable
     }
 
     [Fact]
+    public void ReadingAgainCanBeLimitedToTheFilesNamed()
+    {
+        // Eight files needed reading again on 1 October; the other 155 finished ones did not.
+        var named = TestPdf.Scanned(InRoot("hp", "8340B.pdf"), pages: 2);
+        var other = TestPdf.Scanned(InRoot("hp", "8341B.pdf"), pages: 1);
+        var options = NewOptions();
+
+        var (first, _) = NewProcessor(EngineReading("HEWLETT"));
+        first.Survey(options);
+        first.Run(options);
+
+        var redo = new LibraryOptions { Root = _root, ReadCompletedAgain = true, Documents = [named] };
+        var (second, engine) = NewProcessor(EngineReading("AGILENT"));
+        second.Survey(redo);
+        var outcome = Assert.Single(second.Run(redo));
+
+        Assert.Equal(named, outcome.Path);
+        Assert.Equal(2, engine.PagesRecognised);
+        Assert.Contains("AGILENT", ExtractText(named), StringComparison.Ordinal);
+        Assert.Contains("HEWLETT", ExtractText(other), StringComparison.Ordinal);
+
+        using var store = LibraryProcessor.OpenStore(redo);
+        Assert.Equal(FileStatus.Completed, store.Find(other)!.Status);
+        Assert.Equal(ClassAction.Ocr, store.Find(other)!.Action);
+    }
+
+    [Fact]
     public void AFinishedFileThatFailedAfterBeingMovedIsReadAgainFromItsOriginal()
     {
         // Two SME manuals were finished in _OCR_QUEUE and then moved. Their records came back as

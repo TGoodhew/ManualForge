@@ -655,6 +655,12 @@ build that took a copied file's new modification time for a change - is found ag
 record is relinked to it and the file is read again with the rest. On 30 September 2026 that was
 164 files, 21,909 pages, where the first pass on the 29th reached none: a restore from backup had
 rounded every file's time to the whole second, and every finished record had been reset.
+A failed record is relinked the same way: a finished file moved to another folder comes back as
+new, and its own text layer is then refused as somebody else's.
+
+`--documents <file>` limits a run to the PDFs listed in it, one path per line. With
+`--redo-completed` that reads a handful of files again without reading every finished file again,
+which is how the eight files the 30 September re-read had stripped or failed were redone.
 
 `--redo-before` re-reads repaired pages whose repair is older than the time given. Unlike `--redo`
 it can be interrupted and restarted with the same time and will carry on where it stopped - the

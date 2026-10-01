@@ -72,6 +72,15 @@ public sealed class LibraryOptions
     public bool ReadCompletedAgain { get; init; }
 
     /// <summary>
+    /// Full paths of the only library files to relink, reopen or process. Empty means all of them.
+    /// For reading a handful of files again without reading every finished file again.
+    /// </summary>
+    public IReadOnlyList<string> Documents { get; init; } = [];
+
+    internal bool Includes(string path)
+        => Documents.Count == 0 || Documents.Contains(Path.GetFullPath(path), StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
     /// Recognise each distinct document once, copying the result to any byte-identical twins.
     /// On a library assembled over years this is not a marginal saving.
     /// </summary>
@@ -144,7 +153,9 @@ public sealed class LibraryProcessor(
             if (relinked > 0)
                 _logger.LogInformation("Relinked {Count} finished file(s) to originals their records had lost", relinked);
 
-            var reopened = store.ReopenCompletedForReading();
+            var reopened = options.Documents.Count == 0
+                ? store.ReopenCompletedForReading()
+                : store.ReopenCompletedForReading(options.Documents);
             _logger.LogInformation("Reading {Count} finished file(s) again from their originals", reopened);
         }
 
@@ -219,6 +230,7 @@ public sealed class LibraryProcessor(
             cancellationToken.ThrowIfCancellationRequested();
 
             if (record.OriginalPath is not null
+                || !options.Includes(record.Path)
                 || record.Status is not (FileStatus.Skipped or FileStatus.Classified or FileStatus.Discovered
                     or FileStatus.Failed)
                 || !File.Exists(record.Path))
@@ -329,7 +341,7 @@ public sealed class LibraryProcessor(
 
         using var store = OpenStore(options);
 
-        var outstanding = store.Outstanding();
+        var outstanding = store.Outstanding().Where(r => options.Includes(r.Path)).ToList();
         if (options.SmallestFirst)
             outstanding = outstanding.OrderBy(r => r.Fingerprint.SizeBytes).ToList();
 

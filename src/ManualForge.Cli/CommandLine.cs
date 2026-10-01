@@ -166,6 +166,8 @@ internal sealed class CommandLine
                                       replacing the searchable copy an earlier run made. That copy
                                       is kept under _superseded in the originals folder. With
                                       --dry-run it times the work and changes nothing.
+              --documents <file>      Run only the PDFs listed in <file>, one path per line.
+                                      With --redo-completed, reads just those again.
               --no-dedup              Recognise every copy separately instead of once per document.
               --refuse-signed         Skip digitally signed files. By default they are processed,
                                       which invalidates their signatures; every one is reported.

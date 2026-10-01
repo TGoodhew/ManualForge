@@ -403,16 +403,29 @@ public sealed class JobStore : IDisposable
     /// read again from.
     /// </para>
     /// </summary>
-    public int ReopenCompletedForReading()
+    public int ReopenCompletedForReading() => Reopen(null);
+
+    /// <summary>The same, for the named files only.</summary>
+    public int ReopenCompletedForReading(IEnumerable<string> paths)
     {
+        ArgumentNullException.ThrowIfNull(paths);
+        return paths.Select(Path.GetFullPath).Distinct(StringComparer.OrdinalIgnoreCase).Sum(p => Reopen(p));
+    }
+
+    private int Reopen(string? path)
+    {
+        const string Finished =
+            "status = 'Completed' AND action IN ('Ocr', 'StripAndRedo') AND original_path IS NOT NULL";
+        var only = path is null ? "" : " AND path = $p";
+
         using var transaction = _connection.BeginTransaction();
 
         using (var pages = _connection.CreateCommand())
         {
             pages.Transaction = transaction;
-            pages.CommandText =
-                "DELETE FROM pages WHERE path IN (SELECT path FROM files WHERE status = 'Completed' " +
-                "AND action IN ('Ocr', 'StripAndRedo') AND original_path IS NOT NULL)";
+            pages.CommandText = $"DELETE FROM pages WHERE path IN (SELECT path FROM files WHERE {Finished}{only})";
+            if (path is not null)
+                pages.Parameters.AddWithValue("$p", path);
             pages.ExecuteNonQuery();
         }
 
@@ -422,8 +435,10 @@ public sealed class JobStore : IDisposable
             files.Transaction = transaction;
             files.CommandText =
                 "UPDATE files SET status = 'Classified', action = 'ReadAgain', error = NULL, updated_utc = $u " +
-                "WHERE status = 'Completed' AND action IN ('Ocr', 'StripAndRedo') AND original_path IS NOT NULL";
+                $"WHERE {Finished}{only}";
             files.Parameters.AddWithValue("$u", Now());
+            if (path is not null)
+                files.Parameters.AddWithValue("$p", path);
             reopened = files.ExecuteNonQuery();
         }
 
