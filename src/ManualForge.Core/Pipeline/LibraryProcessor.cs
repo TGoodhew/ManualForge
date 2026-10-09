@@ -520,6 +520,12 @@ public sealed class LibraryProcessor(
                 _logger.LogInformation(
                     "Flattened {Path}: cleared {Blocker}, {Pages} pages, {Ratio:P1} of the original size",
                     path, flattenResult.BlockerCleared, flattenResult.PageCount, flattenResult.SizeRatio);
+                if (flattenResult.Dropped.Count > 0)
+                {
+                    _logger.LogWarning(
+                        "Flattening {Path} left out of the copy: {Dropped} The original keeps them.",
+                        path, string.Join(" ", flattenResult.Dropped));
+                }
             }
 
             // Step 2: if we are replacing an existing text layer, remove it first so that

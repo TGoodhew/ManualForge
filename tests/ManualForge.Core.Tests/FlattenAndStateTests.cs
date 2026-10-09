@@ -207,6 +207,142 @@ public class FlattenTests : IDisposable
         Assert.InRange(result.SizeRatio, 0.5, 1.5);
     }
 
+    /// <summary>
+    /// A locked four-page manual with what a real one has at document level: nested bookmarks,
+    /// printed page labels, a link from page 1 to page 3, a form, and a vendor's private key.
+    /// </summary>
+    private string CreateNavigableDocument(string name)
+    {
+        var path = Path.Combine(_directory, name);
+        using (var document = new PdfDocument())
+        {
+            var pages = Enumerable.Range(0, 4).Select(_ => document.AddPage()).ToArray();
+
+            var contents = document.Outlines.Add("Contents", pages[0]);
+            var chapter = document.Outlines.Add("Chapter 2", pages[1]);
+            chapter.Outlines.Add("Adjustments", pages[2]);
+            contents.Outlines.Add("Parts list", pages[3]);
+
+            pages[0].AddDocumentLink(new PdfRectangle(new XRect(50, 50, 100, 20)), 3);
+
+            var catalog = document.Internals.Catalog;
+            var labels = new PdfDictionary(document);
+            var nums = new PdfArray(document);
+            var roman = new PdfDictionary(document);
+            roman.Elements["/S"] = new PdfName("/r");
+            var section = new PdfDictionary(document);
+            section.Elements["/S"] = new PdfName("/D");
+            section.Elements["/P"] = new PdfString("5-");
+            nums.Elements.Add(new PdfInteger(0));
+            nums.Elements.Add(roman);
+            nums.Elements.Add(new PdfInteger(2));
+            nums.Elements.Add(section);
+            labels.Elements["/Nums"] = nums;
+            catalog.Elements["/PageLabels"] = labels;
+
+            var form = new PdfDictionary(document);
+            form.Elements["/Fields"] = new PdfArray(document);
+            catalog.Elements["/AcroForm"] = form;
+            catalog.Elements["/FICL:Enfocus"] = new PdfDictionary(document);
+
+            document.SecuritySettings.OwnerPassword = "secret";
+            document.SecuritySettings.PermitModifyDocument = false;
+            document.Save(path);
+        }
+
+        return path;
+    }
+
+    [Fact]
+    public void BookmarksStillLandOnTheirPagesAfterFlattening()
+    {
+        var source = CreateNavigableDocument("bookmarks.pdf");
+        var output = Path.Combine(_directory, "bookmarks-flat.pdf");
+
+        var result = new PdfFlattener().Flatten(source, output);
+
+        Assert.True(result.IsVerified, string.Join("; ", result.Discrepancies));
+        Assert.Equal(
+            [
+                new Bookmark(0, "Contents", 1),
+                new Bookmark(1, "Parts list", 4),
+                new Bookmark(0, "Chapter 2", 2),
+                new Bookmark(1, "Adjustments", 3),
+            ],
+            Bookmarks.Read(output));
+    }
+
+    [Fact]
+    public void PageLabelsSurviveFlattening()
+    {
+        // Printed page numbers ("ii", "5-3") rather than 1, 2, 3: lost from 5 flattened manuals.
+        var source = CreateNavigableDocument("labels.pdf");
+        var output = Path.Combine(_directory, "labels-flat.pdf");
+
+        new PdfFlattener().Flatten(source, output);
+
+        using var document = PdfReader.Open(output, PdfDocumentOpenMode.Import);
+        var nums = document.Internals.Catalog.Elements.GetDictionary("/PageLabels")?.Elements.GetArray("/Nums");
+        Assert.NotNull(nums);
+        Assert.Equal(4, nums.Elements.Count);
+        var section = (PdfDictionary)nums.Elements[3];
+        Assert.Equal("5-", section.Elements.GetString("/P"));
+    }
+
+    [Fact]
+    public void ALinkToAnotherPageStillOpensThatPageAndNoDetachedCopyIsLeft()
+    {
+        // Page import followed a link to the page it opens and imported a detached copy of it, so
+        // every internal link in a flattened file led outside the document: all 141 of 2235_lg's did.
+        var source = CreateNavigableDocument("links.pdf");
+        var output = Path.Combine(_directory, "links-flat.pdf");
+
+        var result = new PdfFlattener().Flatten(source, output);
+
+        Assert.True(result.IsVerified, string.Join("; ", result.Discrepancies));
+        Assert.Equal([(1, (int?)3)], Bookmarks.Links(output));
+
+        using var document = PdfReader.Open(output, PdfDocumentOpenMode.Import);
+        var pageObjects = document.Internals.GetAllObjects().OfType<PdfDictionary>()
+            .Count(o => o.Elements.GetName("/Type") == "/Page");
+        Assert.Equal(document.PageCount, pageObjects);
+    }
+
+    [Fact]
+    public void WhatIsLeftBehindIsReportedWithItsReasonAndAnythingElseAsLost()
+    {
+        var source = CreateNavigableDocument("dropped.pdf");
+        var output = Path.Combine(_directory, "dropped-flat.pdf");
+
+        var result = new PdfFlattener().Flatten(source, output);
+
+        Assert.True(result.IsVerified, string.Join("; ", result.Discrepancies));
+        Assert.Contains(result.Dropped, d => d.StartsWith("/AcroForm left behind:", StringComparison.Ordinal));
+        Assert.Contains("/FICL:Enfocus was lost.", result.Dropped);
+        Assert.DoesNotContain(result.Dropped, d => d.StartsWith("/Outlines", StringComparison.Ordinal));
+        Assert.DoesNotContain(result.Dropped, d => d.StartsWith("/PageLabels", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ComparisonCatchesABookmarkThatNoLongerOpensItsPage()
+    {
+        Bookmark[] before = [new(0, "TOC", 2)];
+        Bookmark[] after = [new(0, "TOC", null)];
+
+        Assert.Single(PdfFlattener.CompareBookmarks(before, after));
+        Assert.Empty(PdfFlattener.CompareBookmarks(before, before));
+    }
+
+    [Fact]
+    public void ComparisonCatchesALinkThatLeadsOutOfTheDocument()
+    {
+        (int, int?)[] before = [(1, 3)];
+        (int, int?)[] after = [(1, null)];
+
+        var problems = PdfFlattener.CompareLinks(before, after);
+        Assert.Contains(problems, p => p.Contains("outside the document", StringComparison.Ordinal));
+    }
+
     [Fact]
     public void ComparisonCatchesAChangedPageCount()
     {
