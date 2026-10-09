@@ -32,8 +32,16 @@ public sealed class OcrEngineOptions
     public int DeviceId { get; init; } = 0;
 
     /// <summary>
-    /// Recognition batch size. Sized against VRAM at startup rather than fixed, because an 8 GB
-    /// card shared with a desktop session has considerably less than 8 GB actually free.
+    /// How many line crops the recogniser reads in one pass. Fixed at 8, not sized from VRAM.
+    ///
+    /// <para>
+    /// It is not only a speed setting. Crops in a batch are padded to the widest of them, and the
+    /// padding moves where word gaps land: on 100 typical pages batch 16 read 14% faster than 8 on
+    /// a 16 GB card but changed the words on 58 pages, and ran a dozen part numbers into their
+    /// makers' names (<c>0007.5789.00ROEDERSTEI</c>), which makes both unsearchable. The page
+    /// cache does not record it either, so changing it mid-run would mix two readings. Issue #31;
+    /// docs/measurements/gpu-concurrency-5070ti.md.
+    /// </para>
     /// </summary>
     public int BatchSize { get; init; } = 8;
 
