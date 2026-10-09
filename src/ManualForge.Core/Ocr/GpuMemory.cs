@@ -28,16 +28,17 @@ public sealed record GpuMemory(int TotalMiB, int UsedMiB, string? Name, int? Uti
 /// NVML or CUDA interop.
 ///
 /// This matters more than a display statistic. Running more pages through the engine at once is
-/// the single biggest throughput lever available — the GPU averages 40% utilisation with one page
+/// the single biggest throughput lever available — the GPU is idle for most of each page with one
 /// in flight, because each page alternates CPU phases with GPU phases — but going past what VRAM
 /// holds does not fail cleanly. Windows lets the driver spill into system memory over PCIe, and
-/// throughput falls off a cliff rather than erroring: measured at 83 pages/min with room to spare
-/// and 7.6 pages/min once the card was full. An order of magnitude slower, with no exception to
-/// tell you why.
+/// throughput falls off a cliff rather than erroring. Measured on both cards this has run on: an
+/// 8 GB RTX 3060 Ti went from 83 pages/min with room to spare to 7.6 once full, and a 16 GB
+/// RTX 5070 Ti from 91.4 at four pages to 13.7 at six. An order of magnitude slower, with no
+/// exception to tell you why.
 ///
 /// So concurrency is chosen from free VRAM at startup, and the figure that matters is free rather
-/// than total: the desktop, a browser and whatever else is running already hold 2.6-2.9 GB of this
-/// 8 GB card before any work begins.
+/// than total: the desktop, a browser and whatever else is running hold 2.6-2.9 GB of either card
+/// before any work begins.
 /// </summary>
 public static class GpuMemoryProbe
 {
@@ -45,17 +46,26 @@ public static class GpuMemoryProbe
     /// Budgeted cost of each extra page in flight. A budget rather than a measurement, and the
     /// distinction is worth being honest about.
     ///
-    /// What was actually observed on an 8 GB card is that peak VRAM barely moved with concurrency
-    /// on a single document — 7,613, 7,655 and 7,709 MiB at one, two and three pages — because
-    /// ONNX Runtime's arena is already grown by the time the second page arrives. But across
-    /// twenty-four pages of varied size the same card reached 7,950 MiB and collapsed. So the
-    /// marginal cost is driven by the variety of page sizes the arena has to accommodate, not by
-    /// the number of pages in flight, and no constant describes it properly.
+    /// ONNX Runtime's arena grows into whatever room it is given, so what a page costs depends on
+    /// the card. On an 8 GB card peak VRAM barely moved with concurrency on a single document —
+    /// 7,613, 7,655 and 7,709 MiB at one, two and three pages — because there was no more room to
+    /// grow into, and across twenty-four pages of varied size it reached 7,950 MiB and collapsed.
+    /// On a 16 GB card, over a hundred varied pages, each extra page added 1.5-3.6 GB: 8.2, 11.8,
+    /// 13.3 and 15.7 GB at one to four pages (docs/measurements/gpu-concurrency-5070ti.md).
     ///
-    /// 700 MiB is therefore chosen to be comfortably larger than anything observed, so that the
-    /// arithmetic errs towards fewer pages. The failure it is erring away from is not a slowdown.
+    /// 3,000 MiB is the middle of what the larger card measured, rounded up. It was 700, chosen
+    /// on the 8 GB card where nothing larger was ever seen, and at 700 the arithmetic would have
+    /// put eighteen pages on the 16 GB card: only the ceiling kept it off the cliff. Erring
+    /// towards fewer pages is the right way round, because the failure it is erring away from is
+    /// not a slowdown.
     /// </summary>
-    public const int MarginalMiBPerConcurrentPage = 700;
+    public const int MarginalMiBPerConcurrentPage = 3_000;
+
+    /// <summary>
+    /// The smallest card that gets three pages in flight by default. 16 GB cards report a little
+    /// under 16,384 MiB (the RTX 5070 Ti reports 16,303), so the line sits well below that.
+    /// </summary>
+    public const int LargeCardMiB = 15_000;
 
     /// <summary>Headroom left unused, so that a desktop that grows does not push the run over.</summary>
     public const int ReserveMiB = 512;
@@ -92,13 +102,7 @@ public static class GpuMemoryProbe
     /// </summary>
     /// <param name="memory">What the probe found, or null when it could not look.</param>
     /// <param name="ceiling">
-    /// Never go above this however much memory there is.
-    ///
-    /// Two by default, not three. Three was the fastest setting measured — 83.3 pages a minute
-    /// against 78.1 — but it was also the setting that tipped an 8 GB card into spilling once the
-    /// pages were varied enough, and the difference between those two figures is 6% while the
-    /// difference between either and spilling is a factor of ten. Three is available by asking for
-    /// it explicitly, which is the right way round for a choice with that shape.
+    /// Never go above this however much memory there is. Null takes <see cref="CeilingFor"/>.
     /// </param>
     /// <remarks>
     /// One is always safe, because it is what a single page needs and that is already accounted
@@ -106,17 +110,44 @@ public static class GpuMemoryProbe
     /// nvidia-smi, or CPU execution — one is also the right answer: on CPU the work is already
     /// spread across every core inside the engine, and adding outer concurrency only contends.
     /// </remarks>
-    public static int ConcurrencyFor(GpuMemory? memory, int ceiling = 2)
+    public static int ConcurrencyFor(GpuMemory? memory, int? ceiling = null)
     {
-        if (memory is null || ceiling < 1)
+        if (memory is null)
+            return 1;
+
+        var limit = ceiling ?? CeilingFor(memory);
+        if (limit < 1)
             return 1;
 
         var spare = memory.FreeMiB - ReserveMiB;
         if (spare <= 0)
             return 1;
 
-        return Math.Clamp(1 + spare / MarginalMiBPerConcurrentPage, 1, ceiling);
+        return Math.Clamp(1 + spare / MarginalMiBPerConcurrentPage, 1, limit);
     }
+
+    /// <summary>
+    /// The most pages in flight a card gets without being asked: three from 16 GB, two below.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Two on an 8 GB card, not three. Three was the fastest setting measured there — 83.3 pages a
+    /// minute against 78.1 — but it was also the setting that tipped the card into spilling once
+    /// the pages were varied enough, and the difference between those two figures is 6% while the
+    /// difference between either and spilling is a factor of ten.
+    /// </para>
+    /// <para>
+    /// Three on a 16 GB card, not four, for the same reason one step up. Four was the fastest there
+    /// at 91.4 pages a minute against 82.9-86.8, but it peaked at 15.7 GB of 16.3, leaving nothing
+    /// for a browser or a game opened during a run, and six had already collapsed to 13.7. Three
+    /// peaked at 12.4-13.3 GB. Nothing larger has been measured, so a bigger card gets three too.
+    /// </para>
+    /// <para>
+    /// More is available by asking for it explicitly, which is the right way round for a choice
+    /// with that shape.
+    /// </para>
+    /// </remarks>
+    public static int CeilingFor(GpuMemory memory) => memory.TotalMiB >= LargeCardMiB ? 3 : 2;
 
     private static string? RunNvidiaSmi(string arguments)
     {
