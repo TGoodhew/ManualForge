@@ -76,13 +76,21 @@ public sealed record PipelineReport(
 /// Throughput figures used to estimate how long work will take.
 ///
 /// These are measurements, not constants, and they go stale: the first was 55.9 pages/min when
-/// recognition was serial, which the estimates went on quoting after the pipeline had made it 104.
-/// Named here so that when it changes again there is one place to change it.
+/// recognition was serial, which the estimates went on quoting after the pipeline had made it 104,
+/// and that was quoted for a card that had been replaced. Named here so that when it changes
+/// again there is one place to change it.
 /// </summary>
 public static class MeasuredThroughput
 {
-    /// <summary>Pages a minute on an RTX 3060 Ti at 300 dpi, two pages in flight, measured end to end.</summary>
-    public const double PagesPerMinuteOnGpu = 104.1;
+    /// <summary>
+    /// Pages a minute on an RTX 5070 Ti at 300 dpi and the default three pages in flight, measured
+    /// end to end on the 100 pages of <c>_compare/typical-test.pdf</c> (9 Oct 2026, #31).
+    ///
+    /// Not comparable with the 104.1 it replaces, which was five manuals on an RTX 3060 Ti at two
+    /// pages: the new card ran the typical pages at 74.9 at two, so they are the denser set, and
+    /// estimates from this figure should err long. Re-take it from #25's full run.
+    /// </summary>
+    public const double PagesPerMinuteOnGpu = 87.3;
 
     /// <summary>The same corpus on 24 CPU threads, for a machine with no usable GPU.</summary>
     public const double PagesPerMinuteOnCpu = 15.2;
