@@ -82,6 +82,31 @@ settings fingerprint does not include it. Batch 16 is not adopted until it has b
 Acrobat-token harness on the table and typical books (`tools/measure-single-characters.cs`). Batch 32
 was slower than 16 as well as different.
 
+## cuDNN algorithm search makes no difference
+
+ONNX Runtime's CUDA provider defaults to `cudnn_conv_algo_search=EXHAUSTIVE`, which benchmarks
+convolution algorithms for each new input shape. PaddleOcrNet's documentation recommends `HEURISTIC`
+for OCR, and ManualForge has never set it. While profiling for #32, heuristic looked about 2 GB
+lighter. **That was wrong.** The comparison put late-morning runs against early-morning ones, and
+in between the desktop's own share of the card fell from about 2.6 GB to 1.1 GB. Run back to back,
+with the card's memory read before each run and subtracted:
+
+| Search | Pages in flight | Pages/min | ManualForge's own peak |
+|---|---|---|---|
+| exhaustive | 1 | 49.7 | 5.5 GB |
+| heuristic | 1 | 50.3 | 5.5 GB |
+| exhaustive | 3 | 83.9 / 87.5 | 13.9 / 13.1 GB |
+| heuristic | 3 | 83.4 / 87.1 | 14.4 / 12.7 GB |
+
+The words were identical every time, and so were all 100 pages compared with PdfPig. Speed and
+memory are the same within noise, so the default is left alone. `DEFAULT` (no search at all) was
+far slower: over 9 minutes for what takes 1, stopped.
+
+**The same drift affects every peak in this document.** The memory pool grows into whatever room is
+free, so ManualForge's peak at 3 pages was about 10 GB with the desktop holding 2.6 GB, and 12.7–14.4
+GB with it holding 1.1. Peaks here are the card's total, desktop included, and show what fitted, not
+what a page needs. 3 pages in flight ran a dozen times without reaching the cliff.
+
 ## Rasterisers
 
 Two, four and six give the same throughput. Rasterising is not the limit.
