@@ -41,6 +41,10 @@ per machine (and per driver update), not a sign of a CPU fallback.
 | 3 | 8 | 4 | 86.6 | 14.6 GB | 41% | 26% | 36,001 |
 | 3 | 8 | 6 | 85.8 | 15.6 GB | 37% | 26% | 36,001 |
 
+After the change, `run` with no flags chose three pages in flight by itself (15,033 MiB free at
+startup) and read the same 100 pages at **87.3 pages a minute**, 36,001 words, peak 11.7 GB. That
+is the figure `MeasuredThroughput.PagesPerMinuteOnGpu` now carries.
+
 Serial `manualforge ocr` on the same pages: 36.2 pages a minute, GPU 18%, CPU 16%. The same three
 pages-in-flight setting run twice came out 86.8 and 82.9, so differences under about 5% are noise.
 
