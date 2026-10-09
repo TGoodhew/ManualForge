@@ -32,7 +32,8 @@ public sealed record FlattenResult(
     long SourceBytes,
     long OutputBytes,
     ModificationBlocker BlockerCleared,
-    IReadOnlyList<string> Discrepancies)
+    IReadOnlyList<string> Discrepancies,
+    IReadOnlyList<string> Dropped)
 {
     public bool IsVerified => Discrepancies.Count == 0;
 
@@ -51,7 +52,16 @@ public sealed record FlattenResult(
 /// the one outcome worth ruling out completely.
 ///
 /// Every flatten is verified before it is accepted: page count, per-page geometry and rotation, and
-/// the pixel dimensions and compression filter of every image on every page must match the source.
+/// the pixel dimensions and compression filter of every image on every page must match the source,
+/// and so must every bookmark's title, depth and destination page, and every link's destination.
+///
+/// <para>
+/// The document's own entries - bookmarks, page labels, how it opens, its optional-content layers -
+/// are carried across by <see cref="CatalogCarrier"/>. Page import alone drops them, which cost 7
+/// flattened manuals their bookmarks before anyone noticed (#28). What is left behind on purpose -
+/// forms, signatures, tagging - and anything else that does not survive is listed in
+/// <see cref="FlattenResult.Dropped"/>, so it is reported rather than silent.
+/// </para>
 /// </summary>
 public sealed class PdfFlattener
 {
@@ -75,6 +85,8 @@ public sealed class PdfFlattener
         }
 
         var sourceFingerprints = Fingerprint(sourcePath);
+        var sourceBookmarks = Bookmarks.Read(sourcePath);
+        var sourceLinks = Bookmarks.Links(sourcePath);
 
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outputPath))!);
         var temporary = outputPath + ".partial";
@@ -92,14 +104,22 @@ public sealed class PdfFlattener
                 target.Info.Keywords = source.Info.Keywords;
                 target.Info.Creator = source.Info.Creator;
 
+                var imported = new List<(PdfPage, PdfPage)>(source.PageCount);
                 for (var i = 0; i < source.PageCount; i++)
-                    target.AddPage(source.Pages[i]);
+                    imported.Add((source.Pages[i], target.AddPage(source.Pages[i])));
+
+                var carrier = new CatalogCarrier(target);
+                carrier.MapImportedPages(imported);
+                carrier.CarryCatalog(source.Internals.Catalog);
 
                 target.Save(temporary);
             }
 
             var outputFingerprints = Fingerprint(temporary);
-            var discrepancies = Compare(sourceFingerprints, outputFingerprints);
+            var discrepancies = Compare(sourceFingerprints, outputFingerprints).ToList();
+            discrepancies.AddRange(CompareBookmarks(sourceBookmarks, Bookmarks.Read(temporary)));
+            discrepancies.AddRange(CompareLinks(sourceLinks, Bookmarks.Links(temporary)));
+            var dropped = DroppedEntries(sourcePath, temporary);
 
             // Only accept the flattened file once it has been shown to match. A mismatch leaves the
             // partial file in place for inspection rather than quietly replacing anything.
@@ -108,7 +128,7 @@ public sealed class PdfFlattener
                 return new FlattenResult(
                     sourcePath, temporary, outputFingerprints.Count,
                     new FileInfo(sourcePath).Length, new FileInfo(temporary).Length,
-                    capabilities.Blocker, discrepancies);
+                    capabilities.Blocker, discrepancies, dropped);
             }
 
             File.Move(temporary, outputPath, overwrite: true);
@@ -116,7 +136,7 @@ public sealed class PdfFlattener
             return new FlattenResult(
                 sourcePath, outputPath, outputFingerprints.Count,
                 new FileInfo(sourcePath).Length, new FileInfo(outputPath).Length,
-                capabilities.Blocker, discrepancies);
+                capabilities.Blocker, discrepancies, dropped);
         }
         catch
         {
@@ -237,5 +257,67 @@ public sealed class PdfFlattener
         }
 
         return problems;
+    }
+
+    /// <summary>
+    /// Every bookmark must survive with its title, depth and destination page. A difference is a
+    /// failure of the carrying, not of the source, so it fails the flatten.
+    /// </summary>
+    public static IReadOnlyList<string> CompareBookmarks(IReadOnlyList<Bookmark> before, IReadOnlyList<Bookmark> after)
+    {
+        if (before.Count != after.Count)
+            return [$"Bookmarks changed: {before.Count} became {after.Count}."];
+
+        for (var i = 0; i < before.Count; i++)
+        {
+            if (before[i] != after[i])
+                return [$"Bookmark {i + 1} changed: '{before[i]}' became '{after[i]}'."];
+        }
+
+        return [];
+    }
+
+    /// <summary>
+    /// Every link that opened a page must still open the same page. Before #28 a flattened copy's
+    /// links led to detached copies of their pages: 2235_lg's 141 links all did.
+    /// </summary>
+    public static IReadOnlyList<string> CompareLinks(
+        IReadOnlyList<(int OnPage, int? Opens)> before, IReadOnlyList<(int OnPage, int? Opens)> after)
+    {
+        if (before.Count != after.Count)
+            return [$"Links changed: {before.Count} became {after.Count}."];
+
+        for (var i = 0; i < before.Count; i++)
+        {
+            if (before[i] != after[i])
+            {
+                var opens = after[i].Opens is { } page ? $"page {page}" : "a page outside the document";
+                return [$"A link on page {before[i].OnPage} that opened page {before[i].Opens} now opens {opens}."];
+            }
+        }
+
+        return [];
+    }
+
+    /// <summary>
+    /// The catalog entries the source has and the copy does not, each with the reason it was left
+    /// behind, or a plain statement that it was lost when there is no reason.
+    /// </summary>
+    private static IReadOnlyList<string> DroppedEntries(string sourcePath, string outputPath)
+    {
+        static HashSet<string> Keys(string path)
+        {
+            using var document = PdfReader.Open(path, PdfDocumentOpenMode.Import);
+            return [.. document.Internals.Catalog.Elements.Keys];
+        }
+
+        var kept = Keys(outputPath);
+        return Keys(sourcePath)
+            .Where(key => key is not "/Type" and not "/Pages" && !kept.Contains(key))
+            .Order(StringComparer.Ordinal)
+            .Select(key => CatalogCarrier.LeftBehind.TryGetValue(key, out var reason)
+                ? $"{key} left behind: {reason}."
+                : $"{key} was lost.")
+            .ToList();
     }
 }
