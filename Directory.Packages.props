@@ -6,8 +6,8 @@
   </PropertyGroup>
 
   <ItemGroup Label="OCR">
-    <PackageVersion Include="PaddleOcrNet" Version="2.2.0" />
-    <PackageVersion Include="PaddleOcrNet.Gpu" Version="2.2.0" />
+    <PackageVersion Include="PaddleOcrNet" Version="2.2.1" />
+    <PackageVersion Include="PaddleOcrNet.Gpu" Version="2.2.1" />
   </ItemGroup>
 
   <ItemGroup Label="PDF">

@@ -4,9 +4,9 @@ using Xunit;
 namespace ManualForge.Core.Tests;
 
 /// <summary>
-/// Deskew is off unless asked for. PaddleOcrNet 2.2.0 maps a straightened page's text back 3-5 pt
-/// beside its ink, and with it off the same pages read slightly more.
-/// docs/measurements/deskew-offset.md.
+/// Deskew is off unless asked for. With it off the same pages read slightly more. Under
+/// PaddleOcrNet 2.2.0 it also put a straightened page's text up to 6.6 pt beside its ink; 2.2.1 fixes
+/// most of that. docs/measurements/deskew-offset.md.
 /// </summary>
 public sealed class DeskewDefaultTests
 {

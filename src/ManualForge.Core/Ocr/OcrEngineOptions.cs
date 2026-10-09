@@ -38,14 +38,14 @@ public sealed class OcrEngineOptions
     public int BatchSize { get; init; } = 8;
 
     /// <summary>
-    /// Straighten a skewed page before recognition. Off by default, because it misplaces the text.
+    /// Straighten a skewed page before recognition. Off by default, because it reads no more for it.
     ///
     /// <para>
-    /// PaddleOcrNet 2.2.0 rotates a skewed page onto an enlarged canvas and maps what it reads back
-    /// onto the original, and the mapping comes back several points out: on the table book every
-    /// page it straightened had its words 3-5 pt right and 1-3 pt down of their ink, lines and words
-    /// alike, a quarter of the pages. Search still finds the words; selecting them highlights the
-    /// space beside them. Nothing reports the angle it applied, so the shift cannot be undone here.
+    /// It used to misplace the text as well. PaddleOcrNet 2.2.0 rotated a skewed page onto an
+    /// enlarged canvas and mapped what it read back onto the original several points out: on the
+    /// table book 22 pages had their words up to 6.6 pt right and below their ink. 2.2.1 fixes the
+    /// mapping (upstream FarhanLodi/PaddleOcrNet#9, which we reported); on the same book 3 pages
+    /// still sit 1.3-1.5 pt low, and nothing is sideways.
     /// </para>
     ///
     /// <para>
