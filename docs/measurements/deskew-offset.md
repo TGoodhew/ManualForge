@@ -67,3 +67,23 @@ on clean type and cost a fifth of the throughput. Repair already ran with both o
   [FarhanLodi/PaddleOcrNet#9](https://github.com/FarhanLodi/PaddleOcrNet/issues/9), with the probe
   above as the reproduction. If a fixed release lands, re-run the probe before turning deskew back
   on: it has to earn its keep on recognition as well as stop moving the text.
+
+## After the upstream fix (PaddleOcrNet 2.2.1, 9 Oct 2026)
+
+2.2.1 shipped a fix for #9. Re-measured on all 100 table pages with the probe's method: words of 4+
+characters unique on the page, matched by text, and the mean movement of their centres with
+`--deskew` against the same build with deskew off. RTX 5070 Ti, serial `ocr`.
+
+| | Pages moved over 1 pt | Worst | Direction |
+|---|---|---|---|
+| 2.2.0 | 22 | 6.58 pt | right and down, e.g. p62 5.63 right 3.40 down, p75 2.99 right 1.41 down |
+| 2.2.1 | 3 (p21, p44, p92) | 1.53 pt | down only, 1.26-1.53 pt, under 0.15 pt sideways |
+
+The 2.2.0 row matches the table above, so the method holds. The sideways shift is gone; a smaller
+downward one remains on three pages and has not been explained. Deskew stays off: the fix only
+removes the reason it was harmful, not the finding that it reads nothing more. Turning it on would need
+the Acrobat-token comparison re-run first. Serial on these pages, deskew cost 166.6 s against
+162.2 s off.
+
+With deskew off, 2.2.1 reads exactly what 2.2.0 did: on the typical and table books, 86,105
+words each, the same words on every page, and not one box moved by more than 0.01 pt.
