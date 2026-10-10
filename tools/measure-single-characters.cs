@@ -158,6 +158,9 @@ foreach (var config in configs)
 
     int all = 0, hit = 0, mis = 0, miss = 0, s = 0, sHit = 0, sMis = 0, sMiss = 0, sStack = 0, sMerged = 0, sPresent = 0, oursAll = 0, extra = 0;
     using var detail = new StreamWriter(Path.Combine(outDir, $"singles-{tag}.tsv"));
+    // Every Acrobat token, not only singles, with what lies under it: what a breakdown of the
+    // multi-character misses (splits, misreads, Acrobat's own errors) is made from.
+    using var tokens = new StreamWriter(Path.Combine(outDir, $"tokens-{tag}.tsv"));
     using var calibration = new StreamWriter(Path.Combine(outDir, $"calibration-{tag}.tsv"));
     foreach (var p in pages)
     {
@@ -192,6 +195,14 @@ foreach (var config in configs)
             if (single && (verdict == "hit" || under.Any(o => o.T.Length <= 2))) sPresent++;
             if (single)
                 detail.WriteLine($"{p}\t{a.X0.ToString("F1", inv)}\t{a.Y0.ToString("F1", inv)}\t{a.T}\t{verdict}\t{string.Join(' ', under.Select(o => o.T))}");
+
+            // Ours on the same line across the token's whole width, left to right: a token we split
+            // in two shows up here as its pieces.
+            var across = ours[p]
+                .Where(o => o.X1 >= a.X0 + dx - 1.5 && o.X0 <= a.X1 + dx + 1.5 && cy >= o.Y0 - 1.5 && cy <= o.Y1 + 1.5)
+                .OrderBy(o => o.X0).Select(o => o.T);
+            tokens.WriteLine($"{p}\t{a.T}\t{verdict}\t{string.Join(' ', under.Select(o => o.T))}\t{string.Join(' ', across)}\t" +
+                             $"{(a.X0 + dx).ToString("F1", inv)}\t{(a.Y0 + dy).ToString("F1", inv)}\t{(a.X1 + dx).ToString("F1", inv)}\t{(a.Y1 + dy).ToString("F1", inv)}");
         }
         oursAll += ours[p].Count;
         extra += ours[p].Count(o => !used.Contains(o));
