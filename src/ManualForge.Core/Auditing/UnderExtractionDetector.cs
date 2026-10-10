@@ -243,7 +243,7 @@ public sealed class UnderExtractionDetector(DoctorOptions? options = null)
 
         // Words into lines, the way the indexer does: by shared baseline.
         var lines = new List<(RectD Box, List<UglyToad.PdfPig.Content.Word> Words)>();
-        foreach (var word in page.GetWords())
+        foreach (var word in Text.PageWords.Of(page))
         {
             var box = word.BoundingBox;
             var line = lines.FirstOrDefault(l => Math.Abs(l.Box.Y - (page.Height - box.Top)) < 3.0);
