@@ -83,16 +83,20 @@ public sealed record PipelineReport(
 public static class MeasuredThroughput
 {
     /// <summary>
-    /// Pages a minute on an RTX 5070 Ti at 300 dpi and the default three pages in flight, measured
-    /// end to end on the 100 pages of <c>_compare/typical-test.pdf</c> (9 Oct 2026, #31).
+    /// Pages a minute on an RTX 5070 Ti at 300 dpi and the default three pages in flight, over the
+    /// whole of #25's run: 23,045 pages of 172 manuals in 151.9 minutes (9-10 Oct 2026). The
+    /// library's own mix, flattening and writing included, so it is the figure for a library.
     ///
-    /// Not comparable with the 104.1 it replaces, which was five manuals on an RTX 3060 Ti at two
-    /// pages: the new card ran the typical pages at 74.9 at two, so they are the denser set, and
-    /// estimates from this figure should err long. Re-take it from #25's full run.
+    /// The 87.3 it replaces was measured on the 100 pages of <c>_compare/typical-test.pdf</c>, which
+    /// are denser than most of a library, and it quoted 4.4 hours for what took 2.5. A single dense
+    /// manual can still run slower: 08340-90020-serv-v2-4 ran at 141.5.
     /// </summary>
-    public const double PagesPerMinuteOnGpu = 87.3;
+    public const double PagesPerMinuteOnGpu = 151.7;
 
-    /// <summary>The same corpus on 24 CPU threads, for a machine with no usable GPU.</summary>
+    /// <summary>
+    /// 24 CPU threads, for a machine with no usable GPU, measured on the same 100 dense pages as the
+    /// old GPU figure. Never re-taken on a whole library, so it probably errs long, as that one did.
+    /// </summary>
     public const double PagesPerMinuteOnCpu = 15.2;
 
     /// <summary>Hours for a number of pages, at whichever rate applies.</summary>

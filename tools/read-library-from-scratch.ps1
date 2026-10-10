@@ -65,21 +65,21 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-# Minutes per step. run: about 23,000 pages at 85-90 a minute on the RTX 5070 Ti (#31). doctor: the
-# whole library at about 1,400 pages a minute (9 Oct). repair: about 20,000 flagged pages at 38 a
-# minute (9 Oct, scans). Only used to say when it should finish.
+# Minutes per step, as the first full run took them on the RTX 5070 Ti (9-10 Oct 2026, #25): run 23,045
+# pages at 151.7 a minute, doctor 113,623 pages at 1,637 a minute, repair 19,529 flagged pages at 48 a
+# minute. Only used to say when it should finish.
 $steps = @(
     [pscustomobject]@{ Name = 'preflight'; Title = 'Check nothing holds the library open';           Minutes = 0 }
     [pscustomobject]@{ Name = 'snapshot';  Title = 'Copy _Originals out, and check the copy';         Minutes = 5 }
     [pscustomobject]@{ Name = 'restore';   Title = 'Put every original back over its library file';   Minutes = 3 }
     [pscustomobject]@{ Name = 'verify';    Title = 'Check each restored file byte for byte';          Minutes = 3 }
     [pscustomobject]@{ Name = 'clean';     Title = 'Check no ManualForge output is left';             Minutes = 5 }
-    [pscustomobject]@{ Name = 'remove';    Title = 'Delete _Originals and BASELINE, check the result'; Minutes = 1 }
-    [pscustomobject]@{ Name = 'survey';    Title = 'Classify the library under the policy';           Minutes = 5 }
-    [pscustomobject]@{ Name = 'run';       Title = 'Read every marked file from its original';        Minutes = 270 }
-    [pscustomobject]@{ Name = 'doctor';    Title = 'Audit the whole library';                         Minutes = 80 }
-    [pscustomobject]@{ Name = 'repair';    Title = 'Read every flagged page, scans included';          Minutes = 540 }
-    [pscustomobject]@{ Name = 'index';     Title = 'Build the search index';                          Minutes = 10 }
+    [pscustomobject]@{ Name = 'remove';    Title = 'Delete _Originals and BASELINE, check the result'; Minutes = 3 }
+    [pscustomobject]@{ Name = 'survey';    Title = 'Classify the library under the policy';           Minutes = 2 }
+    [pscustomobject]@{ Name = 'run';       Title = 'Read every marked file from its original';        Minutes = 155 }
+    [pscustomobject]@{ Name = 'doctor';    Title = 'Audit the whole library';                         Minutes = 70 }
+    [pscustomobject]@{ Name = 'repair';    Title = 'Read every flagged page, scans included';          Minutes = 410 }
+    [pscustomobject]@{ Name = 'index';     Title = 'Build the search index';                          Minutes = 5 }
 )
 
 # ---------------------------------------------------------------- where things are
