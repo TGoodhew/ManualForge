@@ -72,6 +72,34 @@ public static class SearchQuery
     }
 
     /// <summary>
+    /// The query's words written as command mnemonics: two or more capitals followed by lower case,
+    /// the convention by which a SCPI manual shows the short form inside the long one -
+    /// <c>WAVeform</c>, <c>SOURce</c>, <c>OFFSet</c>, <c>DCFifty</c>.
+    ///
+    /// <para>
+    /// Nothing else is taken. A word in capitals (<c>SKEW</c>, <c>MODE</c>) is how these manuals
+    /// write half their prose, and a capitalised word (<c>Source</c>) is how sentences start, so
+    /// neither says the page is notation. Nor does <c>MHz</c>, which has the shape and is a unit.
+    /// A plural acronym (<c>LEDs</c>) has it too and is kept, because <c>UNITs</c> is a mnemonic
+    /// of exactly that shape; all it does is favour the pages that spell it the way it was typed.
+    /// </para>
+    /// </summary>
+    public static IReadOnlyList<string> MnemonicTerms(string? query) =>
+        Terms(query).Where(IsMnemonic).Distinct(StringComparer.Ordinal).ToArray();
+
+    private static bool IsMnemonic(string word)
+    {
+        var upper = 0;
+        while (upper < word.Length && char.IsAsciiLetterUpper(word[upper]))
+            upper++;
+
+        return upper >= 2
+            && upper < word.Length
+            && word[upper..].All(char.IsAsciiLetterLower)
+            && !word.EndsWith("Hz", StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// Whether the text is already an FTS5 expression the user meant literally.
     /// </summary>
     public static bool LooksLikeExpression(string query)

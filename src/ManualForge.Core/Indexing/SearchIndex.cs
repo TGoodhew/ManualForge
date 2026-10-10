@@ -47,8 +47,18 @@ public sealed record RankingBias
     /// </summary>
     public double Recovered { get; init; } = 1.0;
 
+    /// <summary>
+    /// For a page that prints the query's command mnemonics in their own case - <c>SOURce</c>,
+    /// <c>OFFSet</c>, <c>CHANnel</c> - when the query is written that way. The index ignores case, so
+    /// to bm25 a prose page about a waveform's source matches <c>:WAVeform:SOURce</c> as well as the
+    /// page that defines it. The case is the one sign left that a page is notation: prose writes
+    /// <c>source</c> or <c>Source</c>, and only a command reference writes <c>SOURce</c>. See
+    /// <see cref="SearchQuery.MnemonicTerms"/>.
+    /// </summary>
+    public double Notation { get; init; } = 1.0;
+
     /// <summary>Whether anything here would change an ordering.</summary>
-    public bool Any => Label != 1.0 || Recovered != 1.0;
+    public bool Any => Label != 1.0 || Recovered != 1.0 || Notation != 1.0;
 
     /// <summary>
     /// What search does unless told otherwise: the label boost on, the recovered-text boost off.
@@ -74,8 +84,15 @@ public sealed record RankingBias
     /// `:WAVeform:SOURce` back out of reach. Kept as a flag, and recorded here rather than
     /// rediscovered.
     /// </para>
+    /// <para>
+    /// The notation boost is on (10 October 2026, #3). On the ground truth it takes 31 of 33 to 33
+    /// within the first 25 and 27 to 32 within the first ten - :WAVeform:SOURce from 92 to 8 - and
+    /// every value from 1.2 to 3.0 scores the same. On 60 commands drawn from other manuals it
+    /// moves 21 pages up and none down. The prose and bare-word controls never ask a query it acts
+    /// on, and the 25 repaired pages do not move. See <c>docs/measurements/ranking-notation.md</c>.
+    /// </para>
     /// </summary>
-    public static readonly RankingBias Default = new() { Label = 1.4, Recovered = 1.4 };
+    public static readonly RankingBias Default = new() { Label = 1.4, Recovered = 1.4, Notation = 1.4 };
 }
 
 /// <summary>Where the text on a page came from.</summary>
@@ -537,6 +554,7 @@ public sealed class SearchIndex : IDisposable
 
         var terms = SearchQuery.Terms(query);
         var bareTerm = SearchQuery.IsBareTerm(query);
+        var mnemonics = SearchQuery.MnemonicTerms(query);
         var hasProvenance = HasTable("page_provenance");
 
         using var command = _connection.CreateCommand();
@@ -632,6 +650,13 @@ public sealed class SearchIndex : IDisposable
                         && bareTerm)
                     {
                         score *= ranking.Recovered;
+                    }
+
+                    if (ranking.Notation != 1.0
+                        && mnemonics.Count > 0
+                        && mnemonics.All(m => fullText.Contains(m, StringComparison.Ordinal)))
+                    {
+                        score *= ranking.Notation;
                     }
                 }
 

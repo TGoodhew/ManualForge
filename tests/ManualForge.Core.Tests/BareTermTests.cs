@@ -59,4 +59,26 @@ public sealed class BareTermTests
         Assert.True(SearchQuery.IsBareTerm("ATTenuation"));
         Assert.False(SearchQuery.IsBareTerm(":CHANnel<N>:ATTenuation"));
     }
+
+    /// <summary>
+    /// The notation bias acts on the words written the way a SCPI manual writes a mnemonic, and on
+    /// nothing else: not on a word in capitals, which is half the prose in these manuals, and not on
+    /// a capitalised word, which is how a sentence starts.
+    /// </summary>
+    [Theory]
+    [InlineData(":WAVeform:SOURce", new[] { "WAVeform", "SOURce" })]
+    [InlineData(":CHANnel<N>:OFFSet", new[] { "CHANnel", "OFFSet" })]
+    [InlineData(":TRIGger:MODE {EDGE|GLITch|ADVanced}", new[] { "TRIGger", "GLITch", "ADVanced" })]
+    [InlineData("DC50|DCFifty", new[] { "DCFifty" })]
+    [InlineData("ATTenuation", new[] { "ATTenuation" })]
+    [InlineData("SKEW", new string[0])]
+    [InlineData("Source of the waveform", new string[0])]
+    [InlineData("waveform source", new string[0])]
+    [InlineData("MHz and dBm", new string[0])]
+    [InlineData("10 GHz :FREQuency", new[] { "FREQuency" })]
+    [InlineData(":CHANnel<N>:UNITs", new[] { "CHANnel", "UNITs" })]
+    public void MnemonicsAreTheWordsWrittenInMnemonicCase(string query, string[] expected)
+    {
+        Assert.Equal(expected, SearchQuery.MnemonicTerms(query));
+    }
 }
