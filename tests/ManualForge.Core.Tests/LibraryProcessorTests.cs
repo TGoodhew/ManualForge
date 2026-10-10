@@ -1108,6 +1108,112 @@ public class LibraryProcessorTests : IDisposable
         var text = ExtractText(path);
         Assert.Contains("HEWLETT", text, StringComparison.Ordinal);
         Assert.DoesNotContain("Broadband", text, StringComparison.Ordinal);
+
+        // Only a hidden layer was replaced; nothing printed changed, so the name does not either.
+        Assert.Null(outcome.RenamedTo);
+    }
+
+    // ---------------------------------------------------------------- printed text nobody can read
+
+    [Fact]
+    public void UnreadablePrintedTextIsSilencedAndTheFileRenamed()
+    {
+        // oven.pdf: a born-digital manual whose fonts decode to nonsense. Before 10 October 2026 the
+        // strip kept that text, as it must - it is the ink - and every recognised word landing on
+        // it was left out, so a re-read gained 7 words on 54 pages of 3458A Quick reference guide.
+        var path = TestPdf.ScannedWithUnreadableText(InRoot("ge", "oven.pdf"), pages: 2);
+        var before = File.ReadAllBytes(path);
+        var repaired = InRoot("ge", "oven_repaired.pdf");
+
+        var options = NewOptions(PolicyOf(ClassAction.StripAndRedo));
+        var (processor, _) = NewProcessor();
+        processor.Survey(options);
+        var outcome = Assert.Single(processor.Run(options));
+
+        Assert.Equal(FileStatus.Completed, outcome.Status);
+        Assert.Equal(repaired, outcome.RenamedTo);
+
+        // The original is kept under its own name; the library holds only the renamed copy.
+        Assert.Equal(before, File.ReadAllBytes(InRoot("_Originals", "ge", "oven.pdf")));
+        Assert.False(File.Exists(path));
+
+        // The recognised words are all there - none left out for landing on the printed text - and
+        // the printed text no longer extracts.
+        var words = ExtractText(repaired).Split(' ');
+        Assert.Equal(2, words.Count(w => w == "HEWLETT"));
+        Assert.DoesNotContain(words, w => w.Contains('#', StringComparison.Ordinal));
+
+        // The record moved with the file, so the next run finds it finished.
+        using (var store = LibraryProcessor.OpenStore(options))
+        {
+            Assert.Null(store.Find(path));
+            var record = store.Find(repaired);
+            Assert.NotNull(record);
+            Assert.Equal(FileStatus.Completed, record.Status);
+            Assert.Equal(repaired, record.OutputPath);
+            Assert.Equal(InRoot("_Originals", "ge", "oven.pdf"), record.OriginalPath);
+        }
+
+        var (again, engine) = NewProcessor();
+        again.Survey(options);
+        Assert.Empty(again.Run(options));
+        Assert.Equal(0, engine.PagesRecognised);
+    }
+
+    [Fact]
+    public void AFileAlreadyHoldingTheRepairedNameIsLeftAlone()
+    {
+        var path = TestPdf.ScannedWithUnreadableText(InRoot("oven.pdf"));
+        var before = File.ReadAllBytes(path);
+        var squatter = TestPdf.Scanned(InRoot("oven_repaired.pdf"), pages: 1);
+        var squatterBytes = File.ReadAllBytes(squatter);
+
+        var options = NewOptions(new ClassificationPolicy(new Dictionary<TextClass, ClassAction>
+        {
+            [TextClass.UnreadableTextLayer] = ClassAction.StripAndRedo,
+            [TextClass.ImageOnly] = ClassAction.Skip,
+        }));
+        var (processor, engine) = NewProcessor();
+        processor.Survey(options);
+        var outcome = Assert.Single(processor.Run(options));
+
+        Assert.Equal(FileStatus.Failed, outcome.Status);
+        Assert.Contains("oven_repaired.pdf", outcome.Error, StringComparison.Ordinal);
+        Assert.Equal(0, engine.PagesRecognised);
+        Assert.Equal(before, File.ReadAllBytes(path));
+        Assert.Equal(squatterBytes, File.ReadAllBytes(squatter));
+        Assert.False(File.Exists(InRoot("_Originals", "oven.pdf")));
+    }
+
+    [Fact]
+    public void ACopyOfARepairedFileIsRenamedToo()
+    {
+        var primary = TestPdf.ScannedWithUnreadableText(InRoot("oven.pdf"));
+        var copy = InRoot("spares", "oven.pdf");
+        Directory.CreateDirectory(Path.GetDirectoryName(copy)!);
+        File.Copy(primary, copy);
+
+        var options = NewOptions(PolicyOf(ClassAction.StripAndRedo));
+        var (processor, engine) = NewProcessor();
+        processor.Survey(options);
+        var outcomes = processor.Run(options);
+
+        Assert.All(outcomes, o => Assert.Equal(FileStatus.Completed, o.Status));
+        Assert.Equal(1, engine.PagesRecognised);
+        Assert.True(File.Exists(InRoot("oven_repaired.pdf")));
+        Assert.True(File.Exists(InRoot("spares", "oven_repaired.pdf")));
+        Assert.False(File.Exists(copy));
+        Assert.True(File.Exists(InRoot("_Originals", "spares", "oven.pdf")));
+    }
+
+    [Theory]
+    [InlineData(@"C:\lib\oven.pdf", @"C:\lib\oven_repaired.pdf")]
+    [InlineData(@"C:\lib\oven_repaired.pdf", @"C:\lib\oven_repaired.pdf")]
+    [InlineData(@"C:\lib\8714 IBASIC.pdf", @"C:\lib\8714 IBASIC_repaired.pdf")]
+    public void TheRepairedNameIsTaggedOnce(string path, string expected)
+    {
+        Assert.Equal(expected, LibraryProcessor.RepairedPathFor(path));
+        Assert.Equal(path.Replace("_repaired", "", StringComparison.Ordinal), LibraryProcessor.UnrepairedPathFor(expected));
     }
 
     /// <summary>The letters a reader sees on a page, in drawing order.</summary>

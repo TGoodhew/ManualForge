@@ -168,7 +168,8 @@ untouched. It needs no backup, so it is not copied into `_Originals`.
 
 So, after a run:
 - **The PDFs in your library are what you use.** Searchable copies where a file was processed,
-  your own files everywhere else, all at the paths they always had.
+  your own files everywhere else, all at the paths they always had, with one exception: a file
+  whose printed text could not be read gets `_repaired` added to its name (see below).
 - **`_Originals` holds the untouched original of every file that was replaced, and nothing else of
   yours.** Together with the files that were left alone, that is your whole library as it was
   before. Uninstall step 5 shows how to put the originals back.
@@ -204,7 +205,14 @@ manualforge index  D:\Manuals     # build or update the search index
 
 - **What `run` does:** by default it OCRs only scans with no text layer. Files that already have
   good text are skipped. `--policy` changes that per class; for example,
-  `--policy UnreadableTextLayer=redo` replaces text layers that cannot be decoded.
+  `--policy UnreadableTextLayer=redo,SuspectText=redo` replaces text layers that cannot be decoded
+  or are garbled.
+- **Printed text that can't be read:** some manuals are typeset in fonts whose letters extract as
+  nonsense (`*($SSOLDQFHV` for "GE Appliances"). With `redo`, that text is kept on the page exactly
+  as it looks, but made to extract as blanks, and the recognised text is written over it. The file
+  is then renamed with `_repaired`, for example `oven.pdf` becomes `oven_repaired.pdf`, so you know
+  its searchable text came from recognition and may have mistakes. The original keeps its old name
+  in `_Originals`. The run summary lists every file renamed.
 - **Files you can't normally write to:** password-protected files (an owner password that forbids
   editing) are rebuilt losslessly first.
 - **Signed files:** digitally signed files are processed, which invalidates the signature, and are
@@ -384,7 +392,13 @@ Remove-Item -LiteralPath "$env:LOCALAPPDATA\ManualForge" -Recurse -Force
           if ((Get-FileHash -LiteralPath $_.FullName).Hash -ne (Get-FileHash -LiteralPath $copy).Hash) { "DIFFERS: $copy" }
       }
 
-  # Only once that printed nothing:
+  # Remove the renamed copies whose originals are now back under the old name.
+  Get-ChildItem $lib -Recurse -File -Filter *_repaired.pdf |
+      Where-Object { -not $_.FullName.StartsWith("$orig\") } |
+      Where-Object { Test-Path -LiteralPath ($_.FullName -replace '_repaired\.pdf$', '.pdf') } |
+      Remove-Item -WhatIf    # drop -WhatIf once the list looks right
+
+  # Only once the check printed nothing:
   Remove-Item -LiteralPath $orig -Recurse -Force
   ```
 

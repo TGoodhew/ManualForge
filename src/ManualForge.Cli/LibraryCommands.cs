@@ -322,7 +322,8 @@ internal static class RunCommand
             done++;
             var name = Path.GetFileName(outcome.Path);
             if (name.Length > 44) name = name[..41] + "...";
-            var flag = outcome.WasFlattened ? " [flattened]" : "";
+            var flag = (outcome.WasFlattened ? " [flattened]" : "")
+                + (outcome.RenamedTo is null ? "" : $" [renamed {LibraryProcessor.RepairedSuffix}]");
 
             // In a dry run nothing reaches Completed by design, so report the work that was done
             // rather than printing every file as though it had failed.
@@ -363,6 +364,20 @@ internal static class RunCommand
             Console.WriteLine(
                 $"Throughput: {completedPages:N0} pages in {runWatch.Elapsed.TotalMinutes:F1} min, " +
                 $"{completedPages / runWatch.Elapsed.TotalMinutes:F1} pages/min");
+        }
+
+        // Renamed files are a caveat about their text, and the user needs to know which they are.
+        var renamed = outcomes.Where(o => o.RenamedTo is not null).ToArray();
+        if (renamed.Length > 0)
+        {
+            Console.WriteLine();
+            Console.WriteLine(options.DryRun
+                ? $"{renamed.Length} file(s) would be renamed: their printed text cannot be read, so it would be"
+                : $"{renamed.Length} file(s) were renamed: their printed text could not be read, so it was");
+            Console.WriteLine("silenced and the text you search and copy is the recognised text. Pages look exactly as before.");
+            Console.WriteLine("The untouched originals are kept under their old names.");
+            foreach (var o in renamed)
+                Console.WriteLine($"  {Path.GetFileName(o.Path)} -> {Path.GetFileName(o.RenamedTo)}");
         }
 
         // Signatures are invalidated by default, but never quietly.

@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using PdfSharp.Drawing;
 using PdfSharp.Pdf;
@@ -126,6 +127,88 @@ internal static class TestPdf
         {
             AddTestFont(document.Pages[i]);
             document.Pages[i].Contents.AppendContent().CreateStream(Encoding.Latin1.GetBytes(content));
+        }
+
+        var temporary = path + ".tmp";
+        document.Save(temporary);
+        document.Dispose();
+        File.Move(temporary, path, overwrite: true);
+        return path;
+    }
+
+    /// <summary>
+    /// A scan with three lines of printed text in a font that decodes to nothing useful: every glyph
+    /// is ink, and every one extracts as '#'. It stands in for oven.pdf and 83620A User.pdf, whose
+    /// subset fonts number their glyphs their own way. A Type 3 font carries its own glyphs, so this
+    /// is an embedded font without a font program or a resolver. <paramref name="readable"/>, if
+    /// given, is printed below in Helvetica, which is not embedded and always decodes.
+    /// </summary>
+    public static string ScannedWithUnreadableText(string path, int pages = 1, string? readable = null)
+    {
+        Scanned(path, pages);
+
+        using var document = PdfSharp.Pdf.IO.PdfReader.Open(path, PdfSharp.Pdf.IO.PdfDocumentOpenMode.Modify);
+
+        // One glyph, a filled box, for every code from space to tilde.
+        var glyph = new PdfDictionary(document);
+        glyph.CreateStream(Encoding.ASCII.GetBytes("600 0 0 0 500 700 d1 0 0 500 700 re f\n"));
+        document.Internals.AddObject(glyph);
+
+        var procs = new PdfDictionary(document);
+        procs.Elements["/box"] = glyph.Reference!;
+
+        var differences = new PdfArray(document);
+        differences.Elements.Add(new PdfInteger(32));
+        for (var code = 32; code <= 126; code++)
+            differences.Elements.Add(new PdfName("/box"));
+        var encoding = new PdfDictionary(document);
+        encoding.Elements["/Type"] = new PdfName("/Encoding");
+        encoding.Elements["/Differences"] = differences;
+
+        var widths = new PdfArray(document);
+        for (var code = 32; code <= 126; code++)
+            widths.Elements.Add(new PdfInteger(600));
+
+        var hashes = string.Concat(Enumerable.Repeat("<0023>", 95));
+        var toUnicode = new PdfDictionary(document);
+        toUnicode.CreateStream(Encoding.ASCII.GetBytes(
+            "/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n" +
+            "/CMapName /Test-Hashes def\n/CMapType 2 def\n" +
+            "1 begincodespacerange\n<00> <FF>\nendcodespacerange\n" +
+            $"1 beginbfrange\n<20> <7E> [{hashes}]\nendbfrange\n" +
+            "endcmap\nCMapName currentdict /CMap defineresource pop\nend\nend\n"));
+        document.Internals.AddObject(toUnicode);
+
+        var font = new PdfDictionary(document);
+        font.Elements["/Type"] = new PdfName("/Font");
+        font.Elements["/Subtype"] = new PdfName("/Type3");
+        font.Elements["/FontBBox"] = new PdfArray(document,
+            new PdfInteger(0), new PdfInteger(0), new PdfInteger(600), new PdfInteger(700));
+        font.Elements["/FontMatrix"] = new PdfArray(document,
+            new PdfReal(0.001), new PdfInteger(0), new PdfInteger(0), new PdfReal(0.001), new PdfInteger(0), new PdfInteger(0));
+        font.Elements["/CharProcs"] = procs;
+        font.Elements["/Encoding"] = encoding;
+        font.Elements["/FirstChar"] = new PdfInteger(32);
+        font.Elements["/LastChar"] = new PdfInteger(126);
+        font.Elements["/Widths"] = widths;
+        font.Elements["/Resources"] = new PdfDictionary(document);
+        font.Elements["/ToUnicode"] = toUnicode.Reference!;
+        document.Internals.AddObject(font);
+
+        const string line = "Broadband Frequency Response of the 8340B synthesized sweeper";
+        for (var i = 0; i < document.PageCount; i++)
+        {
+            var page = document.Pages[i];
+            AddTestFont(page);
+            page.Elements.GetDictionary("/Resources")!.Elements.GetDictionary("/Font")!.Elements["/TestT3"] = font.Reference!;
+
+            var content = new StringBuilder("BT /TestT3 8 Tf 72 700 Td ");
+            for (var row = 0; row < 3; row++)
+                content.Append(CultureInfo.InvariantCulture, $"({line}) Tj 0 -12 Td ");
+            content.Append("ET\n");
+            if (readable is not null)
+                content.Append(CultureInfo.InvariantCulture, $"BT /TestF1 11 Tf 72 600 Td ({readable}) Tj ET\n");
+            page.Contents.AppendContent().CreateStream(Encoding.ASCII.GetBytes(content.ToString()));
         }
 
         var temporary = path + ".tmp";
