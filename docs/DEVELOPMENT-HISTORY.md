@@ -1275,8 +1275,9 @@ dotnet test
   cancelling does not leave a consumer waiting on a channel nobody will complete. Every wait is
   bounded, because a pipeline defect that hangs the suite is worse than one that fails it.
 - **`ConcurrencyControllerTests`** - pages in flight tuned during a run, on simulated cards shaped
-  like the two measured: a plateau, a cliff with memory flat at the top, a desktop taking memory
-  partway through, and a cliff remembered from an earlier run (#31).
+  like the ones measured: a plateau, a card that looks full but has not spilled, memory going out to
+  system RAM on a step up, a collapse with no counter to read, a desktop pushing a settled run over,
+  and a cliff remembered from an earlier run (#31).
 - **`GpuProfileTests`** - what a machine remembers about its card between runs, and the estimates
   made from it.
 - **`GpuMemoryTests`** - what `nvidia-smi` reports, and that probing a machine without it says nothing.

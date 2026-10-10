@@ -102,6 +102,49 @@ public static class GpuMemoryProbe
         return new GpuMemory(total, used, parts.Length > 2 ? parts[2] : null, utilisation);
     }
 
+    /// <summary>
+    /// How much of a process's GPU memory Windows is keeping in system RAM, in MiB: the
+    /// <c>GPU Process Memory\Shared Usage</c> counter, summed over the process's adapters. Null where
+    /// it cannot be read.
+    /// </summary>
+    /// <remarks>
+    /// This, not free memory, is what shows a card going over the edge. The arena fills whatever is
+    /// free, so a healthy run leaves the card nearly full; but a run that has gone too far has its
+    /// memory moved out here. On the RTX 5070 Ti it held a steady 76 MiB at three pages in flight,
+    /// rose to 322 at four as throughput halved, and reached 4.3 GB at six.
+    /// </remarks>
+    public static int? TryReadSpilledMiB(int? processId = null)
+    {
+        if (!OperatingSystem.IsWindows())
+            return null;
+
+        try
+        {
+            var prefix = $"pid_{processId ?? Environment.ProcessId}_";
+            var category = new PerformanceCounterCategory("GPU Process Memory");
+
+            long bytes = 0;
+            var found = false;
+            foreach (var instance in category.GetInstanceNames())
+            {
+                if (!instance.StartsWith(prefix, StringComparison.Ordinal))
+                    continue;
+
+                using var counter = new PerformanceCounter("GPU Process Memory", "Shared Usage", instance, readOnly: true);
+                bytes += counter.RawValue;
+                found = true;
+            }
+
+            return found ? (int)(bytes / (1024 * 1024)) : null;
+        }
+        catch (Exception)
+        {
+            // No such counters (an older Windows, no WDDM GPU), or not allowed to read them. Tuning
+            // then goes on throughput alone, which still catches a collapse.
+            return null;
+        }
+    }
+
     private static string? RunNvidiaSmi(string arguments)
     {
         try

@@ -29,8 +29,11 @@ public sealed class PipelineOptions
     /// </summary>
     public ConcurrencyController? Tuner { get; init; }
 
-    /// <summary>How the tuner reads the card's memory. Defaults to nvidia-smi.</summary>
-    public Func<GpuMemory?>? ReadMemory { get; init; }
+    /// <summary>
+    /// How the tuner reads how much of this process's GPU memory has gone out to system RAM, in MiB.
+    /// Defaults to the Windows performance counter.
+    /// </summary>
+    public Func<int?>? ReadSpilledMiB { get; init; }
 
     /// <summary>Told each change the tuner makes, for showing to whoever is watching.</summary>
     public Action<ConcurrencyDecision>? OnTuned { get; init; }

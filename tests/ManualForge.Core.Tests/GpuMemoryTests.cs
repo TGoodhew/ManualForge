@@ -37,6 +37,18 @@ public class GpuMemoryTests
     }
 
     [Fact]
+    public void ReadingWhatHasSpilledEitherWorksOrSaysNothing()
+    {
+        // This process has likely never touched a GPU, and a build agent may have no counters at all.
+        // Either is an answer of null; what it must never do is throw or report negative memory.
+        var spilled = GpuMemoryProbe.TryReadSpilledMiB();
+        if (spilled is { } mib)
+            Assert.True(mib >= 0);
+
+        Assert.Null(GpuMemoryProbe.TryReadSpilledMiB(processId: int.MaxValue));
+    }
+
+    [Fact]
     public void IdentifyingThisMachinesCardEitherWorksOrSaysNothing()
     {
         var gpu = GpuMemoryProbe.TryIdentify();

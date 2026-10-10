@@ -206,7 +206,7 @@ public class RecognitionPipelineTests : IDisposable
                 Tuner = tuner,
                 RasterWorkers = 4,
                 TuningWindow = TimeSpan.Zero,
-                ReadMemory = () => new GpuMemory(16_000, 4_000, "Simulated"),
+                ReadSpilledMiB = () => 76,
                 OnTuned = d => { lock (decisions) decisions.Add(d); },
             })
             .WaitAsync(Patience);

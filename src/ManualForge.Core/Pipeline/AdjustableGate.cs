@@ -76,7 +76,7 @@ internal sealed class TuningWindow(
     ConcurrencyController tuner, AdjustableGate gate, PipelineOptions options, ILogger logger)
 {
     private readonly object _lock = new();
-    private readonly Func<GpuMemory?> _readMemory = options.ReadMemory ?? GpuMemoryProbe.TryRead;
+    private readonly Func<int?> _readSpilled = options.ReadSpilledMiB ?? (() => GpuMemoryProbe.TryReadSpilledMiB());
     private readonly Stopwatch _clock = Stopwatch.StartNew();
     private int _pages;
     private bool _warm;
@@ -105,7 +105,7 @@ internal sealed class TuningWindow(
             }
         }
 
-        window = window with { Memory = _readMemory() };
+        window = window with { SpilledMiB = _readSpilled() };
 
         ConcurrencyDecision? decision;
         lock (_lock)

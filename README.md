@@ -230,8 +230,9 @@ manualforge index  D:\Manuals     # build or update the search index
 - **`manualforge status D:\Manuals`:** shows the work queue and an estimate at any time, without
   changing anything.
 - **Speed on your GPU:** nothing needs setting for your card. `run` works out how many pages to
-  read at once while it goes: it adds one while that makes it faster and there is memory to spare,
-  and drops back if the card fills up, for example when you open a game partway through. The first
+  read at once while it goes: it adds one while that makes it faster, and drops back as soon as
+  Windows starts moving its GPU memory into system memory, which happens when the card runs out, for
+  example when you open a game partway through. The first
   run on a new card starts at one page and climbs. Later runs start where the last one ended, and
   never try a number that once overfilled the card. The estimates from `survey`, `status` and
   `repair` use the speeds measured on your card once it has done a run or repair big enough to

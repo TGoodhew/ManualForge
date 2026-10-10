@@ -404,7 +404,7 @@ public sealed class LibraryProcessor(
                     RasterWorkers = configured.RasterWorkers,
                     GpuConcurrency = configured.GpuConcurrency,
                     Tuner = configured.Tuner,
-                    ReadMemory = configured.ReadMemory,
+                    ReadSpilledMiB = configured.ReadSpilledMiB,
                     OnTuned = configured.OnTuned,
                     TuningWindow = configured.TuningWindow,
                     RasterQueueDepth = configured.RasterQueueDepth,
