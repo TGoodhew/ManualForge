@@ -68,6 +68,46 @@ public sealed class TallStackTests
     }
 
     [Fact]
+    public void ATableRuleInsideTheBoxDoesNotJoinTheRows()
+    {
+        // Page 60 of the table book (#50): the detector's box for a column of A2s takes in the
+        // table's vertical rule beside it. The rule is inked on every pixel row, so the column read
+        // as one run with no gap, and stayed NNNNN. Its rows are the same with the rule as without.
+        var marks = Enumerable.Range(0, 5).Select(i => RectD.FromEdges(52, 20 + i * 35, 70, 40 + i * 35)).ToArray();
+        var rule = RectD.FromEdges(46, 0, 49, Height);
+
+        var rows = TallStacks.Rows(Page([rule, .. marks]), Width, Height, RectD.FromEdges(45, 15, 74, 200), Line);
+
+        Assert.Equal(marks, rows);
+    }
+
+    [Fact]
+    public void ARulesRaggedEdgeIsLeftOutWithIt()
+    {
+        // As scanned on page 60: the rule's last pixel column is inked only partway down - 85%, then
+        // 29% - and that part on its own still bridged the gaps between the rows.
+        var marks = Enumerable.Range(0, 5).Select(i => RectD.FromEdges(55, 20 + i * 35, 70, 40 + i * 35)).ToArray();
+        var rule = RectD.FromEdges(44, 0, 49, Height);
+        var ragged = RectD.FromEdges(49, 30, 50, 150);
+
+        var rows = TallStacks.Rows(Page([rule, ragged, .. marks]), Width, Height, RectD.FromEdges(43, 15, 74, 200), Line);
+
+        Assert.Equal(marks, rows);
+    }
+
+    [Fact]
+    public void ARuleOnBothSidesIsLeftOutToo()
+    {
+        var marks = Enumerable.Range(0, 3).Select(i => RectD.FromEdges(52, 20 + i * 35, 70, 40 + i * 35)).ToArray();
+
+        var rows = TallStacks.Rows(
+            Page([RectD.FromEdges(46, 0, 48, Height), RectD.FromEdges(73, 0, 75, Height), .. marks]),
+            Width, Height, RectD.FromEdges(45, 15, 76, 130), Line);
+
+        Assert.Equal(marks, rows);
+    }
+
+    [Fact]
     public void ARowIsAsWideAsItsOwnInk()
     {
         // A2 on one row, A12 on the next: each row keeps its own width, not the column's.

@@ -39,6 +39,12 @@ public static class TallStacks
     public const double MaximumRowHeightInLines = 1.15;
 
     /// <summary>
+    /// A pixel column inked on at least this share of a box's rows is a table rule, not lettering,
+    /// and is left out when the box is cut into rows.
+    /// </summary>
+    public const double RuleShare = 0.9;
+
+    /// <summary>
     /// Whether rows cut from a region belong to a table: every row lines up with a row of ordinary
     /// text - one may miss in a column of four or more - and the rows are no taller than a line.
     /// </summary>
@@ -153,6 +159,27 @@ public static class TallStacks
             return [];
         }
 
+        // A table's rule inside the box is not part of the column. The detector's box for a column
+        // of A2s can take in the vertical rule beside it, and a rule is inked on every pixel row, so
+        // it would join the rows into one run with no gap to cut at (#50). Lettering never runs
+        // unbroken down a whole column of rows, so a pixel column inked nearly all the way is a rule.
+        // A scanned rule's edge is ragged - on page 60 its last pixel column was inked 85% of the way
+        // down and the next 29% - so the columns just beside it go too. A tenth of a line is less than
+        // the padding a table leaves between its rules and its text.
+        var rule = new bool[x1 - x0 + 1];
+        int margin = Math.Max(2, (int)Math.Round(0.1 * lineHeight));
+        for (int x = x0; x <= x1; x++)
+        {
+            int inkedRows = 0;
+            for (int y = y0; y <= y1; y++)
+                if (ink[y * width + x])
+                    inkedRows++;
+            if (inkedRows < RuleShare * (y1 - y0 + 1))
+                continue;
+            for (int m = Math.Max(x0, x - margin); m <= Math.Min(x1, x + margin); m++)
+                rule[m - x0] = true;
+        }
+
         // Runs of inked pixel rows. A single blank row inside a glyph - the waist of an 8 at low
         // resolution - is bridged; anything wider is a gap between table rows.
         var runs = new List<(int Top, int Bottom)>();
@@ -160,7 +187,7 @@ public static class TallStacks
         {
             bool inked = false;
             for (int x = x0; x <= x1 && !inked; x++)
-                inked = ink[y * width + x];
+                inked = !rule[x - x0] && ink[y * width + x];
             if (!inked)
                 continue;
 
@@ -194,7 +221,7 @@ public static class TallStacks
             int left = x1, right = x0;
             for (int y = top; y <= bottom; y++)
                 for (int x = x0; x <= x1; x++)
-                    if (ink[y * width + x])
+                    if (!rule[x - x0] && ink[y * width + x])
                     {
                         left = Math.Min(left, x);
                         right = Math.Max(right, x);
