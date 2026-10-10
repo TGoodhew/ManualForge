@@ -52,8 +52,8 @@ A shape is not proof, so a seeded sample of each group was looked at on the page
 ## What that leaves
 
 * **Columns of repeated entries:** 121 tokens (0.3%), on 21 pages and mostly one column of `A2`s.
-  The stack splitter (`TallStacks`) does not catch them, because the merged word is not tall
-  enough to be taken for a stack.
+  Fixed in #50, see below. The guess here, that the merged word was not tall enough to be taken
+  for a stack, was wrong.
 * **Character confusions:** `8`/`B`, `A`/`4`, `Q`/`0` in designators. These are the recogniser's
   own errors, and no setting or model size moved them (`recognition-sweep-tables.md`,
   `server-models-on-tables.md`).
@@ -75,3 +75,36 @@ Against Acrobat on these pages, the deficit #22 was opened for is mostly Acrobat
 somebody searches a parts list for, our readings are well-formed about seven times as often when the
 two disagree, and better by eye in every group but the one chosen to favour Acrobat. The residual
 errors are real but small and specific.
+
+## Columns of repeated entries (#50)
+
+Nearly all of those 121 tokens were on one page: page 60, a parts list whose `A2` and `A4`
+designator columns are set tight, five rows to a block. The stack splitter found every block and
+judged it a stack. It turned the ones read as `NNNNN` down with "no gap to cut at", because the
+detector's box for the column took in the table's vertical rule beside it. A rule is inked on every
+pixel row, so the column's rows ran together into one. The blocks whose boxes stopped short of the
+rule were cut and read correctly.
+
+`TallStacks.Rows` now leaves out any pixel column inked on 90% of the box's rows, together with a
+tenth of a line either side of it, because a scanned rule's edge is ragged. On page 60, one rule's
+last pixel column was inked 85% of the way down and the next 29%. Lettering never runs unbroken
+down a whole column of rows. Measured with `tools/measure-single-characters.cs`, config `engine`,
+10 Oct 2026, RTX 5070 Ti:
+
+| | Table book (of 43,944) | Typical-pages control (of 28,912) |
+|---|---|---|
+| before | 34,047 | 17,561 |
+| after | **34,147** (+100) | 17,568 (+7) |
+
+On page 60, `A4` is now read correctly in all 53 places (21 before), and `A2` in 52 of 68 (22
+before). The tokens lost under a repeated-character word fell from 121 to 73. Most of what is left
+is ordinary misreading (`PRP` as `PAP`, `WC` as `VVC`), not this defect.
+
+Three `A2` blocks are still read as `NNNNN`:
+
+- **Two fail the row-alignment test** ("3 of 5 on text rows"). On two of their rows, the part
+  numbers beside them were themselves read as one word spanning two rows, so nothing of ordinary
+  height lines up there.
+- **One fails the gap test.** Its gaps are 6 px against a threshold of 0.15 of a 41 px line,
+  6.15 px. Easing the threshold to 0.12 caught 5 more tokens and slightly added stray tokens on the
+  control, so it was left as it is.
