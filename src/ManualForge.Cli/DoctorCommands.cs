@@ -57,6 +57,16 @@ internal static class DoctorCommand
         Console.WriteLine($"Render  : {options.AuditDpi} dpi, {options.Workers} document(s) at a time");
         Console.WriteLine();
 
+        if (arguments.Has("trim-missing") && File.Exists(storePath))
+        {
+            using var store = new DoctorStore(storePath);
+            var trimmed = store.TrimMissing();
+            Console.WriteLine($"Forgot {trimmed.Count:N0} audited document(s) that are no longer on disk, findings and repairs with them.");
+            foreach (var path in trimmed.Take(10))
+                Console.WriteLine($"  {path}");
+            Console.WriteLine();
+        }
+
         var runner = new DoctorRunner(loggerFactory.CreateLogger<DoctorRunner>());
 
         var lastReported = 0;
@@ -526,6 +536,14 @@ internal static class DoctorCommand
             Console.WriteLine(
                 $"Standing  : {summary.FlaggedPages:N0} flagged page(s) in total; " +
                 $"{summary.RepairedPages:N0} repaired, {summary.OutstandingPages:N0} outstanding");
+
+            var missing = store.Missing();
+            if (missing.Count > 0)
+            {
+                Console.WriteLine(
+                    $"            including {missing.Count:N0} audited document(s) no longer on disk; " +
+                    "--trim-missing forgets them");
+            }
 
             if (summary.OutstandingPages == 0)
             {
