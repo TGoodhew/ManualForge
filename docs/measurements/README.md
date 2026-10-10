@@ -7,6 +7,10 @@ Nothing in here is hand-edited. If a number looks wrong, re-run the harness and 
 
 | File | What it measures |
 |---|---|
+| **`fresh-run-from-originals.md`** | **#25: the whole library read again from its originals** in 10 h 40 min. Search text 192.3 M → 193.3 M characters; the documents that lost text lost doubled readings. Three things found and fixed: one bad page dropped a 992-page manual from the index, `redo` did nothing for printed text in unreadable fonts (6 files now silenced and renamed `_repaired`), and a manual damaged by three flipped bits since 2017. Every stamp and header survived. |
+| `ground-truth-before-fresh-run.md` / `ground-truth-after-fresh-run.md` | The 33 strings either side of it. Identical: 33 found, 31 in the first 25, 27 in the first ten. |
+| `ordinary-pages-before-fresh-run.md` / `ordinary-pages-after-fresh-run.md` | The harm control either side of it: 39 → 40 found, 37 → 38 in the first ten. |
+| `recovered-text-after-fresh-run.md` | 25 repaired pages against the snapshot index: 22 already findable, 1 newly, the same 2 not findable before or after. |
 | `ground-truth-before-full-repair.md` | The index as it stood on 2026-09-22, after the first 20-document repair and before the corpus-wide one. 27 of 33 at rank 25, 21 in the first ten. |
 | `ground-truth-after-full-repair.md` | The same 33 strings after the whole library was repaired and re-indexed. Also 27 of 33, 21 in the first ten — the 54845A was already repaired, so these queries are blind to that pass. |
 | `recovered-text-reaches-search.md` | The pass those 33 strings cannot see: 25 repaired pages across 25 other documents, asked for a phrase that exists only in recovered text. 21 newly findable, 4 already findable, 0 missing. |
