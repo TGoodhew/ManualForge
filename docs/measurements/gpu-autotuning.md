@@ -127,6 +127,42 @@ the tuned runs peaked at 15.6–15.8 GB of the card, the fixed one at 12.9. Padd
 option to change how ONNX Runtime's pool grows. Within a run, trying more costs the rest of the run,
 so the trying happens between runs, where every run starts with a fresh pool.
 
+## On the card, across runs
+
+Four runs back to back, 10 Oct 2026, each on a fresh copy of the same 280 pages, starting as a card
+never seen:
+
+| Run | Pages in flight | Spilled | Peak on the card | Pages/min | Words |
+|---|---|---|---|---|---|
+| 1 | 2, first try | no (76 MiB) | 10.8 GB | 64.7 | 122,858 |
+| 2 | 3, one more → 2 → 1 | 194 MiB at 70 s, 5.2 GB by the end | 15.9 GB | 53.2 | 122,858 |
+| 3 | 2, the most the card holds | no | 11.4 GB | 71.0 | 122,858 |
+| 4 | 2 | no | 11.5 GB | 69.2 | 122,858 |
+| *fixed 3, half an hour earlier* | *3* | *no* | *12.9 GB* | *79.6* | *122,858* |
+
+The tuning did what it was designed to: tried one more, caught the spill, remembered it, and settled
+at two, where the next two runs did not spill. The words were identical in every run.
+
+**But three pages on this card is a coin toss, not a property of the card.** The same pages at the
+same setting peaked at 12.9 GB in one run and filled the card (15.9 GB, 24 s in) in the next, with the
+desktop holding 0.7 and 1.3 GB respectively. A difference that large from the same work fits ONNX
+Runtime's memory pool growing in regions that double in size. When the work needs a little more than
+the pool holds, the next region asked for is as large as everything so far. Windows' CUDA driver then
+satisfies it from system RAM rather than refusing it (the driver's "sysmem fallback"). Whether a run
+crosses that boundary depends on the order its largest pages arrive in. This is the likely mechanism,
+not a proven one. What is measured is the bimodal peak, and that the spill went on growing after the
+run had stepped down to one page: once the pool has spilled, fewer pages in flight do not bring it back.
+
+So tuning settles on the most pages in flight that the card holds *reliably*, which here and today is
+two: about 70 pages a minute, against about 80 at three when three does not spill and 53 when it does.
+Two things would likely make three, or four, reliable on any card, and both are outside this code:
+
+- **The pool growing by what is asked for, not doubling** (ONNX Runtime's
+  `arena_extend_strategy = kSameAsRequested`). PaddleOcrNet 2.2.1 does not expose it.
+- **Turning off the driver's sysmem fallback** for ManualForge (NVIDIA Control Panel, "CUDA - Sysmem
+  Fallback Policy"). The pool's oversized request would then fail on the card, and ONNX Runtime retries
+  smaller rather than spilling. This is untested here.
+
 ## Evidence so far
 
 `ConcurrencyControllerTests`, on the readings measured above:
