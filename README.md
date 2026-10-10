@@ -316,11 +316,12 @@ manualforge index D:\Manuals
 
 | Command | What it does |
 |---|---|
-| `manualforge reconcile <library>` | Which PDFs are not in the index, and why. |
+| `manualforge reconcile <library>` | Which PDFs are not in the index, and why. `--trim-missing` also removes indexed files that are gone. |
 | `manualforge index <library> --reindex --compact` | Rebuild the index from scratch and shrink it; worth doing after a large repair. |
 | `manualforge index <library> --sidecars <folder>` | Also write a plain-text file per manual. |
 | `manualforge doctor <file.pdf> --explain <page> --dump page.png` | Show why one page was or wasn't flagged. |
 | `manualforge survey <library> --trim-missing` | Forget records of files you have deleted or moved. |
+| `manualforge doctor <library> --trim-missing` | The same for the audit: forget findings and repairs of files that are gone. Files `run` renames are forgotten under their old names automatically, in the audit and the index. |
 | `manualforge gpu` / `manualforge version` | Which execution provider is active; which build is installed. |
 
 `manualforge` with no arguments lists every command and option.

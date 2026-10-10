@@ -108,6 +108,31 @@ public sealed class RepairEstimateTests : IDisposable
     }
 
     [Fact]
+    public void TrimmingForgetsOnlyTheFilesThatAreGone()
+    {
+        var gone = Pdf("gone.pdf");
+        var here = Pdf("here.pdf");
+        using var store = new DoctorStore(Path.Combine(_directory, "doctor.db"));
+        store.Save(new DocumentAudit(gone, "gone", "hash-a", 3, [Flagged(1, PageKind.Drawn)])
+        { Verdict = DocumentVerdict.UnderExtracted });
+        store.Save(new DocumentAudit(here, "here", "hash-b", 3, [Flagged(2, PageKind.Drawn)])
+        { Verdict = DocumentVerdict.UnderExtracted });
+        store.SaveRepair(new PageRepair(gone, 1, "hash-a", 300, "LFR1", 0.9, 1, DateTimeOffset.UtcNow));
+        File.Delete(gone);
+
+        Assert.Equal([gone], store.Missing());
+        Assert.Equal(2, store.Summary().FlaggedPages);
+
+        Assert.Equal([gone], store.TrimMissing());
+
+        Assert.Null(store.Document(gone));
+        Assert.NotNull(store.Document(here));
+        Assert.Equal(1, store.Summary().FlaggedPages);
+        Assert.Equal(0, store.Summary().RepairedPages);
+        Assert.Empty(store.Missing());
+    }
+
+    [Fact]
     public void AFileThatHasGoneIsNotPlanned()
     {
         var gone = Pdf("gone.pdf");

@@ -1196,6 +1196,30 @@ public class LibraryProcessorTests : IDisposable
     }
 
     [Fact]
+    public async Task ARenamedFileIsForgottenUnderItsOldNameInTheIndexAndTheAudit()
+    {
+        // On 10 October 2026 the six renamed files stayed in search under their old names, unreadable
+        // text and all, until they were trimmed by hand.
+        var path = TestPdf.ScannedWithUnreadableText(InRoot("oven.pdf"));
+        var options = NewOptions(PolicyOf(ClassAction.StripAndRedo));
+
+        await new Indexing.LibraryIndexer().IndexAsync(_root);
+        using (var index = new Indexing.SearchIndex(Indexing.LibraryIndexer.DefaultIndexPath(_root), readOnly: true))
+            Assert.Contains(index.Documents(), d => d.Path == path);
+        using (var audit = new Auditing.DoctorStore(Auditing.DoctorStore.DefaultPathFor(_root)))
+            audit.Save(new Auditing.DocumentAudit(path, "oven", "hash", 1, []));
+
+        var (processor, _) = NewProcessor();
+        processor.Survey(options);
+        Assert.Equal(InRoot("oven_repaired.pdf"), Assert.Single(processor.Run(options)).RenamedTo);
+
+        using (var index = new Indexing.SearchIndex(Indexing.LibraryIndexer.DefaultIndexPath(_root), readOnly: true))
+            Assert.DoesNotContain(index.Documents(), d => d.Path == path);
+        using (var audit = new Auditing.DoctorStore(Auditing.DoctorStore.DefaultPathFor(_root), readOnly: true))
+            Assert.Null(audit.Document(path));
+    }
+
+    [Fact]
     public void AFileAlreadyHoldingTheRepairedNameIsLeftAlone()
     {
         var path = TestPdf.ScannedWithUnreadableText(InRoot("oven.pdf"));

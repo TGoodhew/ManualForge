@@ -190,6 +190,8 @@ internal sealed class CommandLine
               --json <path>           Machine-readable findings, which `repair` does not need but
                                       anything else looking at this does.
               --recheck               Re-audit files that have not changed since the last run.
+              --trim-missing          Forget audited files that are no longer on disk, with their
+                                      findings and repairs. The standing counts them until then.
               --report                Print what an earlier audit found; audit nothing.
               --reading-order <page>  Print one page's own text in the reading order the repair
                                       uses. For checking on a real page that a close-set table is

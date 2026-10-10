@@ -379,10 +379,7 @@ internal static class RunCommand
             foreach (var o in renamed)
                 Console.WriteLine($"  {Path.GetFileName(o.Path)} -> {Path.GetFileName(o.RenamedTo)}");
             if (!options.DryRun)
-            {
-                Console.WriteLine("Search keeps the old names until they are trimmed, after the next index:");
-                Console.WriteLine($"  manualforge reconcile \"{root}\" --trim-missing");
-            }
+                Console.WriteLine("The old names are gone from search; the new ones arrive with the next `manualforge index`.");
         }
 
         // Signatures are invalidated by default, but never quietly.

@@ -768,6 +768,8 @@ public sealed class LibraryProcessor(
             // later matches the stale fingerprint and the file is never reprocessed.
             store.UpdateFingerprint(destination);
             store.SetStatus(destination, FileStatus.Completed, gapNote);
+            if (destination != path)
+                ForgetOldName(options, path);
 
             _logger.LogInformation(
                 "Completed {Path}: {Words} words, worst deviation {Deviation:F3} pt, original kept at {Original}",
@@ -837,6 +839,8 @@ public sealed class LibraryProcessor(
         store.UpdateFingerprint(destination);
         store.SetAction(destination, ClassAction.Ocr);
         store.SetStatus(destination, FileStatus.Completed, gapNote);
+        if (destination != path)
+            ForgetOldName(options, path);
 
         _logger.LogInformation(
             "Read {Path} again: {Words} words, worst deviation {Deviation:F3} pt, earlier copy kept at {Superseded}",
@@ -945,6 +949,8 @@ public sealed class LibraryProcessor(
         store.SetPaths(destination, destination, originalDestination);
         store.UpdateFingerprint(destination);
         store.SetStatus(destination, FileStatus.Completed);
+        if (destination != path)
+            ForgetOldName(options, path);
 
         _logger.LogInformation(
             "Copied {Primary} to {Path}: identical content, so it needed no recognition of its own",
@@ -952,6 +958,44 @@ public sealed class LibraryProcessor(
 
         return Outcome(record, FileStatus.Completed, 0, 0, false, stopwatch.Elapsed, null)
             with { RenamedTo = destination == path ? null : destination };
+    }
+
+    /// <summary>
+    /// The search index and the audit are keyed by path too, so once a file is renamed they hold a
+    /// document that is no longer there: search returned the six old names, with their unreadable
+    /// text, until they were trimmed by hand on 10 October 2026. The old name is certainly gone -
+    /// this run renamed it - so it is forgotten here rather than left for a trim. The new name
+    /// arrives with the next `index` and `doctor`.
+    ///
+    /// <para>
+    /// Only the library's own index and audit, where every command keeps them by default. Best
+    /// effort: the file is finished and safe, and a stale entry is untidy, not dangerous.
+    /// </para>
+    /// </summary>
+    private void ForgetOldName(LibraryOptions options, string oldPath)
+    {
+        try
+        {
+            var indexPath = Indexing.LibraryIndexer.DefaultIndexPath(options.Root);
+            if (File.Exists(indexPath))
+            {
+                using var index = new Indexing.SearchIndex(indexPath);
+                index.Remove(oldPath);
+            }
+
+            var auditPath = Auditing.DoctorStore.DefaultPathFor(options.Root);
+            if (File.Exists(auditPath))
+            {
+                using var audit = new Auditing.DoctorStore(auditPath);
+                audit.Remove(oldPath);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Renamed {Path}, but could not forget its old name in the index or the audit; " +
+                "`reconcile --trim-missing` and `doctor --trim-missing` will", oldPath);
+        }
     }
 
     /// <summary>What a file whose printed text was silenced is renamed to: its name, tagged.</summary>

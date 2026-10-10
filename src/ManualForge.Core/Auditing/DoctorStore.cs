@@ -527,6 +527,40 @@ public sealed class DoctorStore : IDisposable
         transaction.Commit();
     }
 
+    /// <summary>
+    /// Audited documents whose file is no longer on disk. Their findings and repairs still count
+    /// in <see cref="Summary"/>, so a file that was renamed or deleted inflates the standing until
+    /// it is forgotten.
+    /// </summary>
+    public IReadOnlyList<string> Missing()
+    {
+        using var command = _connection.CreateCommand();
+        command.CommandText = "SELECT path FROM audited_documents ORDER BY path";
+
+        var missing = new List<string>();
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            var path = reader.GetString(0);
+            if (!File.Exists(path))
+                missing.Add(path);
+        }
+
+        return missing;
+    }
+
+    /// <summary>
+    /// Forgets every audited document whose file is gone, and returns which. Asked for, never
+    /// automatic: a file that comes back would need its repairs read again, and those cost GPU time.
+    /// </summary>
+    public IReadOnlyList<string> TrimMissing()
+    {
+        var missing = Missing();
+        foreach (var path in missing)
+            Remove(path);
+        return missing;
+    }
+
     private static string Now() => DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture);
 
     public void Dispose()
