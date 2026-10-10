@@ -440,7 +440,8 @@ public sealed class LibraryIndexer(ILogger<LibraryIndexer>? logger = null)
     /// </summary>
     private static string Lines(UglyToad.PdfPig.Content.Page page)
     {
-        var words = page.GetWords().ToArray();
+        // Not GetWords(): its grouping cuts words wherever glyphs are tracked apart (#47).
+        var words = Text.PageWords.Of(page).ToArray();
         if (words.Length == 0)
             return string.Empty;
 

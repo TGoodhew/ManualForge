@@ -152,9 +152,11 @@ public sealed class DocumentClassifier(ClassifierOptions? options = null)
             {
                 try
                 {
-                    // GetWords, not Text: see the remarks on TextMetricsCalculator.
+                    // Words, not Text: see the remarks on TextMetricsCalculator. And PageWords, not
+                    // GetWords(): the default grouping chops tracked text into single letters,
+                    // which the measure ignores, so a garbled layer looked clean (#47).
                     var page = document.GetPage(pageNumber);
-                    var words = page.GetWords().Select(w => w.Text);
+                    var words = Text.PageWords.Of(page).Select(w => w.Text);
 
                     // Letters, not words: this counts the glyphs the page draws whatever they
                     // decode to, which is how a text layer we cannot read is told apart from no

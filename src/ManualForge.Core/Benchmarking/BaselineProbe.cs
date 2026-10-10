@@ -89,7 +89,7 @@ public sealed class BaselineProbe
 
         var samples = new List<BaselineSample>();
 
-        foreach (var word in page.GetWords())
+        foreach (var word in Text.PageWords.Of(page))
         {
             var sample = Measure(word, raster.Bitmap, geometry, path, pageNumber);
             if (sample is not null)
