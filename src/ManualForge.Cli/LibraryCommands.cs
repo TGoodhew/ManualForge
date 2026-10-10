@@ -374,18 +374,14 @@ internal static class RunCommand
                 pagesPerMinute = completedPages / runWatch.Elapsed.TotalMinutes;
         }
 
-        if (tuning.Tuner is { } tuner)
+        var after = options.DryRun ? null : tuning.Remember(profiles, pagesPerMinute);
+        if (tuning.Tuner is not null)
         {
-            Console.WriteLine(
-                $"Tuning    : settled on {tuner.BestLevel} page(s) in flight" +
-                (tuner.UnsafeFound is { } bad ? $"; {bad} or more spills on this card and is not tried" : ""));
+            var outcome = tuning.Outcome(after);
+            Console.WriteLine($"Tuning    : {outcome}");
             runLog.LogInformation(
-                "Tuning settled on {Best} pages in flight; unsafe at {Unsafe}; {PagesPerMinute} pages/min",
-                tuner.BestLevel, tuner.UnsafeFound?.ToString() ?? "none found", pagesPerMinute?.ToString("F1") ?? "not measured");
+                "Tuning: {Outcome}; {PagesPerMinute} pages/min", outcome, pagesPerMinute?.ToString("F1") ?? "not measured");
         }
-
-        if (!options.DryRun)
-            tuning.Remember(profiles, pagesPerMinute);
 
         // Renamed files are a caveat about their text, and the user needs to know which they are.
         var renamed = outcomes.Where(o => o.RenamedTo is not null).ToArray();

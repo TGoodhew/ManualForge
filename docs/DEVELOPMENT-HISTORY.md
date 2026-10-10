@@ -1274,12 +1274,10 @@ dotnet test
   there, one page at a time means one, the rasteriser cannot run ahead of a bounded queue, and
   cancelling does not leave a consumer waiting on a channel nobody will complete. Every wait is
   bounded, because a pipeline defect that hangs the suite is worse than one that fails it.
-- **`ConcurrencyControllerTests`** - pages in flight tuned during a run, on simulated cards shaped
-  like the ones measured: a plateau, a card that looks full but has not spilled, memory going out to
-  system RAM on a step up, a collapse with no counter to read, a desktop pushing a settled run over,
-  and a cliff remembered from an earlier run (#31).
-- **`GpuProfileTests`** - what a machine remembers about its card between runs, and the estimates
-  made from it.
+- **`ConcurrencyControllerTests`** - a run stepping down when its GPU memory starts going out to
+  system RAM, on readings measured on the 5070 Ti, and never stepping up (#31).
+- **`GpuProfileTests`** - a card tuned over several runs (each clean run tries one more, the first
+  spill is remembered), and the estimates made from what was learned.
 - **`GpuMemoryTests`** - what `nvidia-smi` reports, and that probing a machine without it says nothing.
 - **`CudaLibraryTests`** - the wrong-looking installs rather than the correct one, because the
   correct one is the easy case: a CUDA 12 layout, an unextracted cuDNN, two toolkit versions side

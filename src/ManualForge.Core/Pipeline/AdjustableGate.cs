@@ -69,54 +69,61 @@ internal sealed class AdjustableGate(int limit)
 }
 
 /// <summary>
-/// Counts pages as they finish and hands the tuner a window when there are enough of them and enough
-/// time has passed to say something.
+/// Counts pages as they finish and hands the tuner a window - with how much of the process's GPU memory
+/// has gone out to system RAM - when there are enough of them and enough time has passed.
 /// </summary>
-internal sealed class TuningWindow(
-    ConcurrencyController tuner, AdjustableGate gate, PipelineOptions options, ILogger logger)
+internal sealed class TuningWindow
 {
     private readonly object _lock = new();
-    private readonly Func<int?> _readSpilled = options.ReadSpilledMiB ?? (() => GpuMemoryProbe.TryReadSpilledMiB());
+    private readonly ConcurrencyController _tuner;
+    private readonly AdjustableGate _gate;
+    private readonly PipelineOptions _options;
+    private readonly ILogger _logger;
+    private readonly Func<int?> _readSpilled;
     private readonly Stopwatch _clock = Stopwatch.StartNew();
     private int _pages;
-    private bool _warm;
+
+    public TuningWindow(ConcurrencyController tuner, AdjustableGate gate, PipelineOptions options, ILogger logger)
+    {
+        _tuner = tuner;
+        _gate = gate;
+        _options = options;
+        _logger = logger;
+        _readSpilled = options.ReadSpilledMiB ?? (() => GpuMemoryProbe.TryReadSpilledMiB());
+
+        // The models are loaded by now, so this is what a healthy process holds out there.
+        tuner.Begin(_readSpilled());
+    }
 
     public void PageDone()
     {
+        _tuner.PageRead();
+
         ConcurrencyWindow window;
         lock (_lock)
         {
             _pages++;
-            var level = gate.Limit;
-            if (_pages < Math.Max(12, 4 * level) || _clock.Elapsed < options.TuningWindow)
+            var level = _gate.Limit;
+            if (_pages < Math.Max(12, 4 * level) || _clock.Elapsed < _options.TuningWindow)
                 return;
 
             window = new ConcurrencyWindow(level, _pages, _clock.Elapsed, null);
             _pages = 0;
             _clock.Restart();
-
-            // The first window pays for loading the models and, on a card's first run, compiling its
-            // kernels - 13.8 s for the first page on a new card against 4.9 s after. It says nothing
-            // about pages in flight.
-            if (!_warm)
-            {
-                _warm = true;
-                return;
-            }
         }
 
         window = window with { SpilledMiB = _readSpilled() };
 
         ConcurrencyDecision? decision;
         lock (_lock)
-            decision = tuner.Observe(window);
+            decision = _tuner.Observe(window);
 
         if (decision is null)
             return;
 
-        gate.SetLimit(decision.To);
-        logger.LogInformation(
+        _gate.SetLimit(decision.To);
+        _logger.LogInformation(
             "Pages in flight {From} -> {To}: {Reason}", decision.From, decision.To, decision.Reason);
-        options.OnTuned?.Invoke(decision);
+        _options.OnTuned?.Invoke(decision);
     }
 }

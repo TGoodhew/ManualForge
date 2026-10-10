@@ -229,12 +229,12 @@ manualforge index  D:\Manuals     # build or update the search index
   should take. `repair <library> --plan` prints just that and stops, without using the GPU.
 - **`manualforge status D:\Manuals`:** shows the work queue and an estimate at any time, without
   changing anything.
-- **Speed on your GPU:** nothing needs setting for your card. `run` works out how many pages to
-  read at once while it goes: it adds one while that makes it faster, and drops back as soon as
-  Windows starts moving its GPU memory into system memory, which happens when the card runs out, for
-  example when you open a game partway through. The first
-  run on a new card starts at one page and climbs. Later runs start where the last one ended, and
-  never try a number that once overfilled the card. The estimates from `survey`, `status` and
+- **Speed on your GPU:** nothing needs setting for your card. ManualForge learns how many pages
+  your card can read at once, one run at a time. The first run on a new card reads two at once.
+  After any run of 100 pages or more that fits on the card, the next run tries one more, until one
+  overfills it. That number is remembered and never tried again, so after a few runs every run uses
+  the most your card holds. If a run overfills the card, for example because you open a game partway
+  through, it drops back by one straight away and carries on. The estimates from `survey`, `status` and
   `repair` use the speeds measured on your card once it has done a run or repair big enough to
   time, and say when they don't have one yet. `--gpu-concurrency <n>` fixes the number instead.
   What was learned is kept in `%LOCALAPPDATA%\ManualForge\gpu-profiles.json`; delete that file

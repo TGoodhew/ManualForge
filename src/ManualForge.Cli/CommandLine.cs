@@ -173,10 +173,10 @@ internal sealed class CommandLine
                                       which invalidates their signatures; every one is reported.
               --trim-missing          Forget the records of files that are no longer on disk. They
                                       are reported either way, and left out of every total.
-              --gpu-concurrency <n>   Pages to recognise at once, fixed. By default this is tuned
-                                      as the run goes, from its own speed and the card's free
-                                      memory, and remembered for the card. Going past what the
-                                      card holds collapses throughput rather than slowing it.
+              --gpu-concurrency <n>   Pages to recognise at once, fixed. By default each run tries
+                                      one more than the card last held, until one spills to
+                                      system memory, and remembers the result for the card.
+                                      Going past what the card holds slows the run sharply.
               --raster-workers <n>    CPU threads turning pages into bitmaps. Default 2.
               --cpu-threads <n>       Cap the threads ONNX Runtime uses per operator. The default
                                       is every core, which is right for a CPU-only run and rude if

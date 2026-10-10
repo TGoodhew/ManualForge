@@ -88,52 +88,126 @@ public sealed class GpuProfileTests : IDisposable
         Assert.Equal(3, tuning.Options(2).GpuConcurrency);
     }
 
+    /// <summary>
+    /// One run on the simulated card, as the pipeline would drive it: the pages it reads, and what the
+    /// spill counter says after each window. Returns where the next run will start.
+    /// </summary>
+    private int RunOnce(GpuProfileStore store, int pages, params int?[] spilled)
+    {
+        var tuning = GpuTuning.ForCard(Card, store.Find(Card), fixedConcurrency: null);
+        var tuner = tuning.Tuner!;
+        tuner.Begin(spilled.Length == 0 ? 0 : spilled.Any(x => x is not null) ? 0 : null);
+
+        for (var i = 0; i < pages; i++)
+            tuner.PageRead();
+        foreach (var reading in spilled)
+            tuner.Observe(new ConcurrencyWindow(tuner.Level, 12, TimeSpan.FromSeconds(20), reading));
+
+        return GpuTuning.StartFor(tuning.Remember(store, pagesPerMinute: null));
+    }
+
     [Fact]
-    public void AFirstRunOnACardStartsAtOneAndClimbs()
+    public void ACardNeverSeenStartsAtTheFirstGuess()
     {
         var tuning = GpuTuning.ForCard(Card, null, fixedConcurrency: null);
-        Assert.NotNull(tuning.Tuner);
-        Assert.Equal(1, tuning.Tuner.Level);
-        Assert.Equal(GpuTuning.MaximumInFlight, tuning.Tuner.Ceiling);
-        Assert.Contains("first run on this card", tuning.Describe(), StringComparison.Ordinal);
+
+        Assert.Equal(GpuTuning.FirstGuess, tuning.Tuner!.Level);
+        Assert.Equal(GpuTuning.FirstGuess, tuning.Options(2).GpuConcurrency);
+        Assert.Contains("first try on this card", tuning.Describe(), StringComparison.Ordinal);
     }
 
     [Fact]
-    public void ALaterRunStartsWhereTheCardSettledAndStaysOffItsCliff()
+    public void EachCleanRunLetsTheNextTryOneMoreUntilOneSpills()
     {
-        var profile = new GpuProfile { Name = Card.Name, TotalMiB = Card.TotalMiB, BestConcurrency = 3, UnsafeConcurrency = 5 };
-        var tuning = GpuTuning.ForCard(Card, profile, fixedConcurrency: null);
+        // The 5070 Ti on 10 October: three held, four put 322 MiB out.
+        var store = Store();
+        int?[] clean = [76, 76, 76];
 
-        Assert.Equal(3, tuning.Tuner!.Level);
-        Assert.Equal(4, tuning.Tuner.Ceiling);
-        Assert.Equal(3, tuning.Options(2).GpuConcurrency);
+        Assert.Equal(3, RunOnce(store, 200, clean));                 // 2 held: try 3
+        Assert.Equal(4, RunOnce(store, 200, clean));                 // 3 held: try 4
+        Assert.Equal(3, RunOnce(store, 200, 76, 322, 322));          // 4 spilled: back to 3
+        Assert.Equal(4, store.Find(Card)?.UnsafeConcurrency);
+
+        // And there it stays: three is the most this card holds, and four is never tried again.
+        Assert.Equal(3, RunOnce(store, 200, clean));
+        Assert.Equal(3, RunOnce(store, 200, clean));
+        Assert.Contains("the most this card holds", GpuTuning.ForCard(Card, store.Find(Card), null).Describe(), StringComparison.Ordinal);
     }
 
     [Fact]
-    public void WhatARunLearnedIsRemembered()
+    public void ASpillAtASettingTheCardHasHeldIsNotHeldAgainstIt()
+    {
+        // Settled at three, with four known to spill. A game takes the card one afternoon and three
+        // spills: the next run starts lower, and climbs back, because three is not ruled out.
+        var store = Store();
+        store.Update(Card, p => p with { BestConcurrency = 3, UnsafeConcurrency = 4 });
+
+        Assert.Equal(3, RunOnce(store, 200, 76, 900, 900));
+        Assert.Equal(2, store.Find(Card)?.BestConcurrency);
+        Assert.Equal(4, store.Find(Card)?.UnsafeConcurrency);
+    }
+
+    [Fact]
+    public void AShortCleanRunVouchesForNothing()
+    {
+        // Thirty pages have not met a big enough page to say a setting holds.
+        var store = Store();
+
+        Assert.Equal(GpuTuning.FirstGuess, RunOnce(store, 30, 76, 76));
+        Assert.Null(store.Find(Card)?.BestConcurrency);
+    }
+
+    [Fact]
+    public void AShortRunThatSpillsIsStillBelieved()
     {
         var store = Store();
-        var tuning = GpuTuning.ForCard(Card, null, fixedConcurrency: null);
 
-        tuning.Remember(store, pagesPerMinute: 100);
-        Assert.Equal(1, store.Find(Card)?.BestConcurrency);
+        Assert.Equal(1, RunOnce(store, 30, 900));
+        Assert.Equal(2, store.Find(Card)?.UnsafeConcurrency);
+    }
+
+    [Fact]
+    public void ARunThatCouldNotReadTheCounterLearnsNothingAboutTheCard()
+    {
+        var store = Store();
+
+        Assert.Equal(GpuTuning.FirstGuess, RunOnce(store, 500, null, null, null));
+        Assert.Null(store.Find(Card)?.BestConcurrency);
+    }
+
+    [Fact]
+    public void ItNeverGoesPastTheMaximum()
+    {
+        var store = Store();
+        store.Update(Card, p => p with { BestConcurrency = GpuTuning.MaximumInFlight });
+
+        Assert.Equal(GpuTuning.MaximumInFlight, GpuTuning.StartFor(store.Find(Card)));
+    }
+
+    [Fact]
+    public void ARunsSpeedIsAveragedWithTheLast()
+    {
+        var store = Store();
+        GpuTuning.ForCard(Card, null, null).Remember(store, pagesPerMinute: 100);
         Assert.Equal(100, store.Find(Card)?.RunPagesPerMinute);
 
-        // A second run's speed is averaged in, and a run too short to measure leaves it alone.
         GpuTuning.ForCard(Card, store.Find(Card), null).Remember(store, pagesPerMinute: 140);
         Assert.Equal(120, store.Find(Card)?.RunPagesPerMinute);
+
+        // A run too short to measure leaves it alone.
         GpuTuning.ForCard(Card, store.Find(Card), null).Remember(store, pagesPerMinute: null);
         Assert.Equal(120, store.Find(Card)?.RunPagesPerMinute);
     }
 
     [Fact]
-    public void ACliffOnceFoundIsNeverForgotten()
+    public void AFixedRunLeavesWhatIsKnownAboutTheCardAlone()
     {
         var store = Store();
-        store.Update(Card, p => p with { UnsafeConcurrency = 4 });
+        store.Update(Card, p => p with { BestConcurrency = 3, UnsafeConcurrency = 4 });
 
-        // A fixed run learns nothing about the cliff, and must not clear what is known.
-        GpuTuning.ForCard(Card, store.Find(Card), fixedConcurrency: 2).Remember(store, null);
+        GpuTuning.ForCard(Card, store.Find(Card), fixedConcurrency: 6).Remember(store, 50);
+
+        Assert.Equal(3, store.Find(Card)?.BestConcurrency);
         Assert.Equal(4, store.Find(Card)?.UnsafeConcurrency);
     }
 
@@ -141,7 +215,7 @@ public sealed class GpuProfileTests : IDisposable
     public void WithNoCardIdentifiedNothingIsWritten()
     {
         var store = Store();
-        GpuTuning.ForCard(null, null, fixedConcurrency: null).Remember(store, 100);
+        Assert.Null(GpuTuning.ForCard(null, null, fixedConcurrency: null).Remember(store, 100));
         Assert.False(File.Exists(store.Path));
     }
 

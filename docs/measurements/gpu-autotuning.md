@@ -7,8 +7,10 @@ page, 151.7 pages a minute in every estimate. That is right for the RTX 5070 Ti 
 everywhere else. It was the same mistake the 3060 Ti's figures had made: they went on being used
 after that card was replaced.
 
-**Now no card's figures are built in.** A run finds its own pages in flight as it goes, and the
-machine remembers what it found for the next run on the same card.
+**Now no card's figures are built in.** The card is tuned one run at a time: each run keeps one
+setting and backs off only if the card spills, a clean run lets the next try one more, and the first
+setting that spills is remembered as the card's limit. Tuning within a run was tried twice and lost
+to a fixed setting both times; the sections after "What is remembered" say why.
 
 ## What is tuned, and what is not
 
@@ -19,35 +21,32 @@ machine remembers what it found for the next run on the same card.
 | Rasterisers | no | Two, four and six give the same speed. Rasterising is not the limit. |
 | cuDNN algorithm search | no | Exhaustive and heuristic were the same within noise. |
 
-## How a run tunes
+## How a card is tuned
 
-The run judges itself in windows of at least 20 seconds and at least `max(12, 4 × pages in flight)`
-pages. The first window is thrown away, because it pays for loading the models and, on a card's first
-run, compiling its kernels (13.8 s for the first page against 4.9 s after).
+**Across runs.** A card never seen starts at two pages in flight: the most the smallest card measured
+(8 GB) held, and about half again the speed of one. After that, each run starts at one more than the
+most the card has held cleanly, unless that is the setting known to spill:
 
-After each window it reads how much of its own GPU memory Windows has moved out to system RAM (the
-`GPU Process Memory\Shared Usage` performance counter for the process), and decides:
+- A run that reads at least 100 pages **without spilling** vouches for its setting. The next run
+  tries one more.
+- A run that **spills** at a setting being tried for the first time marks that setting unsafe for the
+  card, for good. The next run goes back to the one below.
+- A run that spills at a setting the card **has held before** may have been pushed over by something
+  else (a game, a browser). The next run starts one lower and climbs back. The setting isn't ruled out.
+- A run too short to say, or one where the counter could not be read, learns nothing about the card.
 
-1. **Memory going out.** If that has risen more than 128 MiB above the least the run has held
-   there, the card is over the edge and it steps down at once.
-2. **Collapse.** Under half the speed of a lower setting, it steps down. This catches the edge on a
-   machine where the counter can't be read.
-3. **Judging a step up.** After two windows at the new setting, it keeps the step if it was at least
-   5% faster. Otherwise it goes back down and stops climbing. Identical whole runs differ by about
-   5%, so a smaller gain can't be told from noise.
-4. **Otherwise it tries one more.**
+So the card settles on the most pages in flight it holds. On every card measured, that was also the
+fastest: each page added was faster until the card spilled (50, 75, 87, 91 pages a minute at one to
+four on the 5070 Ti), and spilling was slower than any of them. Eight is the most any run will try.
+That isn't a figure for any card: it's above anything one has been seen to want.
 
-A setting that spills or collapses *while being tried* is marked unsafe for the card. One that spills
-later, after it had been fine, may have been pushed over by something else (a game, a browser). It
-only lowers where the next run starts, and that run may climb again.
-
-After a step down, the mark for "gone out" moves up to what is out now, because the memory pool does
-not hand back what was moved. What counts after that is whether more goes.
-
-Lowering the number takes effect as pages finish; nothing in flight is interrupted. The run starts
-up to eight workers. A gate decides how many may hold a page, so the tuner moves a limit and never
-starts or stops a thread. Eight is a cap on workers, not a figure for any card: four was fastest on
-the 16 GB card and six had collapsed.
+**Within a run, only down.** Every 20 seconds and `max(12, 4 × pages in flight)` pages, the run reads
+how much of its own GPU memory Windows has moved out to system RAM (the
+`GPU Process Memory\Shared Usage` performance counter for the process). If that has risen more than
+128 MiB above what the process held before its first page, the card is over the edge, and the run
+steps down one at once. After a step down, the mark moves up to what is out now, because the memory
+pool doesn't hand back what was moved. What counts after that is whether more goes. A step down
+takes effect as pages finish; nothing in flight is interrupted.
 
 ## What is remembered
 
@@ -57,8 +56,8 @@ cent, which isn't worth re-tuning from nothing.
 
 | Field | Learned from | Used for |
 |---|---|---|
-| `BestConcurrency` | the last step up that paid, less any that later spilled | where the next run starts (a new card starts at 1) |
-| `UnsafeConcurrency` | a spill or collapse on a step up | never started at or climbed to; only ever lowered |
+| `BestConcurrency` | the most pages in flight a run of 100+ pages held without spilling; one less after a spill | the next run starts one above it (a new card starts at 2) |
+| `UnsafeConcurrency` | a spill at a setting being tried for the first time | never tried again; only ever lowered |
 | `RunPagesPerMinute` | a run of 100 pages or more, end to end, averaged with the last | `survey`, `status` and `run` estimates |
 | `RepairPagesPerMinute` | per page kind and resolution, 30 pages or more, first page excluded, averaged with the last | `repair`'s estimate |
 
@@ -67,8 +66,8 @@ an RTX 5070 Ti; this <card> has not been timed yet"). With no NVIDIA card they u
 `--gpu-concurrency <n>` fixes pages in flight and turns tuning off. A fixed run still records its
 speed and never clears a known cliff.
 
-Each run's log records the card, its driver, what the tuner started from, every change it made with
-the reason, and where it settled.
+Each run's log records the card, its driver, the setting and why it was chosen, any step down with
+the reason, and what the next run will try. Deleting the file starts the card again from two.
 
 ## Free memory is the wrong signal
 
@@ -109,18 +108,44 @@ three pages ran at 85.8 with it, against 85.5 without.
 Six pages here ran at 43 pages a minute, not the 13.7 measured on 9 Oct. How hard the fall is varies;
 that there is one does not.
 
+## Climbing within a run loses too
+
+The second version climbed on throughput within the run (keeping a step if it was 5% faster) and
+stepped down on the spill counter. On the card, 10 Oct 2026, 280 pages (all seven test files in
+`_compare`), Release build:
+
+| Run | Pages in flight | Spilled | Pages/min | Words |
+|---|---|---|---|---|
+| tuned, first run on the card | 1 → 2 → 3 → 4, not worth it → 3, spilled → 2 | 2,012 MiB | 68.6 | 122,858 |
+| tuned, second run | starts at 2 → 3, spilled → 2, spilled → 1 | 652 MiB | 66.0 | 122,858 |
+| fixed at 3 | 3 | none (76 MiB, steady) | **79.6** | 122,858 |
+
+At three pages, the fixed run never spilled and the tuned runs did. The difference is the memory
+pool. It never shrinks, so a run that tried four pages and went back to three kept four's pool. And
+it grows in steps that double, so growing it a page at a time left it larger than growing it once:
+the tuned runs peaked at 15.6–15.8 GB of the card, the fixed one at 12.9. PaddleOcrNet 2.2.1 has no
+option to change how ONNX Runtime's pool grows. Within a run, trying more costs the rest of the run,
+so the trying happens between runs, where every run starts with a fresh pool.
+
 ## Evidence so far
 
-Simulated cards (`ConcurrencyControllerTests`), on the curves measured above:
+`ConcurrencyControllerTests`, on the readings measured above:
 
-- **Plenty of room** (50.4, 74.9, 86.8, 91.4, 92): climbs to 4, tries 5, gives it back.
-- **Looks full, has not spilled:** still climbed. This is the case the first version got wrong.
-- **10 Oct, 4 spills 322 MiB at 46 pages/min:** back to 3, 4 marked unsafe.
-- **No counter, 8 GB collapse** (50, 78, 7.6): back to 2, 3 marked unsafe.
-- **Another program pushes a settled run over:** steps down, lowers the next start, card not marked.
-- **Memory that went out and stayed out** does not keep pushing it down.
-- A remembered unsafe setting is never reached.
+- A healthy run (76 MiB steady), and a card that looks full but hasn't spilled, are left alone.
+- **Four pages, 322 MiB out:** steps down to three.
+- **Six pages, 4.3 GB out before the first window:** caught, against what the process held before
+  its first page.
+- Memory that went out and stayed out doesn't keep pushing it down. More going out does.
+- It never steps up, and without the counter it decides nothing.
 
-A real pipeline (`RecognitionPipelineTests.ATunedRunClimbsWhileMorePagesInFlightPay`) with a
-simulated engine climbs from 1 to at least 2 and runs that many pages at once. The counter reader
-gives the same figure as `Get-Counter` for a live process.
+`GpuProfileTests`, a card tuned over several runs:
+
+- **The 5070 Ti's curve:** 2 → 3 → 4, four spills, back to 3, and 3 from then on.
+- A spill at a setting the card has held lowers the next start but doesn't rule the setting out.
+- A short clean run, or one without the counter, vouches for nothing. A short run that spills is
+  still believed.
+- A run with a fixed setting leaves what is known about the card alone.
+
+A real pipeline (`RecognitionPipelineTests.ARunWhoseMemoryStartsGoingOutStepsDownAndFinishes`) with
+a simulated engine and counter steps from three to two and still reads every page. The counter
+reader gives the same figure as `Get-Counter` for a live process.

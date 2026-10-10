@@ -191,14 +191,16 @@ public class RecognitionPipelineTests : IDisposable
     }
 
     [Fact]
-    public async Task ATunedRunClimbsWhileMorePagesInFlightPay()
+    public async Task ARunWhoseMemoryStartsGoingOutStepsDownAndFinishes()
     {
-        // Every page takes the same time, so each page added in flight adds throughput, as it does on
-        // a card with room to spare. The tuner should climb, and the engine should see it climb.
+        // Three pages in flight, healthy for a few windows, then this process's memory starts going
+        // out to system RAM - as four pages did on the RTX 5070 Ti. The run steps down and still reads
+        // every page.
         var path = Scanned("a.pdf", 160);
-        var engine = new FakeOcrEngine { OnPage = _ => Task.Delay(30) };
-        var tuner = new ConcurrencyController(start: 1, maximum: 4);
+        var engine = new FakeOcrEngine { OnPage = _ => Task.Delay(10) };
+        var tuner = new ConcurrencyController(3);
         var decisions = new List<ConcurrencyDecision>();
+        var readings = 0;
 
         var report = await NewPipeline(engine, new MemoryPageOcrCache())
             .RunAsync([Job(path, 160)], new PipelineOptions
@@ -206,16 +208,17 @@ public class RecognitionPipelineTests : IDisposable
                 Tuner = tuner,
                 RasterWorkers = 4,
                 TuningWindow = TimeSpan.Zero,
-                ReadSpilledMiB = () => 76,
+                ReadSpilledMiB = () => Interlocked.Increment(ref readings) <= 3 ? 76 : 900,
                 OnTuned = d => { lock (decisions) decisions.Add(d); },
             })
             .WaitAsync(Patience);
 
         Assert.Equal(160, report.PagesRecognised);
-        Assert.NotEmpty(decisions);
-        Assert.Equal(1, decisions[0].From);
-        Assert.True(tuner.BestLevel >= 2, $"best {tuner.BestLevel}: {string.Join("; ", decisions.Select(d => d.Reason))}");
-        Assert.True(engine.PeakConcurrency >= 2);
+        Assert.Equal(160, tuner.Pages);
+        Assert.Equal(3, tuner.SpilledAt);
+        Assert.Equal(new ConcurrencyDecision(3, 2, decisions[0].Reason), decisions[0]);
+        Assert.Contains("system RAM", decisions[0].Reason, StringComparison.Ordinal);
+        Assert.InRange(engine.PeakConcurrency, 2, 3);
     }
 
     [Fact]

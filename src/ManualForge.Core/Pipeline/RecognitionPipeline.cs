@@ -24,8 +24,8 @@ public sealed class PipelineOptions
     public int GpuConcurrency { get; init; } = 1;
 
     /// <summary>
-    /// Chooses pages in flight as the run goes, from its own throughput and the card's free memory
-    /// (#31). Null keeps <see cref="GpuConcurrency"/> fixed.
+    /// Sets pages in flight for the run and steps them down if this process's GPU memory starts going
+    /// out to system RAM (#31). Null keeps <see cref="GpuConcurrency"/> fixed.
     /// </summary>
     public ConcurrencyController? Tuner { get; init; }
 
@@ -324,11 +324,10 @@ public sealed class RecognitionPipeline(
         }, CancellationToken.None);
 
         // Stage 3: recognise. This is the only stage whose width is chosen from hardware: as many
-        // workers as the most pages in flight that may be tried, of which the gate lets through as
-        // many as are in flight now.
+        // workers as pages in flight, of which the gate lets through fewer if the tuner steps down.
         var tuner = options.Tuner;
-        var workerCount = Math.Max(1, tuner?.Ceiling ?? options.GpuConcurrency);
-        var gate = new AdjustableGate(Math.Max(1, tuner?.Level ?? options.GpuConcurrency));
+        var workerCount = Math.Max(1, tuner?.Level ?? options.GpuConcurrency);
+        var gate = new AdjustableGate(workerCount);
         var tuning = tuner is null ? null : new TuningWindow(tuner, gate, options, _logger);
 
         var gpuWorkers = Enumerable.Range(0, workerCount).Select(_ => Task.Run(async () =>
