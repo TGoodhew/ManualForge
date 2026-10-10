@@ -1,3 +1,5 @@
+using ManualForge.Core.Ocr;
+
 namespace ManualForge.Core.Auditing;
 
 /// <summary>
@@ -44,24 +46,87 @@ public static class RepairThroughput
     /// <summary>Time spent on a document before its first page is read.</summary>
     public static readonly TimeSpan PerDocument = TimeSpan.Zero;
 
-    /// <summary>Pages a minute for a page of this kind read at this resolution.</summary>
-    public static double PagesPerMinute(PageKind kind, int dpi) => (kind, dpi) switch
+    /// <summary>
+    /// The fewest pages of one kind and resolution a repair must read before its rate for them is
+    /// remembered. Fewer, and one odd document decides every estimate after it.
+    /// </summary>
+    public const int PagesToLearnFrom = 30;
+
+    /// <summary>Pages a minute for a page of this kind read at this resolution, as measured above.</summary>
+    public static double PagesPerMinute(PageKind kind, int dpi) => (kind, Band(dpi)) switch
     {
-        (PageKind.Drawn, <= 300) => 89.4,
-        (PageKind.Drawn, <= 400) => 70.8,
+        (PageKind.Drawn, 300) => 89.4,
+        (PageKind.Drawn, 400) => 70.8,
         (PageKind.Drawn, _) => 44.0,
-        (_, <= 300) => 43.9,
-        (_, <= 400) => 45.4,
+        (_, 300) => 43.9,
+        (_, 400) => 45.4,
         _ => 28.0,
     };
 
+    /// <summary>
+    /// The same, from what this card was measured doing when it has read enough such pages, and
+    /// from the table when it has not (#31).
+    /// </summary>
+    public static double PagesPerMinute(PageKind kind, int dpi, GpuProfile? learned) =>
+        learned is not null
+        && learned.RepairPagesPerMinute.TryGetValue(Key(kind, dpi), out var rate)
+        && rate > 0
+            ? rate
+            : PagesPerMinute(kind, dpi);
+
+    /// <summary>How a rate is filed in a profile: "Drawn/300", "Raster/600".</summary>
+    public static string Key(PageKind kind, int dpi) =>
+        FormattableString.Invariant($"{(kind == PageKind.Drawn ? PageKind.Drawn : PageKind.Raster)}/{Band(dpi)}");
+
+    /// <summary>The resolutions the rates are measured at; anything between rounds up.</summary>
+    public static int Band(int dpi) => dpi <= 300 ? 300 : dpi <= 400 ? 400 : 600;
+
     /// <summary>How long reading these pages, spread over this many documents, should take.</summary>
-    public static TimeSpan Estimate(IEnumerable<PlannedRepairPage> pages, int documents)
+    public static TimeSpan Estimate(IEnumerable<PlannedRepairPage> pages, int documents, GpuProfile? learned = null)
     {
         ArgumentNullException.ThrowIfNull(pages);
-        var minutes = pages.Sum(p => 1.0 / PagesPerMinute(p.Kind, p.Dpi));
+        var minutes = pages.Sum(p => 1.0 / PagesPerMinute(p.Kind, p.Dpi, learned));
         return TimeSpan.FromMinutes(minutes) + PerDocument * documents;
     }
+
+    /// <summary>
+    /// Folds what a repair measured into what was known: a rate read from enough pages is averaged
+    /// with the one before it, so one unusual run moves the estimate without deciding it.
+    /// </summary>
+    public static Dictionary<string, double> Learn(
+        IReadOnlyDictionary<string, double> before, IEnumerable<RepairTiming> timings)
+    {
+        ArgumentNullException.ThrowIfNull(before);
+        ArgumentNullException.ThrowIfNull(timings);
+
+        var after = new Dictionary<string, double>(before, StringComparer.Ordinal);
+        foreach (var timing in timings.Where(t => t.Pages >= PagesToLearnFrom && t.Elapsed > TimeSpan.Zero))
+        {
+            var key = Key(timing.Kind, timing.Dpi);
+            after[key] = after.TryGetValue(key, out var earlier) ? (earlier + timing.PagesPerMinute) / 2 : timing.PagesPerMinute;
+        }
+
+        return after;
+    }
+
+    /// <summary>Keeps what a repair on this card measured, for the next estimate made on it.</summary>
+    public static void Remember(GpuProfileStore store, GpuIdentity? gpu, RepairReport report)
+    {
+        ArgumentNullException.ThrowIfNull(store);
+        ArgumentNullException.ThrowIfNull(report);
+
+        if (gpu is null || report.Timings is not { Count: > 0 } timings
+            || !timings.Any(t => t.Pages >= PagesToLearnFrom))
+            return;
+
+        store.Update(gpu, p => p with { RepairPagesPerMinute = Learn(p.RepairPagesPerMinute, timings) });
+    }
+}
+
+/// <summary>How long a repair spent on pages of one kind at one resolution.</summary>
+public sealed record RepairTiming(PageKind Kind, int Dpi, int Pages, TimeSpan Elapsed)
+{
+    public double PagesPerMinute => Elapsed.TotalMinutes <= 0 ? 0 : Pages / Elapsed.TotalMinutes;
 }
 
 /// <summary>One page a repair will read, and what decides how long it takes.</summary>
@@ -73,5 +138,8 @@ public sealed record PlannedRepairPage(string Path, int PageNumber, PageKind Kin
 /// </summary>
 public sealed record RepairPlan(IReadOnlyList<PlannedRepairPage> Pages, int Documents)
 {
-    public TimeSpan Estimate => RepairThroughput.Estimate(Pages, Documents);
+    public TimeSpan Estimate => EstimateOn(null);
+
+    /// <summary>The estimate on a card whose own repair speeds are known.</summary>
+    public TimeSpan EstimateOn(GpuProfile? learned) => RepairThroughput.Estimate(Pages, Documents, learned);
 }

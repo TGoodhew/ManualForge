@@ -229,6 +229,16 @@ manualforge index  D:\Manuals     # build or update the search index
   should take. `repair <library> --plan` prints just that and stops, without using the GPU.
 - **`manualforge status D:\Manuals`:** shows the work queue and an estimate at any time, without
   changing anything.
+- **Speed on your GPU:** nothing needs setting for your card. ManualForge learns how many pages
+  your card can read at once, one run at a time. The first run on a new card reads two at once.
+  After any run of 100 pages or more that fits on the card, the next run tries one more, until one
+  overfills it. That number is remembered and never tried again, so after a few runs every run uses
+  the most your card holds. If a run overfills the card, for example because you open a game partway
+  through, it drops back by one straight away and carries on. The estimates from `survey`, `status` and
+  `repair` use the speeds measured on your card once it has done a run or repair big enough to
+  time, and say when they don't have one yet. `--gpu-concurrency <n>` fixes the number instead.
+  What was learned is kept in `%LOCALAPPDATA%\ManualForge\gpu-profiles.json`; delete that file
+  to start again.
 
 ### One file
 
@@ -362,7 +372,7 @@ $path = ([Environment]::GetEnvironmentVariable('Path', 'User') -split ';' | Wher
 [Environment]::SetEnvironmentVariable('Path', $path, 'User')
 ```
 
-**4. Remove the models and logs (optional):**
+**4. Remove the models, logs and what was learned about your GPU (optional):**
 
 ```powershell
 Remove-Item -LiteralPath "$env:LOCALAPPDATA\ManualForge" -Recurse -Force

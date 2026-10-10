@@ -191,6 +191,37 @@ public class RecognitionPipelineTests : IDisposable
     }
 
     [Fact]
+    public async Task ARunWhoseMemoryStartsGoingOutStepsDownAndFinishes()
+    {
+        // Three pages in flight, healthy for a few windows, then this process's memory starts going
+        // out to system RAM - as four pages did on the RTX 5070 Ti. The run steps down and still reads
+        // every page.
+        var path = Scanned("a.pdf", 160);
+        var engine = new FakeOcrEngine { OnPage = _ => Task.Delay(10) };
+        var tuner = new ConcurrencyController(3);
+        var decisions = new List<ConcurrencyDecision>();
+        var readings = 0;
+
+        var report = await NewPipeline(engine, new MemoryPageOcrCache())
+            .RunAsync([Job(path, 160)], new PipelineOptions
+            {
+                Tuner = tuner,
+                RasterWorkers = 4,
+                TuningWindow = TimeSpan.Zero,
+                ReadSpilledMiB = () => Interlocked.Increment(ref readings) <= 3 ? 76 : 900,
+                OnTuned = d => { lock (decisions) decisions.Add(d); },
+            })
+            .WaitAsync(Patience);
+
+        Assert.Equal(160, report.PagesRecognised);
+        Assert.Equal(160, tuner.Pages);
+        Assert.Equal(3, tuner.SpilledAt);
+        Assert.Equal(new ConcurrencyDecision(3, 2, decisions[0].Reason), decisions[0]);
+        Assert.Contains("system RAM", decisions[0].Reason, StringComparison.Ordinal);
+        Assert.InRange(engine.PeakConcurrency, 2, 3);
+    }
+
+    [Fact]
     public async Task OnePageAtATimeMeansOnePageAtATime()
     {
         var path = Scanned("a.pdf", 6);

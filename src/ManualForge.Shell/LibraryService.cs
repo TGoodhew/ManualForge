@@ -17,7 +17,7 @@ public sealed class LibraryServiceOptions
 
     public string? ModelCachePath { get; init; }
 
-    /// <summary>Pages on the GPU at once. Null asks <see cref="GpuMemoryProbe"/> what will fit.</summary>
+    /// <summary>Pages on the GPU at once. Null tunes them as the run goes (#31).</summary>
     public int? GpuConcurrency { get; init; }
 
     public int RasterWorkers { get; init; } = 2;
@@ -102,19 +102,24 @@ public sealed class LibraryService(
             builder, new DocumentClassifier(), _loggerFactory.CreateLogger<LibraryProcessor>(),
             pageCache, pipeline);
 
-        var concurrency = _options.GpuConcurrency
-            ?? (engine.Runtime.UsingGpu ? GpuMemoryProbe.ConcurrencyFor(GpuMemoryProbe.TryRead()) : 1);
+        // Pages in flight are tuned as the run goes, from where this card settled last time (#31).
+        var profiles = new GpuProfileStore();
+        var tuning = GpuTuning.For(engine.Runtime.UsingGpu, _options.GpuConcurrency, profiles);
+        var pipelineOptions = tuning.Options(_options.RasterWorkers, progress: pages);
 
-        return await processor.RunAsync(
-            libraryOptions,
-            files,
-            cancellationToken,
-            new PipelineOptions
-            {
-                GpuConcurrency = Math.Max(1, concurrency),
-                RasterWorkers = Math.Max(1, _options.RasterWorkers),
-                Progress = pages,
-            }).ConfigureAwait(false);
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        var outcomes = await processor.RunAsync(libraryOptions, files, cancellationToken, pipelineOptions)
+            .ConfigureAwait(false);
+
+        if (!dryRun)
+        {
+            var completedPages = outcomes.Where(o => o.Status == FileStatus.Completed).Sum(o => (long)o.PageCount);
+            tuning.Remember(profiles, completedPages >= MeasuredThroughput.PagesToLearnFrom
+                ? completedPages / watch.Elapsed.TotalMinutes
+                : null);
+        }
+
+        return outcomes;
     }
 
     private LibraryOptions OptionsFor(string root, ClassificationPolicy policy, bool dryRun) => new()

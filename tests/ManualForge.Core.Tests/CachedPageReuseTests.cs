@@ -6,26 +6,43 @@ using ManualForge.Core.Text;
 
 namespace ManualForge.Core.Tests;
 
-/// <summary>A cache that lives only as long as the test, and counts what was asked of it.</summary>
+/// <summary>
+/// A cache that lives only as long as the test, and counts what was asked of it. Locked, because the
+/// pipeline's rasterisers ask it while its GPU workers write to it, as they do the real one.
+/// </summary>
 internal sealed class MemoryPageOcrCache : IPageOcrCache
 {
+    private readonly object _lock = new();
     private readonly Dictionary<(string Path, int Page, string Settings), CachedPage> _entries = [];
+    private int _saves;
 
-    public int Saves { get; private set; }
+    public int Saves
+    {
+        get { lock (_lock) return _saves; }
+    }
 
     public CachedPage? TryGet(string documentPath, int pageNumber, string settingsFingerprint)
-        => _entries.GetValueOrDefault((Path.GetFullPath(documentPath), pageNumber, settingsFingerprint));
+    {
+        lock (_lock)
+            return _entries.GetValueOrDefault((Path.GetFullPath(documentPath), pageNumber, settingsFingerprint));
+    }
 
     public void Save(string documentPath, int pageNumber, string settingsFingerprint, CachedPage page)
     {
-        Saves++;
-        _entries[(Path.GetFullPath(documentPath), pageNumber, settingsFingerprint)] = page;
+        lock (_lock)
+        {
+            _saves++;
+            _entries[(Path.GetFullPath(documentPath), pageNumber, settingsFingerprint)] = page;
+        }
     }
 
     public void Clear(string documentPath)
     {
-        foreach (var key in _entries.Keys.Where(k => k.Path == Path.GetFullPath(documentPath)).ToArray())
-            _entries.Remove(key);
+        lock (_lock)
+        {
+            foreach (var key in _entries.Keys.Where(k => k.Path == Path.GetFullPath(documentPath)).ToArray())
+                _entries.Remove(key);
+        }
     }
 }
 

@@ -1,5 +1,9 @@
 # Pages in flight, batch size and rasterisers on an RTX 5070 Ti
 
+> Superseded for pages in flight: the fixed defaults below are no longer built in. A run now tunes
+> them on whatever card it is on ([gpu-autotuning.md](gpu-autotuning.md)). The measurements stand,
+> and the finding that batch size changes the output is why batch size is not tuned.
+
 The RTX 3060 Ti (8 GB) was replaced by an RTX 5070 Ti (16 GB GDDR7, Blackwell, sm_120). Every GPU
 default had been chosen against the old card, most of them by its 8 GB of memory. This is the
 re-measurement for #31.

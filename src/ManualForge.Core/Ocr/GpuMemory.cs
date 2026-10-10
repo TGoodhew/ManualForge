@@ -23,6 +23,16 @@ public sealed record GpuMemory(int TotalMiB, int UsedMiB, string? Name, int? Uti
         + (UtilisationPercent is { } u ? $", {u}% busy" : string.Empty);
 }
 
+/// <summary>A card, as far as tuning is concerned: its name and how much memory it has.</summary>
+public sealed record GpuIdentity(string Name, int TotalMiB, string? Driver)
+{
+    /// <summary>What a profile is filed under. Two cards of the same model are the same card here.</summary>
+    public string Key => $"{Name}|{TotalMiB}";
+
+    public override string ToString() =>
+        $"{Name} ({TotalMiB:N0} MiB{(Driver is null ? "" : $", driver {Driver}")})";
+}
+
 /// <summary>
 /// Reads VRAM from nvidia-smi, which is the only way to see it without taking a dependency on
 /// NVML or CUDA interop.
@@ -36,39 +46,34 @@ public sealed record GpuMemory(int TotalMiB, int UsedMiB, string? Name, int? Uti
 /// RTX 5070 Ti from 91.4 at four pages to 13.7 at six. An order of magnitude slower, with no
 /// exception to tell you why.
 ///
-/// So concurrency is chosen from free VRAM at startup, and the figure that matters is free rather
-/// than total: the desktop, a browser and whatever else is running hold 2.6-2.9 GB of either card
-/// before any work begins.
+/// So the card is watched while it works. Pages in flight are not chosen from a figure for any
+/// card but found by the run itself (ConcurrencyController, #31): it climbs while another page
+/// pays and the memory to hold it is free, and steps back from a collapse or a nearly full card.
+/// The free figure matters, not the total: the desktop, a browser and whatever else is running
+/// hold 2.6-2.9 GB of either card before any work begins.
 /// </summary>
 public static class GpuMemoryProbe
 {
     /// <summary>
-    /// Budgeted cost of each extra page in flight. A budget rather than a measurement, and the
-    /// distinction is worth being honest about.
-    ///
-    /// ONNX Runtime's arena grows into whatever room it is given, so what a page costs depends on
-    /// the card. On an 8 GB card peak VRAM barely moved with concurrency on a single document —
-    /// 7,613, 7,655 and 7,709 MiB at one, two and three pages — because there was no more room to
-    /// grow into, and across twenty-four pages of varied size it reached 7,950 MiB and collapsed.
-    /// On a 16 GB card, over a hundred varied pages, each extra page added 1.5-3.6 GB: 8.2, 11.8,
-    /// 13.3 and 15.7 GB at one to four pages (docs/measurements/gpu-concurrency-5070ti.md).
-    ///
-    /// 3,000 MiB is the middle of what the larger card measured, rounded up. It was 700, chosen
-    /// on the 8 GB card where nothing larger was ever seen, and at 700 the arithmetic would have
-    /// put eighteen pages on the 16 GB card: only the ceiling kept it off the cliff. Erring
-    /// towards fewer pages is the right way round, because the failure it is erring away from is
-    /// not a slowdown.
+    /// Which card this is: what a tuned setting or a measured speed belongs to. Null without
+    /// nvidia-smi. The driver is reported, not keyed on - a driver update moves speed by a few per
+    /// cent, and re-tuning from nothing for that would cost more than it learned.
     /// </summary>
-    public const int MarginalMiBPerConcurrentPage = 3_000;
+    public static GpuIdentity? TryIdentify()
+    {
+        var line = RunNvidiaSmi("--query-gpu=name,memory.total,driver_version --format=csv,noheader,nounits");
+        if (line is null)
+            return null;
 
-    /// <summary>
-    /// The smallest card that gets three pages in flight by default. 16 GB cards report a little
-    /// under 16,384 MiB (the RTX 5070 Ti reports 16,303), so the line sits well below that.
-    /// </summary>
-    public const int LargeCardMiB = 15_000;
+        var parts = line.Split(',', StringSplitOptions.TrimEntries);
+        if (parts.Length < 2
+            || !int.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var total))
+        {
+            return null;
+        }
 
-    /// <summary>Headroom left unused, so that a desktop that grows does not push the run over.</summary>
-    public const int ReserveMiB = 512;
+        return new GpuIdentity(parts[0], total, parts.Length > 2 ? parts[2] : null);
+    }
 
     /// <summary>
     /// Reads the first CUDA device, or null if nvidia-smi is not there. Memory and utilisation come
@@ -98,56 +103,47 @@ public static class GpuMemoryProbe
     }
 
     /// <summary>
-    /// How many pages to keep in flight on the GPU, given what is free right now.
+    /// How much of a process's GPU memory Windows is keeping in system RAM, in MiB: the
+    /// <c>GPU Process Memory\Shared Usage</c> counter, summed over the process's adapters. Null where
+    /// it cannot be read.
     /// </summary>
-    /// <param name="memory">What the probe found, or null when it could not look.</param>
-    /// <param name="ceiling">
-    /// Never go above this however much memory there is. Null takes <see cref="CeilingFor"/>.
-    /// </param>
     /// <remarks>
-    /// One is always safe, because it is what a single page needs and that is already accounted
-    /// for by the time this is asked. When the probe finds nothing — no NVIDIA card, no
-    /// nvidia-smi, or CPU execution — one is also the right answer: on CPU the work is already
-    /// spread across every core inside the engine, and adding outer concurrency only contends.
+    /// This, not free memory, is what shows a card going over the edge. The arena fills whatever is
+    /// free, so a healthy run leaves the card nearly full; but a run that has gone too far has its
+    /// memory moved out here. On the RTX 5070 Ti it held a steady 76 MiB at three pages in flight,
+    /// rose to 322 at four as throughput halved, and reached 4.3 GB at six.
     /// </remarks>
-    public static int ConcurrencyFor(GpuMemory? memory, int? ceiling = null)
+    public static int? TryReadSpilledMiB(int? processId = null)
     {
-        if (memory is null)
-            return 1;
+        if (!OperatingSystem.IsWindows())
+            return null;
 
-        var limit = ceiling ?? CeilingFor(memory);
-        if (limit < 1)
-            return 1;
+        try
+        {
+            var prefix = $"pid_{processId ?? Environment.ProcessId}_";
+            var category = new PerformanceCounterCategory("GPU Process Memory");
 
-        var spare = memory.FreeMiB - ReserveMiB;
-        if (spare <= 0)
-            return 1;
+            long bytes = 0;
+            var found = false;
+            foreach (var instance in category.GetInstanceNames())
+            {
+                if (!instance.StartsWith(prefix, StringComparison.Ordinal))
+                    continue;
 
-        return Math.Clamp(1 + spare / MarginalMiBPerConcurrentPage, 1, limit);
+                using var counter = new PerformanceCounter("GPU Process Memory", "Shared Usage", instance, readOnly: true);
+                bytes += counter.RawValue;
+                found = true;
+            }
+
+            return found ? (int)(bytes / (1024 * 1024)) : null;
+        }
+        catch (Exception)
+        {
+            // No such counters (an older Windows, no WDDM GPU), or not allowed to read them. Tuning
+            // then goes on throughput alone, which still catches a collapse.
+            return null;
+        }
     }
-
-    /// <summary>
-    /// The most pages in flight a card gets without being asked: three from 16 GB, two below.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// Two on an 8 GB card, not three. Three was the fastest setting measured there — 83.3 pages a
-    /// minute against 78.1 — but it was also the setting that tipped the card into spilling once
-    /// the pages were varied enough, and the difference between those two figures is 6% while the
-    /// difference between either and spilling is a factor of ten.
-    /// </para>
-    /// <para>
-    /// Three on a 16 GB card, not four, for the same reason one step up. Four was the fastest there
-    /// at 91.4 pages a minute against 82.9-86.8, but it peaked at 15.7 GB of 16.3, leaving nothing
-    /// for a browser or a game opened during a run, and six had already collapsed to 13.7. Three
-    /// peaked at 12.4-13.3 GB. Nothing larger has been measured, so a bigger card gets three too.
-    /// </para>
-    /// <para>
-    /// More is available by asking for it explicitly, which is the right way round for a choice
-    /// with that shape.
-    /// </para>
-    /// </remarks>
-    public static int CeilingFor(GpuMemory memory) => memory.TotalMiB >= LargeCardMiB ? 3 : 2;
 
     private static string? RunNvidiaSmi(string arguments)
     {

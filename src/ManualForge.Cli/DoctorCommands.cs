@@ -730,10 +730,15 @@ internal static class RepairCommand
         // somebody deciding whether to start one now or overnight needs the number at the top. It
         // costs exactly the pages this scope will read, each at the rate measured for its kind and
         // resolution, because one average rate was wrong by a fifth on the jobs that mattered.
+        //
+        // The rates are this card's own when a repair has run on it, and the table's until then.
+        var profiles = new GpuProfileStore();
+        var gpu = GpuMemoryProbe.TryIdentify();
+        var learned = profiles.Find(gpu);
         var plan = PageRepairer.Plan(store, options);
         if (plan.Pages.Count > 0)
         {
-            var estimate = plan.Estimate;
+            var estimate = plan.EstimateOn(learned);
             var howLong = estimate.TotalHours < 1
                 ? $"{estimate.TotalMinutes:F0} minutes"
                 : $"{estimate.TotalHours:F1} hours";
@@ -748,8 +753,12 @@ internal static class RepairCommand
                 var kind = group.Key.Kind == PageKind.Drawn ? "drawn" : "scanned";
                 Console.WriteLine(
                     $"           {group.Count(),7:N0} {kind,-7} at {group.Key.Dpi} dpi, " +
-                    $"~{RepairThroughput.PagesPerMinute(group.Key.Kind, group.Key.Dpi):F0} pages/min");
+                    $"~{RepairThroughput.PagesPerMinute(group.Key.Kind, group.Key.Dpi, learned):F0} pages/min");
             }
+
+            Console.WriteLine(learned?.RepairPagesPerMinute.Count > 0
+                ? $"           at the rates measured on this {gpu!.Name} where it has read enough such pages"
+                : "           at the rates measured on an RTX 5070 Ti" + (gpu is null ? "" : $"; this {gpu.Name} has not been timed yet"));
         }
 
         Console.WriteLine();
@@ -812,6 +821,9 @@ internal static class RepairCommand
         });
 
         var report = await repairer.RepairAsync(store, options, progress, cancellationToken).ConfigureAwait(false);
+
+        if (engine.Runtime.UsingGpu)
+            RepairThroughput.Remember(profiles, gpu, report);
 
         Console.WriteLine();
         Console.WriteLine();
