@@ -23,9 +23,11 @@ Started 20:34, finished 07:14: **10 h 40 min** against an estimate of 15 h.
 | repair | 6 h 47 min | all 19,529 pages, 1.72 M words, 48 pages/min (estimate 8.6 h) |
 | index | 3 min | 631 of 632 documents. One failed, see below |
 
-**The estimates are now well off.** `PagesPerMinuteOnGpu` is 87.3, measured on 100 dense benchmark
-pages. Across the whole library the run averaged 151.7, and later re-reads 141 to 247. Repair ran at
-48 pages/min against an estimate of about 38.
+**The estimates were well off, and have been re-taken from this run.** `PagesPerMinuteOnGpu` was
+87.3, measured on 100 dense benchmark pages. Across the whole library the run averaged 151.7, which
+is now the figure; later re-reads ran at 141 to 247. Repair ran at 48 pages/min. Re-measured by page
+kind and resolution, the repair table (`RepairThroughput`) is 5 to 25 per cent faster than the RTX
+3060 Ti's, and estimates this run at 406 minutes against the 519 the old table gave. It took 407.
 
 ## What reviewing it found
 

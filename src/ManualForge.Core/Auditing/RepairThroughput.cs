@@ -10,46 +10,49 @@ namespace ManualForge.Core.Auditing;
 /// </para>
 ///
 /// <para>
-/// Measured on 1 October 2026 over the 21,262 repairs on record, from the time between consecutive
-/// pages of the same document on an RTX 3060 Ti. The kind of page matters most: a drawn page
-/// carries a few labels, while a scanned page is dense lettering the recogniser has to read word by
-/// word. Resolution matters second. The suggested resolution was the first guess at the cause, and
-/// on its own it does not even order the rates - 400 dpi ran faster than 300 - because it mostly
-/// stands in for the mix of kinds.
+/// Measured from the time between consecutive pages of the same document, over the 19,529 pages of
+/// the full repair on 10 October 2026, on an RTX 5070 Ti (#25). The kind of page matters most: a
+/// drawn page carries a few labels, while a scanned page is dense lettering the recogniser has to
+/// read word by word. Resolution matters second. The suggested resolution was the first guess at
+/// the cause, and on its own it does not even order the rates - 400 dpi runs faster than 300 on
+/// scans - because it mostly stands in for the mix of kinds.
 /// </para>
 ///
 /// <list type="table">
 ///   <listheader><term>pages/min</term><description>300 dpi | 400 dpi | 600 dpi</description></listheader>
-///   <item><term>Drawn</term><description>77.8 (3,022) | 65.6 (532) | 41.9 (353)</description></item>
-///   <item><term>Raster</term><description>35.1 (13,856) | 39.3 (1,050) | 25.0 (390)</description></item>
+///   <item><term>Drawn</term><description>89.4 (3,001) | 70.8 (531) | 44.0 (354)</description></item>
+///   <item><term>Raster</term><description>43.9 (13,628) | 45.4 (1,047) | 28.0 (393)</description></item>
 /// </list>
 ///
 /// <para>
-/// Each document also costs a little before its first page - hashing it, reading it, opening it -
-/// about 2 seconds on the 1 October run, whose records are all still on file. Earlier runs suggest
-/// 15, but only because pages repaired again since have vanished from between their neighbours, so
-/// their gaps span whole documents that are no longer there.
+/// The same measurement on the RTX 3060 Ti, on 1 October, gave 77.8, 65.6 and 41.9 for drawn pages
+/// and 35.1, 39.3 and 25.0 for scanned ones: the new card is 5 to 25 per cent faster, most on the
+/// scans. It also gave each document about 2 seconds before its first page - hashing it, reading
+/// it, opening it. On the new card that time no longer shows between documents (median -0.2 s), so
+/// it is no longer charged.
 /// </para>
 ///
 /// <para>
-/// Checked against the two large repairs on record: 20,758 pages that took 532 minutes are
-/// estimated at 537, and 4,201 that took 127 at 125. The single rate said 451 and 91.
+/// The 10 October repair took 407 minutes. This table estimates it at 406, and the 3060 Ti table
+/// said 519. That is the run the table was measured on, so it shows the method is consistent, not
+/// that it predicts. The 3060 Ti table, tested the same way on its own runs, estimated 537 for 532
+/// minutes and 125 for 127, where the single rate it replaced said 451 and 91.
 /// </para>
 /// </summary>
 public static class RepairThroughput
 {
     /// <summary>Time spent on a document before its first page is read.</summary>
-    public static readonly TimeSpan PerDocument = TimeSpan.FromSeconds(2);
+    public static readonly TimeSpan PerDocument = TimeSpan.Zero;
 
     /// <summary>Pages a minute for a page of this kind read at this resolution.</summary>
     public static double PagesPerMinute(PageKind kind, int dpi) => (kind, dpi) switch
     {
-        (PageKind.Drawn, <= 300) => 77.8,
-        (PageKind.Drawn, <= 400) => 65.6,
-        (PageKind.Drawn, _) => 41.9,
-        (_, <= 300) => 35.1,
-        (_, <= 400) => 39.3,
-        _ => 25.0,
+        (PageKind.Drawn, <= 300) => 89.4,
+        (PageKind.Drawn, <= 400) => 70.8,
+        (PageKind.Drawn, _) => 44.0,
+        (_, <= 300) => 43.9,
+        (_, <= 400) => 45.4,
+        _ => 28.0,
     };
 
     /// <summary>How long reading these pages, spread over this many documents, should take.</summary>

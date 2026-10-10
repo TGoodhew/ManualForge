@@ -21,8 +21,9 @@ verified, and the original is then moved, unchanged, into an `_Originals` folder
 library. Files that need no work are never touched. See
 [What happens to your library folder](#what-happens-to-your-library-folder).
 
-It works on any NVIDIA GPU with CUDA 13, at about 85–90 pages a minute on an RTX 5070 Ti. It also
-runs on the CPU alone, about 15 pages a minute.
+It works on any NVIDIA GPU with CUDA 13. On an RTX 5070 Ti it read a whole library at about 150
+pages a minute, and dense pages such as tables at about 85–90. It also runs on the CPU alone, at
+about 15 pages a minute on dense pages.
 
 A note on accuracy: what ManualForge measures is how *much* text it recovers. How *correctly* it
 reads a scanned page has not been measured. The details, and the full story of how ManualForge was

@@ -54,7 +54,10 @@ public sealed class RepairEstimateTests : IDisposable
             .. Enumerable.Range(1, 35).Select(n => new PlannedRepairPage("b.pdf", n, PageKind.Raster, 300)),
         ];
 
-        var expected = TimeSpan.FromMinutes(78 / 77.8 + 35 / 35.1) + RepairThroughput.PerDocument * 2;
+        var expected = TimeSpan.FromMinutes(
+                78 / RepairThroughput.PagesPerMinute(PageKind.Drawn, 300)
+                + 35 / RepairThroughput.PagesPerMinute(PageKind.Raster, 300))
+            + RepairThroughput.PerDocument * 2;
         Assert.Equal(expected.TotalSeconds, new RepairPlan(pages, 2).Estimate.TotalSeconds, precision: 3);
     }
 
