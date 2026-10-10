@@ -7,6 +7,9 @@ Nothing in here is hand-edited. If a number looks wrong, re-run the harness and 
 
 | File | What it measures |
 |---|---|
+| **`ranking-notation.md`** | **The third ranking change (#3): a page that prints the query's mnemonics in their own case (`SOURce`) beats prose using the same words.** Ground truth 31 → 33 in the first 25 and 27 → 32 in the first ten, flat from 1.2 to 3.0; on 60 commands from other manuals, 21 pages up and none down. Also why the prose controls could not see it, and the new control that can. |
+| `ground-truth-with-notation.md` | The 33 strings with it on: 33 found, 33 in the first 25, 32 in the first ten. |
+| `command-pages-without-notation.md` / `command-pages-with-notation.md` | `tools/measure-command-pages.ps1`: 60 SCPI commands from pages of other manuals, asked as printed. 25 → 31 in the first ten, 41 → 47 found. |
 | **`fresh-run-from-originals.md`** | **#25: the whole library read again from its originals** in 10 h 40 min. Search text 192.3 M → 193.3 M characters; the documents that lost text lost doubled readings. Three things found and fixed: one bad page dropped a 992-page manual from the index, `redo` did nothing for printed text in unreadable fonts (6 files now silenced and renamed `_repaired`), and a manual damaged by three flipped bits since 2017. Every stamp and header survived. |
 | `ground-truth-before-fresh-run.md` / `ground-truth-after-fresh-run.md` | The 33 strings either side of it. Identical: 33 found, 31 in the first 25, 27 in the first ten. |
 | `ordinary-pages-before-fresh-run.md` / `ordinary-pages-after-fresh-run.md` | The harm control either side of it: 39 → 40 found, 37 → 38 in the first ten. |
@@ -87,7 +90,10 @@ single-token change actually moves. A control that cannot respond is not evidenc
 ./tools/measure-recovered-text.ps1  -Extra @('--rank-labels','1.4')   # other documents
 ./tools/measure-ordinary-pages.ps1  -Extra @('--rank-labels','1.4')   # ordinary prose, does it harm?
 ./tools/measure-bare-terms.ps1      -Extra @('--rank-labels','1.4')   # one-word queries, does it harm?
+./tools/measure-command-pages.ps1   -Extra @('--rank-labels','1.4')   # commands from other manuals
 ```
 
-The last two are the ones that decide. A change that gains four places on the ground truth and costs ten
+The last three are the ones that decide, and only the ones whose queries the change can act on
+count: the prose and bare-word controls never hold a word in mnemonic case, so a change scoped to
+command syntax leaves them unchanged whatever it does. A change that gains four places on the ground truth and costs ten
 ordinary pages their first place is not an improvement, and only that script will say so.

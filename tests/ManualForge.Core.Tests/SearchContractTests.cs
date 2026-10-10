@@ -155,6 +155,31 @@ public sealed class SearchContractTests : IDisposable
     }
 
     [Fact]
+    public void ACommandWrittenInItsOwnCaseBeatsProseAboutTheSameWords()
+    {
+        using var index = new SearchIndex(Path_("index.db"));
+
+        // :WAVeform:SOURce on 9 October 2026: rank 92, below a user's guide talking about the
+        // source of a modulating waveform. The index ignores case, so to bm25 the prose is the
+        // better match; only the case says which page is the command reference.
+        index.AddDocument(
+            @"C:\Manuals\User Guide.pdf", "User Guide", "hash-a",
+            Pages("select the modulating waveform source, internal or external; the waveform source "
+                + "sets where the modulating waveform comes from"));
+
+        index.AddDocument(
+            @"C:\Manuals\Programmer.pdf", "Programmer", "hash-b",
+            Pages("WAVeform Commands Syntax Diagram SOURce space SOURce? TYPE? VIEW space VIEW? "
+                + "XDISplay? XINCrement? XORigin? XRANge? XREFerence? XUNits? YDISplay? YINCrement?"));
+
+        Assert.Equal("User Guide", index.Search(":WAVeform:SOURce", ranking: new RankingBias())[0].Title);
+        Assert.Equal("Programmer", index.Search(":WAVeform:SOURce")[0].Title);
+
+        // Typed in lower case it is a question about the words, and bm25 answers it.
+        Assert.Equal("User Guide", index.Search("waveform source")[0].Title);
+    }
+
+    [Fact]
     public void ALabelBoostDoesNotReachAPageThatOnlyMentionsTheWord()
     {
         using var index = new SearchIndex(Path_("index.db"));

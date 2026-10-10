@@ -198,6 +198,7 @@ internal static class SearchCommand
             {
                 Label = arguments.GetDouble("rank-labels") ?? RankingBias.Default.Label,
                 Recovered = arguments.GetDouble("rank-recovered") ?? RankingBias.Default.Recovered,
+                Notation = arguments.GetDouble("rank-notation") ?? RankingBias.Default.Notation,
             });
 
         if (machine)
