@@ -376,6 +376,58 @@ public sealed class JobStore : IDisposable
     }
 
     /// <summary>
+    /// Moves a record, its page progress and its cached recognition to the name its file now has.
+    /// Anything recorded under the new name before - a file of that name that went missing - is
+    /// dropped: the record that made the file there is the one that describes it.
+    /// </summary>
+    public void Rename(string path, string newPath)
+    {
+        var from = Path.GetFullPath(path);
+        var to = Path.GetFullPath(newPath);
+        if (string.Equals(from, to, StringComparison.OrdinalIgnoreCase))
+            return;
+
+        using var transaction = _connection.BeginTransaction();
+        var hasCache = TableExists("page_ocr", transaction);
+
+        Execute("DELETE FROM pages WHERE path = $p", to, transaction);
+        Execute("DELETE FROM files WHERE path = $p", to, transaction);
+        if (hasCache)
+            Execute("DELETE FROM page_ocr WHERE path = $p", to, transaction);
+
+        foreach (var table in hasCache ? ["files", "pages", "page_ocr"] : new[] { "files", "pages" })
+        {
+            using var command = _connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = $"UPDATE {table} SET path = $to WHERE path = $from";
+            command.Parameters.AddWithValue("$to", to);
+            command.Parameters.AddWithValue("$from", from);
+            command.ExecuteNonQuery();
+        }
+
+        using (var output = _connection.CreateCommand())
+        {
+            output.Transaction = transaction;
+            output.CommandText = "UPDATE files SET output_path = $to, updated_utc = $u WHERE path = $to";
+            output.Parameters.AddWithValue("$to", to);
+            output.Parameters.AddWithValue("$u", Now());
+            output.ExecuteNonQuery();
+        }
+
+        // Copies waiting on this file find it by name.
+        using (var copies = _connection.CreateCommand())
+        {
+            copies.Transaction = transaction;
+            copies.CommandText = "UPDATE files SET duplicate_of = $to WHERE duplicate_of = $from";
+            copies.Parameters.AddWithValue("$to", to);
+            copies.Parameters.AddWithValue("$from", from);
+            copies.ExecuteNonQuery();
+        }
+
+        transaction.Commit();
+    }
+
+    /// <summary>
     /// Records that the file at <paramref name="path"/> is a finished searchable copy made from
     /// <paramref name="originalPath"/>, for a record that has lost that history. The file is not
     /// touched; only what the store believes about it changes.

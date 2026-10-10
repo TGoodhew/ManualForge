@@ -78,6 +78,14 @@ public sealed class ClassifierOptions
     /// </summary>
     public double TextLayerGlyphsPerPage { get; init; } = 100;
 
+    /// <summary>
+    /// A layer counts as unreadable only when fewer than this share of its glyphs decode to letters
+    /// or digits. A page carrying one line of readable text - HP419Mod.pdf's printed footer, 90 of
+    /// 113 glyphs - is sparse, not unreadable; the unreadable files in this library decode 1 to 7
+    /// per cent.
+    /// </summary>
+    public double UnreadableAlphanumericShare { get; init; } = 0.5;
+
     /// <summary>At or above this plausible-token ratio, text is clean enough to trust on its own.</summary>
     public double GoodPlausibleRatio { get; init; } = 0.85;
 
@@ -211,7 +219,8 @@ public sealed class DocumentClassifier(ClassifierOptions? options = null)
             // document with two, which an extractor interleaves character by character
             // ("BBrrooaaddbbaanndd") and makes it less searchable than before we touched it. It
             // happened to three files in this library before this check existed.
-            if (glyphsPerPage >= _options.TextLayerGlyphsPerPage)
+            if (glyphsPerPage >= _options.TextLayerGlyphsPerPage
+                && alphanumericPerPage < glyphsPerPage * _options.UnreadableAlphanumericShare)
             {
                 return (TextClass.UnreadableTextLayer,
                     $"the pages draw {glyphsPerPage:F0} glyphs each but only {alphanumericPerPage:F0} " +

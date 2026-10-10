@@ -106,6 +106,12 @@ public sealed record FileOutcome(
     /// itself. On a completed file, <see cref="Error"/> then describes them rather than a failure.
     /// </summary>
     public IReadOnlyList<int> PagesWithoutText { get; init; } = PagesWithoutText ?? [];
+
+    /// <summary>
+    /// Where the finished file went when it was not back at <see cref="Path"/>: renamed with
+    /// <see cref="LibraryProcessor.RepairedSuffix"/> because its printed text was silenced.
+    /// </summary>
+    public string? RenamedTo { get; init; }
 }
 
 /// <summary>
@@ -244,7 +250,10 @@ public sealed class LibraryProcessor(
                 || !File.Exists(record.Path))
                 continue;
 
+            // A repaired file's original keeps the name the file had before it was tagged.
             var original = OriginalsPathFor(options, record.Path);
+            if (!File.Exists(original))
+                original = OriginalsPathFor(options, UnrepairedPathFor(record.Path));
             if (!File.Exists(original))
                 continue;
 
@@ -533,6 +542,7 @@ public sealed class LibraryProcessor(
             // again was stripped the first time too, if it had a layer of its own. Only hidden
             // text goes; text a reader can see is part of the page.
             var stripped = false;
+            var silenced = false;
             if (record.Action == ClassAction.StripAndRedo
                 || (readAgain && TextLayerProbe.PagesWithText(source).Count > 0))
             {
@@ -547,6 +557,44 @@ public sealed class LibraryProcessor(
                 }
                 source = strippedPath;
                 stripped = true;
+
+                // Visible text that is itself unreadable - a font that numbers its glyphs its own
+                // way - cannot be stripped, because it is the ink, and while it extracts the new
+                // layer is kept off it. It is silenced instead: still drawn, extracted as spaces.
+                // Judged on what the strip left, so a readable stamp on a scan whose hidden layer
+                // was the garbled part is left as it is.
+                var left = _classifier.Classify(strippedPath);
+                if (left.Class is TextClass.UnreadableTextLayer or TextClass.SuspectText)
+                {
+                    var silencedPath = Path.Combine(workingDirectory, "silenced.pdf");
+                    int fonts;
+                    using (var document = PdfReader.Open(strippedPath, PdfDocumentOpenMode.Modify))
+                    {
+                        fonts = UnreadableTextSilencer.Silence(document);
+                        document.Save(silencedPath);
+                    }
+
+                    if (fonts > 0)
+                    {
+                        source = silencedPath;
+                        silenced = true;
+                        _logger.LogInformation(
+                            "Silenced the printed text of {Path}: {Fonts} font(s) now extract as spaces ({Class}: {Rationale})",
+                            path, fonts, left.Class, left.Rationale);
+                    }
+                }
+            }
+
+            // A file whose printed text was silenced is named for it, so whoever opens it knows its
+            // text came from recognition rather than from the publisher. Checked before anything is
+            // recognised, so a name already taken costs nothing.
+            var destination = silenced ? RepairedPathFor(path) : path;
+            if (!string.Equals(destination, path, StringComparison.OrdinalIgnoreCase) && File.Exists(destination))
+            {
+                var detail = $"Its printed text is unreadable and was to be silenced, but {Path.GetFileName(destination)} " +
+                             "already exists beside it. Move or rename that file and run again.";
+                store.SetStatus(path, FileStatus.Failed, detail);
+                return Outcome(record, FileStatus.Failed, 0, 0, flattened, stopwatch.Elapsed, detail);
             }
 
             // The invariant that matters more than any classification: a hidden text layer is
@@ -675,13 +723,15 @@ public sealed class LibraryProcessor(
                 {
                     store.SetStatus(path, FileStatus.Classified, null);
                 }
-                _logger.LogInformation("Dry run: {Path} would gain {Words} words", path, report.TotalWordsWritten);
-                return Outcome(record, FileStatus.Classified, report.TotalWordsWritten, worstDeviation, flattened, stopwatch.Elapsed, null);
+                _logger.LogInformation("Dry run: {Path} would gain {Words} words{Renamed}", path, report.TotalWordsWritten,
+                    destination == path ? "" : $" and become {Path.GetFileName(destination)}");
+                return Outcome(record, FileStatus.Classified, report.TotalWordsWritten, worstDeviation, flattened, stopwatch.Elapsed, null)
+                    with { RenamedTo = destination == path ? null : destination };
             }
 
             if (readAgain)
-                return ReplaceEarlierCopy(store, options, record, outputPath, report.TotalWordsWritten, worstDeviation,
-                    flattened, stopwatch, signatureInvalidated, gapNote, gapPages);
+                return ReplaceEarlierCopy(store, options, record, outputPath, destination, report.TotalWordsWritten,
+                    worstDeviation, flattened, stopwatch, signatureInvalidated, gapNote, gapPages);
 
             // Step 5: move the original aside, then put the new file in its place. Both are moves
             // on the same volume, so each is atomic, and the original exists in exactly one place
@@ -692,7 +742,7 @@ public sealed class LibraryProcessor(
 
             try
             {
-                File.Move(outputPath, path, overwrite: false);
+                File.Move(outputPath, destination, overwrite: false);
             }
             catch (Exception ex)
             {
@@ -705,24 +755,27 @@ public sealed class LibraryProcessor(
                 throw;
             }
 
-            store.SetPaths(path, path, originalDestination);
-            // The file at this path is now the searchable one, so the recorded fingerprint has to
-            // describe that rather than the source it replaced. Otherwise restoring the original
-            // later matches the stale fingerprint and the file is never reprocessed.
-            store.UpdateFingerprint(path);
-            store.SetStatus(path, FileStatus.Completed, gapNote);
-
             // The document is finished, so its cached recognition has done its job. Releasing it
             // here keeps the cache to the documents actually in flight rather than the whole
             // library.
             _pageCache.Clear(path);
 
+            // The record follows the file, so the next run finds it finished under its new name.
+            store.Rename(path, destination);
+            store.SetPaths(destination, destination, originalDestination);
+            // The file at this path is now the searchable one, so the recorded fingerprint has to
+            // describe that rather than the source it replaced. Otherwise restoring the original
+            // later matches the stale fingerprint and the file is never reprocessed.
+            store.UpdateFingerprint(destination);
+            store.SetStatus(destination, FileStatus.Completed, gapNote);
+
             _logger.LogInformation(
                 "Completed {Path}: {Words} words, worst deviation {Deviation:F3} pt, original kept at {Original}",
-                path, report.TotalWordsWritten, worstDeviation, originalDestination);
+                destination, report.TotalWordsWritten, worstDeviation, originalDestination);
 
             return Outcome(record, FileStatus.Completed, report.TotalWordsWritten, worstDeviation, flattened,
-                stopwatch.Elapsed, gapNote, signatureInvalidated, gapPages);
+                stopwatch.Elapsed, gapNote, signatureInvalidated, gapPages)
+                with { RenamedTo = destination == path ? null : destination };
         }
         catch (OperationCanceledException)
         {
@@ -757,7 +810,7 @@ public sealed class LibraryProcessor(
     /// <c>_superseded</c> beside it, not deleted, so a reading that turns out worse can be undone.
     /// </summary>
     private FileOutcome ReplaceEarlierCopy(
-        JobStore store, LibraryOptions options, FileRecord record, string outputPath, int words,
+        JobStore store, LibraryOptions options, FileRecord record, string outputPath, string destination, int words,
         double worstDeviation, bool flattened, Stopwatch stopwatch, bool signatureInvalidated,
         string? gapNote, IReadOnlyList<int> gapPages)
     {
@@ -768,7 +821,7 @@ public sealed class LibraryProcessor(
 
         try
         {
-            File.Move(outputPath, path, overwrite: false);
+            File.Move(outputPath, destination, overwrite: false);
         }
         catch (Exception ex)
         {
@@ -779,17 +832,19 @@ public sealed class LibraryProcessor(
             return Outcome(record, FileStatus.Failed, words, worstDeviation, flattened, stopwatch.Elapsed, ex.Message);
         }
 
-        store.UpdateFingerprint(path);
-        store.SetAction(path, ClassAction.Ocr);
-        store.SetStatus(path, FileStatus.Completed, gapNote);
         _pageCache.Clear(path);
+        store.Rename(path, destination);
+        store.UpdateFingerprint(destination);
+        store.SetAction(destination, ClassAction.Ocr);
+        store.SetStatus(destination, FileStatus.Completed, gapNote);
 
         _logger.LogInformation(
             "Read {Path} again: {Words} words, worst deviation {Deviation:F3} pt, earlier copy kept at {Superseded}",
-            path, words, worstDeviation, superseded);
+            destination, words, worstDeviation, superseded);
 
         return Outcome(record, FileStatus.Completed, words, worstDeviation, flattened, stopwatch.Elapsed, gapNote,
-            signatureInvalidated, gapPages);
+            signatureInvalidated, gapPages)
+            with { RenamedTo = destination == path ? null : destination };
     }
 
     /// <summary>Which of these pages of a file draw any text, visible or not.</summary>
@@ -826,21 +881,38 @@ public sealed class LibraryProcessor(
     {
         var path = record.Path;
 
-        if (record.DuplicateOf is null)
+        // Read afresh rather than from the record the run started with: a primary renamed for
+        // being repaired earlier in this run has its new name here and nowhere else.
+        var duplicateOf = store.Find(path)?.DuplicateOf ?? record.DuplicateOf;
+        if (duplicateOf is null)
         {
             const string reason = "Marked as a duplicate but with no primary recorded.";
             store.SetStatus(path, FileStatus.Failed, reason);
             return Outcome(record, FileStatus.Failed, 0, 0, false, stopwatch.Elapsed, reason);
         }
 
-        var primary = store.Find(record.DuplicateOf);
+        var primary = store.Find(duplicateOf);
         if (primary is null || primary.Status != FileStatus.Completed || !File.Exists(primary.Path))
         {
             // The primary failed, or was never reached. Leave this one outstanding rather than
             // failing it: another run may yet produce the primary.
-            var reason = $"Waiting for its primary, {Path.GetFileName(record.DuplicateOf)}, to be produced.";
+            var reason = $"Waiting for its primary, {Path.GetFileName(duplicateOf)}, to be produced.";
             store.SetStatus(path, FileStatus.Classified, reason);
             return Outcome(record, FileStatus.Classified, 0, 0, false, stopwatch.Elapsed, reason);
+        }
+
+        // A primary renamed for having its printed text silenced passes the name on: the copy is
+        // the same file, with the same caveat.
+        var destination = primary.OriginalPath is not null
+            && !string.Equals(Path.GetFileName(primary.OriginalPath), Path.GetFileName(primary.Path), StringComparison.OrdinalIgnoreCase)
+            ? RepairedPathFor(path)
+            : path;
+        if (destination != path && File.Exists(destination))
+        {
+            var reason = $"Its primary was renamed {Path.GetFileName(primary.Path)}, but {Path.GetFileName(destination)} " +
+                         "already exists beside this copy. Move or rename that file and run again.";
+            store.SetStatus(path, FileStatus.Failed, reason);
+            return Outcome(record, FileStatus.Failed, 0, 0, false, stopwatch.Elapsed, reason);
         }
 
         if (options.DryRun)
@@ -857,7 +929,7 @@ public sealed class LibraryProcessor(
 
         try
         {
-            File.Copy(primary.Path, path, overwrite: false);
+            File.Copy(primary.Path, destination, overwrite: false);
         }
         catch (Exception ex)
         {
@@ -869,15 +941,41 @@ public sealed class LibraryProcessor(
             throw;
         }
 
-        store.SetPaths(path, path, originalDestination);
-        store.UpdateFingerprint(path);
-        store.SetStatus(path, FileStatus.Completed);
+        store.Rename(path, destination);
+        store.SetPaths(destination, destination, originalDestination);
+        store.UpdateFingerprint(destination);
+        store.SetStatus(destination, FileStatus.Completed);
 
         _logger.LogInformation(
             "Copied {Primary} to {Path}: identical content, so it needed no recognition of its own",
-            primary.Path, path);
+            primary.Path, destination);
 
-        return Outcome(record, FileStatus.Completed, 0, 0, false, stopwatch.Elapsed, null);
+        return Outcome(record, FileStatus.Completed, 0, 0, false, stopwatch.Elapsed, null)
+            with { RenamedTo = destination == path ? null : destination };
+    }
+
+    /// <summary>What a file whose printed text was silenced is renamed to: its name, tagged.</summary>
+    public const string RepairedSuffix = "_repaired";
+
+    /// <summary>
+    /// <c>oven.pdf</c> becomes <c>oven_repaired.pdf</c> beside it. A name already tagged keeps its
+    /// tag rather than gaining a second.
+    /// </summary>
+    public static string RepairedPathFor(string path)
+    {
+        var name = Path.GetFileNameWithoutExtension(path);
+        return name.EndsWith(RepairedSuffix, StringComparison.OrdinalIgnoreCase)
+            ? path
+            : Path.Combine(Path.GetDirectoryName(path)!, name + RepairedSuffix + Path.GetExtension(path));
+    }
+
+    /// <summary>The name a tagged file had before it was repaired; any other name as it is.</summary>
+    public static string UnrepairedPathFor(string path)
+    {
+        var name = Path.GetFileNameWithoutExtension(path);
+        return name.EndsWith(RepairedSuffix, StringComparison.OrdinalIgnoreCase)
+            ? Path.Combine(Path.GetDirectoryName(path)!, name[..^RepairedSuffix.Length] + Path.GetExtension(path))
+            : path;
     }
 
     private static FileOutcome Outcome(
