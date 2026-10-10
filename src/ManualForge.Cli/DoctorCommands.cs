@@ -453,9 +453,9 @@ internal static class DoctorCommand
         RenderAtOrAboveImageCoverage =
             arguments.GetDouble("render-above-image") ?? new DoctorOptions().RenderAtOrAboveImageCoverage,
         RuleSegmentRun = arguments.GetInt("rule-run") ?? new DoctorOptions().RuleSegmentRun,
-        // Off unless asked for. It finds photographs about as often as it finds analyser readouts,
-        // so it is opt-in: docs/measurements/reverse-video.md.
-        ReverseVideo = arguments.Has("reverse-video"),
+        // On unless turned off (#12, docs/measurements/reverse-video.md). --reverse-video, the
+        // opt-in it used to be, is still accepted and changes nothing.
+        ReverseVideo = !arguments.Has("no-reverse-video"),
         ReverseVideoMinimumAreaPt =
             arguments.GetDouble("reverse-video-area") ?? new DoctorOptions().ReverseVideoMinimumAreaPt,
         ReverseVideoMinimumFill =

@@ -210,11 +210,10 @@ internal sealed class CommandLine
               --sample <n>            Audit n pages per document instead of all of them.
               --workers <n>           Documents at once. Default half the cores.
               --doctor-db <path>      Findings database. Default <root>/_Originals/manualforge-doctor.db.
-              --reverse-video         Also look inside solid blocks of ink for glyph-shaped holes -
-                                      white lettering on black, which a filter looking for marks
-                                      cannot see. Off by default: at the shipped thresholds it
-                                      flags about one page in 1,200 and finds photographs as
-                                      readily as readouts. docs/measurements/reverse-video.md.
+              --no-reverse-video      Do not look inside solid blocks of ink for glyph-shaped holes -
+                                      white lettering on black, such as an instrument screenshot's
+                                      readouts. On by default: 17 of 20 pages it adds give the
+                                      repair real text. docs/measurements/reverse-video.md.
 
             repair options:
               --dpi <n>               Override the per-page resolution the audit suggested.
