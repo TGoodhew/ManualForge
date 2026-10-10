@@ -8,8 +8,10 @@
 
       1. preflight   nothing that holds the library open may be running
       2. snapshot    copy <library>\_Originals out to -Snapshot, and check the copy
-      3. restore     write every kept original back over its library file
-      4. verify      every restored file matches its original byte for byte
+      3. restore     write every kept original back over its library file, and move each
+                     name_repaired.pdf whose original is back as name.pdf into the snapshot
+      4. verify      every restored file matches its original byte for byte, and no
+                     name_repaired.pdf is left beside a restored original
       5. clean       no ManualForge output is left in the library (bar the known exception)
       6. remove      delete _Originals and BASELINE, then check the end state
       7. survey      record the class table under the policy
@@ -128,6 +130,10 @@ if (-not $progress.Snapshot) {
 }
 $snapshotOriginals = Join-Path $progress.Snapshot '_Originals'
 
+# Where the renamed copies of restored files go: kept, like everything else this script removes from
+# the library before step 6, rather than deleted.
+$snapshotRepaired = Join-Path $progress.Snapshot '_repaired'
+
 # ---------------------------------------------------------------- the plan
 
 $remaining = $steps | Where-Object { $progress.Done -notcontains $_.Name }
@@ -171,6 +177,20 @@ function Get-LibraryPdfs {
 function Get-KeptOriginals {
     Get-ChildItem -LiteralPath $originals -Recurse -File -Filter *.pdf |
         Where-Object { $_.FullName -notmatch '\\_Originals\\(_superseded|broken)\\' }
+}
+
+# A file whose printed text was silenced was renamed name_repaired.pdf beside where name.pdf was
+# (PR #40), and its original kept in _Originals as name.pdf. Once the originals are back, each
+# such copy whose name.pdf has an original to restore is a searchable copy of a file that is about
+# to be read again. One with no original behind it is left for step 5 to report.
+function Get-RepairedCopies {
+    Get-LibraryPdfs | Where-Object { $_.BaseName -like '*_repaired' } | ForEach-Object {
+        $relative = $_.FullName.Substring($Library.Length + 1)
+        $untagged = $relative -replace '_repaired\.pdf$', '.pdf'
+        if (Test-Path -LiteralPath (Join-Path $originals $untagged)) {
+            [pscustomobject]@{ File = $_; Relative = $relative; Untagged = $untagged }
+        }
+    }
 }
 
 function Stop-Night([string] $reason) {
@@ -277,6 +297,19 @@ try {
         Write-Line ("=== {0:HH:mm:ss}  restore originals" -f $started)
         Invoke-Robocopy @($originals, $Library, '*.pdf', '/S', '/COPY:DAT', '/R:1', '/W:1', '/NP', '/NDL',
             '/XD', (Join-Path $originals '_superseded'), (Join-Path $originals 'broken'))
+
+        # A renamed copy is not overwritten by its original, which comes back under the old name,
+        # so it would stay beside it and be read a second time. Moved, not deleted: the library
+        # count afterwards is the same, one restored original for each copy moved out.
+        $moved = 0
+        foreach ($copy in @(Get-RepairedCopies)) {
+            $destination = Join-Path $snapshotRepaired $copy.Relative
+            New-Item -ItemType Directory -Force -Path (Split-Path -Parent $destination) | Out-Null
+            Move-Item -LiteralPath $copy.File.FullName -Destination $destination
+            Write-Line "    moved $($copy.Relative) to the snapshot; its original is back as $($copy.Untagged)"
+            $moved++
+        }
+        Write-Line ("    {0:N0} renamed copies moved to {1}" -f $moved, $snapshotRepaired)
         Complete-Step 'restore' $started
     }
 
@@ -293,6 +326,8 @@ try {
                 (Get-FileHash -LiteralPath $kept.FullName).Hash -ne (Get-FileHash -LiteralPath $target).Hash) { $target }
         }
         Write-Line ("    {0:N0} originals checked" -f $checked)
+        $differs = @(@($differs) + @(Get-RepairedCopies | ForEach-Object { "$($_.File.FullName) (renamed copy still beside its original)" }) |
+            Where-Object { $_ })
         if ($differs) {
             $differs | ForEach-Object { Write-Line "    DIFFERS: $_" }
             Stop-Night "Some library files do not match their originals."
