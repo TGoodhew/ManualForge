@@ -246,7 +246,11 @@ public sealed class LibraryIndexer(ILogger<LibraryIndexer>? logger = null)
             {
                 try
                 {
-                    var embedded = ExtractPages(document.Path, token);
+                    var embedded = ExtractPages(
+                        document.Path, token,
+                        (pageNumber, ex) => _logger.LogWarning(
+                            "Page {Page} of {Path} would not parse and is indexed without text: {Reason}",
+                            pageNumber, document.Path, ex.Message));
                     var (text, provenance) = Merge(embedded, document.Repairs);
 
                     await channel.Writer.WriteAsync(
@@ -391,28 +395,39 @@ public sealed class LibraryIndexer(ILogger<LibraryIndexer>? logger = null)
                 System.Text.Encoding.UTF8.GetBytes(builder.ToString())))[..16];
     }
 
-    /// <summary>Extracts and prepares every page of one document.</summary>
+    /// <summary>
+    /// Extracts and prepares every page of one document. A page that will not parse comes back
+    /// empty, and <paramref name="pageFailed"/> hears about it.
+    /// </summary>
     public static IReadOnlyList<IndexedPageText> ExtractPages(
-        string path, CancellationToken cancellationToken = default)
+        string path, CancellationToken cancellationToken = default,
+        Action<int, Exception>? pageFailed = null)
     {
         using var document = PdfDocument.Open(path, new ParsingOptions { UseLenientParsing = true });
 
         var pages = new List<IndexedPageText>(document.NumberOfPages);
-        foreach (var page in document.GetPages())
+        for (var pageNumber = 1; pageNumber <= document.NumberOfPages; pageNumber++)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
             try
             {
+                // GetPage inside the try, not GetPages() around it: PdfPig builds the page, running
+                // its content stream, when it is fetched, and that is where a broken page throws -
+                // "No XObject with name /I294 found on page 31" cost 08340-90020-serv-v2-4 all 992
+                // pages when the enumerator sat outside this block.
+                var page = document.GetPage(pageNumber);
+
                 // GetWords, not Text: many PDFs position words rather than emitting spaces, and
                 // the raw string comes back as one unbroken run. Lines are rebuilt from the words'
                 // own vertical positions so the de-hyphenator has line ends to work with.
                 pages.Add(Dehyphenator.Prepare(Lines(page)));
             }
-            catch (Exception)
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 // One page that will not parse must not cost the other five hundred.
                 pages.Add(new IndexedPageText(string.Empty, string.Empty));
+                pageFailed?.Invoke(pageNumber, ex);
             }
         }
 

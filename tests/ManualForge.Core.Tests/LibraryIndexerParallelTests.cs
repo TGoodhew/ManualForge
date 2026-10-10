@@ -114,4 +114,32 @@ public sealed class LibraryIndexerParallelTests : IDisposable
         using var index = new SearchIndex(Path.Combine(_root, "index.db"), readOnly: true);
         Assert.NotEmpty(index.Search("distinctive05"));
     }
+
+    [Fact]
+    public async Task APageThatWillNotParseCostsOnlyItself()
+    {
+        // As 08340-90020-serv-v2-4.pdf page 31: the page draws an image its resources do not hold,
+        // and PdfPig refuses the whole page - even with lenient parsing.
+        var path = TestPdf.TypesetOnly(
+            Path.Combine(_root, "manual.pdf"), "The keyword is survivor and it appears on every page.", pages: 3);
+        using (var document = PdfSharp.Pdf.IO.PdfReader.Open(path, PdfSharp.Pdf.IO.PdfDocumentOpenMode.Modify))
+        {
+            document.Pages[1].Contents.AppendContent().CreateStream("q /I294 Do Q\n"u8.ToArray());
+            document.Save(path + ".tmp");
+        }
+        File.Move(path + ".tmp", path, overwrite: true);
+
+        var failed = new List<int>();
+        var pages = LibraryIndexer.ExtractPages(path, pageFailed: (page, _) => failed.Add(page));
+        Assert.Equal([2], failed);
+        Assert.Equal(3, pages.Count);
+
+        var report = await IndexAsync("index.db", workers: 1);
+
+        Assert.Equal(0, report.DocumentsFailed);
+        Assert.Equal(1, report.DocumentsIndexed);
+
+        using var index = new SearchIndex(Path.Combine(_root, "index.db"), readOnly: true);
+        Assert.Equal([1, 3], index.Search("survivor").Select(h => h.PageNumber).Order().ToArray());
+    }
 }
