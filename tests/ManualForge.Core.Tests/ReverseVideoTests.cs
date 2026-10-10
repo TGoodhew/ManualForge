@@ -37,10 +37,7 @@ public sealed class ReverseVideoTests
         return bitmap;
     }
 
-    /// <summary>
-    /// With the looking turned on, which is not the default: it finds real lettering and real
-    /// photographs alike, and the measurement that would justify defaulting it on has not been made.
-    /// </summary>
+    /// <summary>With the looking turned on, as it is by default since #12.</summary>
     private static int BlobsIn(SKBitmap bitmap, DoctorOptions? options = null) =>
         InkAnalyser.Analyse(
             bitmap, Geometry, [], options ?? new DoctorOptions { ReverseVideo = true }).GlyphLikeBlobs;
@@ -62,14 +59,14 @@ public sealed class ReverseVideoTests
     }
 
     [Fact]
-    public void AndAreNotFoundByDefault()
+    public void AreFoundByDefaultAndNotWithoutTheLook()
     {
-        // The paired assertion, and the current default: without this looking, the same page yields
-        // nothing at all. That is the blind spot - and also why turning it on is not free, since
-        // what it finds on a real page is lettering and photographs in roughly equal measure.
+        // The paired assertion: without this looking, the same page yields nothing at all - the blind
+        // spot. It is on by default since #12's sweep found 17 of 20 added pages give real text.
         using var bitmap = Page((canvas, ink, paper) => Badge(canvas, ink, paper, 300, 400));
 
-        Assert.Equal(0, BlobsIn(bitmap, new DoctorOptions()));
+        Assert.Equal(5, BlobsIn(bitmap, new DoctorOptions()));
+        Assert.Equal(0, BlobsIn(bitmap, new DoctorOptions { ReverseVideo = false }));
     }
 
     [Fact]
@@ -140,5 +137,40 @@ public sealed class ReverseVideoTests
             0,
             InkAnalyser.Analyse(
                 bitmap, Geometry, [badge], new DoctorOptions { ReverseVideo = true }).GlyphLikeBlobs);
+    }
+
+    [Fact]
+    public void WhiteLettersTheTextLayerHoldsAreNotCountedTwice()
+    {
+        // The U1253B's table headings: white text on a dark bar, every letter in the text layer. The
+        // glyph boxes cover the letters, not the bar, so the bar is still ink nothing accounts for
+        // and is opened - and its holes are letters that are searchable already. Only the ones the
+        // text layer lacks may count.
+        // A heading bar is far wider than its words, so it stays solid with their glyph boxes taken
+        // out of it. Five letters spread along one.
+        using var bitmap = Page((canvas, ink, paper) =>
+        {
+            canvas.DrawRect(300, 400, 600, 60, ink);
+            for (var i = 0; i < 5; i++)
+                canvas.DrawRect(340 + i * 110, 419, 14, 22, paper);
+        });
+
+        // Glyph boxes, in display points, over the first three of the five letters.
+        var glyphs = Enumerable.Range(0, 3)
+            .Select(i => new RectD(
+                (340 + i * 110) * Geometry.PointsPerPixelX,
+                842 - ((419 + 22) * Geometry.PointsPerPixelY),
+                14 * Geometry.PointsPerPixelX,
+                22 * Geometry.PointsPerPixelY))
+            .ToArray();
+
+        Assert.Equal(
+            5,
+            InkAnalyser.Analyse(bitmap, Geometry, [], new DoctorOptions { ReverseVideo = true }).GlyphLikeBlobs);
+
+        Assert.Equal(
+            2,
+            InkAnalyser.Analyse(
+                bitmap, Geometry, glyphs, new DoctorOptions { ReverseVideo = true }).GlyphLikeBlobs);
     }
 }

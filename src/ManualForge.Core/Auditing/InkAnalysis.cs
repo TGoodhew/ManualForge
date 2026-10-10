@@ -102,7 +102,8 @@ public static class InkAnalyser
         if (uncovered <= 0)
             return new InkAnalysis(ink / (double)total, 0, 0, 0);
 
-        var found = CountGlyphLikeBlobs(mask, width, height, geometry, options);
+        var found = CountGlyphLikeBlobs(
+            mask, width, height, geometry, options, TextInPixels(geometry, textBoxesDisplayPt, options));
         blobs = found;
 
         return new InkAnalysis(
@@ -132,7 +133,8 @@ public static class InkAnalyser
 
         // Copied before the flood fill consumes it.
         var uncovered = (byte[])mask.Clone();
-        var blobs = CountGlyphLikeBlobs(mask, width, height, geometry, options);
+        var blobs = CountGlyphLikeBlobs(
+            mask, width, height, geometry, options, TextInPixels(geometry, textBoxesDisplayPt, options));
 
         var output = new SKBitmap(new SKImageInfo(width, height, SKColorType.Bgra8888, SKAlphaType.Premul));
         using (var canvas = new SKCanvas(output))
@@ -225,6 +227,32 @@ public static class InkAnalyser
     }
 
     /// <summary>
+    /// The extracted glyph boxes in image pixels, padded as <see cref="MarkCovered"/> pads them.
+    /// Only reverse video needs them: a white letter is not ink, so the mask cannot say whether the
+    /// text layer accounts for it.
+    /// </summary>
+    private static List<RectD> TextInPixels(
+        PageGeometry geometry, IReadOnlyList<RectD> boxes, DoctorOptions options)
+    {
+        if (!options.ReverseVideo)
+            return [];
+
+        var padding = options.TextBoxPaddingPt;
+        var pixels = new List<RectD>(boxes.Count);
+        foreach (var box in boxes)
+        {
+            var left = (box.Left - padding) / geometry.PointsPerPixelX;
+            var right = (box.Right + padding) / geometry.PointsPerPixelX;
+            var top = (geometry.VisualHeightPt - box.Bottom - padding) / geometry.PointsPerPixelY;
+            var bottom = (geometry.VisualHeightPt - box.Top + padding) / geometry.PointsPerPixelY;
+            pixels.Add(new RectD(
+                Math.Min(left, right), Math.Min(top, bottom), Math.Abs(right - left), Math.Abs(bottom - top)));
+        }
+
+        return pixels;
+    }
+
+    /// <summary>
     /// Promotes ink under an extracted glyph box from 1 to 2, and returns how much was promoted.
     /// </summary>
     private static long MarkCovered(
@@ -279,7 +307,8 @@ public static class InkAnalyser
     /// </para>
     /// </summary>
     private static List<RectD> CountGlyphLikeBlobs(
-        byte[] mask, int width, int height, PageGeometry geometry, DoctorOptions options)
+        byte[] mask, int width, int height, PageGeometry geometry, DoctorOptions options,
+        IReadOnlyList<RectD> textPx)
     {
         var minHeightPx = options.MinimumBlobHeightPt / geometry.PointsPerPixelY;
         var maxHeightPx = options.MaximumBlobHeightPt / geometry.PointsPerPixelY;
@@ -388,7 +417,7 @@ public static class InkAnalyser
         var kept = DropRuleSegments(blobs, geometry, options);
 
         if (options.ReverseVideo && blocks.Count > 0)
-            kept.AddRange(LetteringInsideBlocks(mask, width, height, geometry, options, blocks));
+            kept.AddRange(LetteringInsideBlocks(mask, width, height, geometry, options, blocks, textPx));
 
         return kept;
     }
@@ -418,7 +447,8 @@ public static class InkAnalyser
         int height,
         PageGeometry geometry,
         DoctorOptions options,
-        List<Extent> blocks)
+        List<Extent> blocks,
+        IReadOnlyList<RectD> textPx)
     {
         var found = new List<RectD>();
 
@@ -459,7 +489,11 @@ public static class InkAnalyser
                     $"  block {block.Width}x{block.Height}px fill {block.Fill:P0} -> {holes.Count} hole(s)");
             }
 
-            found.AddRange(holes);
+            // A hole the text layer already has a letter over is accounted for, exactly as covered
+            // ink is. Born-digital manuals print table headers and section bars as white text on a
+            // dark fill, and that text is searchable already: on 10 October 2026 the U1253B's
+            // white table headings alone added 40 pages to the audit.
+            found.AddRange(holes.Where(h => !InsideText(h, textPx)));
         }
 
         if (probe)
@@ -527,6 +561,19 @@ public static class InkAnalyser
         return Clusters(local, w, h, geometry, options)
             .Select(r => new RectD(block.MinX + r.Left, block.MinY + r.Top, r.Width, r.Height))
             .ToList();
+    }
+
+    private static bool InsideText(RectD hole, IReadOnlyList<RectD> textPx)
+    {
+        var x = hole.Left + hole.Width / 2;
+        var y = hole.Top + hole.Height / 2;
+        foreach (var box in textPx)
+        {
+            if (x >= box.Left && x <= box.Left + box.Width && y >= box.Top && y <= box.Top + box.Height)
+                return true;
+        }
+
+        return false;
     }
 
     private static void Seed(byte[] local, Queue<int> queue, int index, int width)

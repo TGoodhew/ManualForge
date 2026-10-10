@@ -221,11 +221,17 @@ public sealed class DoctorOptions
     ///
     /// <para>
     /// The one shape a detector that looks for marks cannot see, because the letters are an absence
-    /// of ink inside a block of it. It was the only miss in the recall sample re-drawn after the
-    /// render gate was fixed, which makes it the leading known cause of missed pages. Issue #12.
+    /// of ink inside a block of it: the readouts and softkeys of every instrument screenshot.
+    /// </para>
+    ///
+    /// <para>
+    /// On by default since 10 October 2026 (#12). On 2,547 screenshot-heavy pages it flagged 87 more,
+    /// and 17 of 20 drawn at random gave the repair real text no layer held - "Res BW 300.0 kHz",
+    /// "TTL Limits", a system-information screen word for word - at 93% mean confidence. Two gave a
+    /// few characters of junk. See <c>docs/measurements/reverse-video.md</c>.
     /// </para>
     /// </summary>
-    public bool ReverseVideo { get; init; }
+    public bool ReverseVideo { get; init; } = true;
 
     /// <summary>
     /// How solidly a cluster must fill its bounding box before its inside is worth examining.

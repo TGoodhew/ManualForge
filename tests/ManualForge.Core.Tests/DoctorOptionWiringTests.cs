@@ -16,13 +16,14 @@ public sealed class DoctorOptionWiringTests
         DoctorCommand.OptionsFrom(CommandLine.Parse(["doctor", "library", .. args]));
 
     [Fact]
-    public void ReverseVideoIsOffUnlessAskedFor()
+    public void ReverseVideoIsOnUnlessTurnedOff()
     {
-        Assert.False(From().ReverseVideo);
+        Assert.True(From().ReverseVideo);
+        Assert.False(From("--no-reverse-video").ReverseVideo);
     }
 
     [Fact]
-    public void ReverseVideoFlagTurnsItOn()
+    public void TheOldOptInStillMeansOn()
     {
         Assert.True(From("--reverse-video").ReverseVideo);
     }
