@@ -118,6 +118,7 @@ internal static class SurveyCommand
         // "Marked for work" must mean work still to do, not merely a non-Skip action. Counting by
         // action alone reported 155 files outstanding when every one of them was already finished,
         // which flatly contradicted the run that followed it.
+        var speed = MeasuredThroughput.ForThisMachine();
         var duplicates = records.Where(r => r.Action == ClassAction.CopyFromDuplicate).ToArray();
         if (duplicates.Length > 0)
         {
@@ -125,7 +126,7 @@ internal static class SurveyCommand
             Console.WriteLine(
                 $"  {duplicates.Length:N0} file(s) are byte-identical copies of another and will be copied " +
                 $"rather than recognised, sparing {spared:N0} pages " +
-                $"(~{MeasuredThroughput.HoursFor(spared):F1} hours).");
+                $"(~{speed.HoursFor(spared):F1} hours).");
             Console.WriteLine();
         }
 
@@ -140,9 +141,7 @@ internal static class SurveyCommand
                           (done > 0 ? $"  ({done:N0} already done)" : ""));
         if (workPages > 0)
         {
-            var hours = MeasuredThroughput.HoursFor(workPages);
-            Console.WriteLine(
-                $"  Estimated at {MeasuredThroughput.PagesPerMinuteOnGpu:F0} pages/min on CUDA: {hours:F1} hours");
+            Console.WriteLine($"  Estimated at {speed}: {speed.HoursFor(workPages):F1} hours");
             Console.WriteLine(
                 "  A library-wide average, and the smallest files run first, so the last of those " +
                 "hours are the densest material and will run longer than this.");
@@ -252,19 +251,17 @@ internal static class RunCommand
             loggerFactory.CreateLogger<SearchablePdfBuilder>(),
             pageCache);
 
-        // How many pages to keep on the GPU at once. The measured reason this is not simply "more"
-        // is that going past what VRAM holds does not slow down, it collapses: the driver spills to
-        // system memory over PCIe and throughput falls from 83 to 7.6 pages a minute with no error
-        // raised. So it is sized from what is actually free, not from the card's nominal capacity.
+        // How many pages to keep on the GPU at once. Not simply "more": past what the card holds,
+        // throughput does not slow down, it collapses - 83 to 7.6 pages a minute with no error - and
+        // where that happens depends on the card and what else is using it. So, unless told, the
+        // run finds out as it goes, starting where this card settled last time (#31).
         var vram = GpuMemoryProbe.TryRead();
-        var concurrency = arguments.GetInt("gpu-concurrency")
-            ?? (engine.Runtime.UsingGpu ? GpuMemoryProbe.ConcurrencyFor(vram) : 1);
+        var profiles = new GpuProfileStore();
+        var tuning = GpuTuning.For(engine.Runtime.UsingGpu, arguments.GetInt("gpu-concurrency"), profiles);
 
-        var pipelineOptions = new PipelineOptions
-        {
-            GpuConcurrency = Math.Max(1, concurrency),
-            RasterWorkers = Math.Max(1, arguments.GetInt("raster-workers") ?? 2),
-        };
+        var pipelineOptions = tuning.Options(
+            arguments.GetInt("raster-workers") ?? 2,
+            d => Console.WriteLine($"  [pages in flight {d.From} -> {d.To}: {d.Reason}]"));
 
         var pipeline = new RecognitionPipeline(
             engine, rasteriser, pageCache, builder.SettingsFingerprint,
@@ -274,14 +271,20 @@ internal static class RunCommand
             builder, new DocumentClassifier(), loggerFactory.CreateLogger<LibraryProcessor>(),
             pageCache, pipeline);
 
+        if (tuning.Gpu is not null)
+            Console.WriteLine($"GPU        : {tuning.Gpu}");
         Console.WriteLine(vram is null
-            ? "GPU memory : not reported; recognising one page at a time."
+            ? "GPU memory : not reported."
             : $"GPU memory : {vram}");
-        Console.WriteLine(
-            $"Pipeline   : {pipelineOptions.GpuConcurrency} page(s) on the GPU at once, " +
-            $"{pipelineOptions.RasterWorkers} rasteriser(s)" +
-            (arguments.GetInt("gpu-concurrency") is null ? "" : " (set on the command line)"));
+        Console.WriteLine($"Pipeline   : {tuning.Describe()}, {pipelineOptions.RasterWorkers} rasteriser(s)");
         Console.WriteLine();
+
+        // In the log as well as on the console, so a run's speed can be read later against the card
+        // and driver it ran on, and the decisions the tuner made.
+        var runLog = loggerFactory.CreateLogger("Run");
+        runLog.LogInformation(
+            "GPU {Gpu}; {Memory}; pages in flight {Pipeline}",
+            tuning.Gpu?.ToString() ?? "none", vram?.ToString() ?? "memory not reported", tuning.Describe());
 
         // Always survey first. It is cheap on an already-surveyed library because unchanged files
         // are left alone, and it is what makes a re-run over a finished folder a no-op.
@@ -359,12 +362,30 @@ internal static class RunCommand
         Console.WriteLine($"Worst alignment deviation: {worst:F3} pt");
 
         var completedPages = outcomes.Where(o => o.Status == FileStatus.Completed).Sum(o => (long)o.PageCount);
+        double? pagesPerMinute = null;
         if (completedPages > 0 && runWatch.Elapsed.TotalMinutes > 0)
         {
             Console.WriteLine(
                 $"Throughput: {completedPages:N0} pages in {runWatch.Elapsed.TotalMinutes:F1} min, " +
                 $"{completedPages / runWatch.Elapsed.TotalMinutes:F1} pages/min");
+
+            // Too few pages and the rate is mostly model loading; it would make every estimate wrong.
+            if (completedPages >= MeasuredThroughput.PagesToLearnFrom)
+                pagesPerMinute = completedPages / runWatch.Elapsed.TotalMinutes;
         }
+
+        if (tuning.Tuner is { } tuner)
+        {
+            Console.WriteLine(
+                $"Tuning    : settled on {tuner.BestLevel} page(s) in flight" +
+                (tuner.UnsafeFound is { } bad ? $"; {bad} or more spills on this card and is not tried" : ""));
+            runLog.LogInformation(
+                "Tuning settled on {Best} pages in flight; unsafe at {Unsafe}; {PagesPerMinute} pages/min",
+                tuner.BestLevel, tuner.UnsafeFound?.ToString() ?? "none found", pagesPerMinute?.ToString("F1") ?? "not measured");
+        }
+
+        if (!options.DryRun)
+            tuning.Remember(profiles, pagesPerMinute);
 
         // Renamed files are a caveat about their text, and the user needs to know which they are.
         var renamed = outcomes.Where(o => o.RenamedTo is not null).ToArray();

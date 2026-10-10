@@ -1274,7 +1274,12 @@ dotnet test
   there, one page at a time means one, the rasteriser cannot run ahead of a bounded queue, and
   cancelling does not leave a consumer waiting on a channel nobody will complete. Every wait is
   bounded, because a pipeline defect that hangs the suite is worse than one that fails it.
-- **`GpuMemoryTests`** - the arithmetic that decides concurrency, which errs downwards on purpose.
+- **`ConcurrencyControllerTests`** - pages in flight tuned during a run, on simulated cards shaped
+  like the two measured: a plateau, a cliff with memory flat at the top, a desktop taking memory
+  partway through, and a cliff remembered from an earlier run (#31).
+- **`GpuProfileTests`** - what a machine remembers about its card between runs, and the estimates
+  made from it.
+- **`GpuMemoryTests`** - what `nvidia-smi` reports, and that probing a machine without it says nothing.
 - **`CudaLibraryTests`** - the wrong-looking installs rather than the correct one, because the
   correct one is the easy case: a CUDA 12 layout, an unextracted cuDNN, two toolkit versions side
   by side, and half an installation. Fake directory trees throughout, so nothing on the machine
@@ -1389,6 +1394,9 @@ GPU, and at first 46 for a repair — held in one place, `MeasuredThroughput`, s
 goes stale once. This section used to say they still quoted 55.9 pages/min, the pre-pipeline serial
 rate; that was fixed in `115d036` and the note outlived it, which is its own small lesson about
 documentation that records a problem rather than a behaviour.
+
+Since #31 the rates are the card's own once it has done a run or repair big enough to time, and the
+measured figures are only a fallback, labelled as such ([gpu-autotuning.md](measurements/gpu-autotuning.md)).
 
 What remains true for `status` and `survey` is that the estimate is a library-wide average applied
 to work ordered smallest-first, so the last hours are the densest material and run longer than the

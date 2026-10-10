@@ -95,7 +95,8 @@ public sealed record RepairReport(
     long WordsRecovered,
     long CharactersRecovered,
     double MeanConfidence,
-    TimeSpan Elapsed)
+    TimeSpan Elapsed,
+    IReadOnlyList<RepairTiming>? Timings = null)
 {
     public double PagesPerMinute => Elapsed.TotalMinutes <= 0 ? 0 : PagesRepaired / Elapsed.TotalMinutes;
 }
@@ -224,6 +225,12 @@ public sealed class PageRepairer(IOcrEngine engine, ILogger<PageRepairer>? logge
         long characters = 0;
         var confidenceTotal = 0.0;
 
+        // Time per page, by kind and resolution, for the estimates the next repair on this card
+        // makes. The first page is not counted: it pays for loading the models.
+        var timings = new Dictionary<(PageKind Kind, int Dpi), (int Pages, TimeSpan Elapsed)>();
+        var pageClock = new System.Diagnostics.Stopwatch();
+        var warm = false;
+
         foreach (var document in documents)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -270,6 +277,7 @@ public sealed class PageRepairer(IOcrEngine engine, ILogger<PageRepairer>? logge
                 }
 
                 var dpi = DpiFor(finding, options);
+                pageClock.Restart();
 
                 try
                 {
@@ -284,6 +292,15 @@ public sealed class PageRepairer(IOcrEngine engine, ILogger<PageRepairer>? logge
                     words += repair.WordCount;
                     characters += repair.OcrText.Length;
                     confidenceTotal += repair.MeanConfidence;
+
+                    if (warm)
+                    {
+                        var key = (finding.Kind == PageKind.Drawn ? PageKind.Drawn : PageKind.Raster, RepairThroughput.Band(dpi));
+                        var (pages, elapsed) = timings.GetValueOrDefault(key);
+                        timings[key] = (pages + 1, elapsed + pageClock.Elapsed);
+                    }
+
+                    warm = true;
 
                     progress?.Report(new RepairProgress(
                         document.Path, finding.PageNumber, repaired + alreadyDone, totalPages, repair.WordCount));
@@ -305,7 +322,8 @@ public sealed class PageRepairer(IOcrEngine engine, ILogger<PageRepairer>? logge
         return new RepairReport(
             documentsTouched, repaired, alreadyDone, failed, stale, words, characters,
             repaired == 0 ? 0 : confidenceTotal / repaired,
-            stopwatch.Elapsed);
+            stopwatch.Elapsed,
+            timings.Select(t => new RepairTiming(t.Key.Kind, t.Key.Dpi, t.Value.Pages, t.Value.Elapsed)).ToArray());
     }
 
     private async Task<PageRepair> RepairPageAsync(

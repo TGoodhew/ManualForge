@@ -191,6 +191,34 @@ public class RecognitionPipelineTests : IDisposable
     }
 
     [Fact]
+    public async Task ATunedRunClimbsWhileMorePagesInFlightPay()
+    {
+        // Every page takes the same time, so each page added in flight adds throughput, as it does on
+        // a card with room to spare. The tuner should climb, and the engine should see it climb.
+        var path = Scanned("a.pdf", 160);
+        var engine = new FakeOcrEngine { OnPage = _ => Task.Delay(30) };
+        var tuner = new ConcurrencyController(start: 1, maximum: 4);
+        var decisions = new List<ConcurrencyDecision>();
+
+        var report = await NewPipeline(engine, new MemoryPageOcrCache())
+            .RunAsync([Job(path, 160)], new PipelineOptions
+            {
+                Tuner = tuner,
+                RasterWorkers = 4,
+                TuningWindow = TimeSpan.Zero,
+                ReadMemory = () => new GpuMemory(16_000, 4_000, "Simulated"),
+                OnTuned = d => { lock (decisions) decisions.Add(d); },
+            })
+            .WaitAsync(Patience);
+
+        Assert.Equal(160, report.PagesRecognised);
+        Assert.NotEmpty(decisions);
+        Assert.Equal(1, decisions[0].From);
+        Assert.True(tuner.BestLevel >= 2, $"best {tuner.BestLevel}: {string.Join("; ", decisions.Select(d => d.Reason))}");
+        Assert.True(engine.PeakConcurrency >= 2);
+    }
+
+    [Fact]
     public async Task OnePageAtATimeMeansOnePageAtATime()
     {
         var path = Scanned("a.pdf", 6);

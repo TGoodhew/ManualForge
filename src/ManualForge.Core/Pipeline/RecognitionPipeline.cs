@@ -17,11 +17,26 @@ public sealed class PipelineOptions
     public int RasterWorkers { get; init; } = 2;
 
     /// <summary>
-    /// Pages in flight on the GPU. See <see cref="GpuMemoryProbe"/> for why this is chosen from
-    /// free VRAM rather than fixed: past what the card holds, throughput does not degrade, it
-    /// collapses.
+    /// Pages in flight on the GPU, when it is fixed. Ignored when <see cref="Tuner"/> is set: past
+    /// what the card holds, throughput does not degrade, it collapses, and where that happens
+    /// depends on the card and on what else is using it.
     /// </summary>
     public int GpuConcurrency { get; init; } = 1;
+
+    /// <summary>
+    /// Chooses pages in flight as the run goes, from its own throughput and the card's free memory
+    /// (#31). Null keeps <see cref="GpuConcurrency"/> fixed.
+    /// </summary>
+    public ConcurrencyController? Tuner { get; init; }
+
+    /// <summary>How the tuner reads the card's memory. Defaults to nvidia-smi.</summary>
+    public Func<GpuMemory?>? ReadMemory { get; init; }
+
+    /// <summary>Told each change the tuner makes, for showing to whoever is watching.</summary>
+    public Action<ConcurrencyDecision>? OnTuned { get; init; }
+
+    /// <summary>The shortest window the tuner judges, so a run of quick pages is not mistaken for a level's speed.</summary>
+    public TimeSpan TuningWindow { get; init; } = TimeSpan.FromSeconds(20);
 
     /// <summary>
     /// How many rasterised pages may wait for the GPU. Each is a PNG of a 300 dpi page, so this
@@ -99,9 +114,34 @@ public static class MeasuredThroughput
     /// </summary>
     public const double PagesPerMinuteOnCpu = 15.2;
 
-    /// <summary>Hours for a number of pages, at whichever rate applies.</summary>
-    public static double HoursFor(long pages, bool usingGpu = true) =>
-        pages / (usingGpu ? PagesPerMinuteOnGpu : PagesPerMinuteOnCpu) / 60.0;
+    /// <summary>
+    /// The fewest pages a run must finish for its speed to be remembered. Below this the time is
+    /// mostly loading models, and a 30-page run would set every estimate after it.
+    /// </summary>
+    public const int PagesToLearnFrom = 100;
+
+    /// <summary>
+    /// The rate to estimate from on this machine: what its own GPU was last measured doing, and
+    /// failing that the figures above, said to be borrowed (#31).
+    /// </summary>
+    public static ThroughputBasis ForThisMachine(GpuProfileStore? store = null)
+    {
+        var gpu = GpuMemoryProbe.TryIdentify();
+        if (gpu is null)
+            return new ThroughputBasis(PagesPerMinuteOnCpu, "on the CPU, as no NVIDIA GPU was found");
+
+        return (store ?? new GpuProfileStore()).Find(gpu)?.RunPagesPerMinute is { } learned
+            ? new ThroughputBasis(learned, $"as measured on this {gpu.Name}")
+            : new ThroughputBasis(PagesPerMinuteOnGpu, $"as measured on an RTX 5070 Ti; this {gpu.Name} has not been timed yet");
+    }
+}
+
+/// <summary>A speed to estimate from, and where it came from, which the estimate should say.</summary>
+public sealed record ThroughputBasis(double PagesPerMinute, string Source)
+{
+    public double HoursFor(long pages) => pages / PagesPerMinute / 60.0;
+
+    public override string ToString() => $"{PagesPerMinute:F0} pages/min {Source}";
 }
 
 public sealed record RecognitionJob(string SourcePath, string CacheKey, int PageCount);
@@ -280,11 +320,37 @@ public sealed class RecognitionPipeline(
             }
         }, CancellationToken.None);
 
-        // Stage 3: recognise. This is the only stage whose width is chosen from hardware.
-        var gpuWorkers = Enumerable.Range(0, Math.Max(1, options.GpuConcurrency)).Select(_ => Task.Run(async () =>
+        // Stage 3: recognise. This is the only stage whose width is chosen from hardware: as many
+        // workers as the most pages in flight that may be tried, of which the gate lets through as
+        // many as are in flight now.
+        var tuner = options.Tuner;
+        var workerCount = Math.Max(1, tuner?.Ceiling ?? options.GpuConcurrency);
+        var gate = new AdjustableGate(Math.Max(1, tuner?.Level ?? options.GpuConcurrency));
+        var tuning = tuner is null ? null : new TuningWindow(tuner, gate, options, _logger);
+
+        var gpuWorkers = Enumerable.Range(0, workerCount).Select(_ => Task.Run(async () =>
         {
-            await foreach (var job in rasterQueue.Reader.ReadAllAsync(token).ConfigureAwait(false))
+            while (true)
             {
+                await gate.EnterAsync(token).ConfigureAwait(false);
+                RasterisedPageJob? job;
+                try
+                {
+                    if (!await rasterQueue.Reader.WaitToReadAsync(token).ConfigureAwait(false))
+                        break;
+                    if (!rasterQueue.Reader.TryRead(out job))
+                    {
+                        // Another worker took it first.
+                        gate.Exit();
+                        continue;
+                    }
+                }
+                catch
+                {
+                    gate.Exit();
+                    throw;
+                }
+
                 var watch = Stopwatch.StartNew();
                 try
                 {
@@ -323,7 +389,16 @@ public sealed class RecognitionPipeline(
                     AccountForPage(job.Document);
                     _logger.LogWarning(ex, "Could not recognise page {Page} of {Path}", job.PageNumber, job.Document.SourcePath);
                 }
+                finally
+                {
+                    gate.Exit();
+                }
+
+                tuning?.PageDone();
             }
+
+            // The loop leaves through the break above, still holding its place at the gate.
+            gate.Exit();
         }, token)).ToArray();
 
         try

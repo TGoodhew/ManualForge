@@ -142,9 +142,15 @@ public sealed class DoctorService(
 
         var repairer = new PageRepairer(engine, _loggerFactory.CreateLogger<PageRepairer>());
 
-        return await repairer
+        var report = await repairer
             .RepairAsync(store, options with { Paths = paths }, progress, cancellationToken)
             .ConfigureAwait(false);
+
+        // What this card was measured doing, for the next estimate made on it (#31).
+        if (engine.Runtime.UsingGpu)
+            RepairThroughput.Remember(new GpuProfileStore(), GpuMemoryProbe.TryIdentify(), report);
+
+        return report;
     }
 
     public Task<byte[]?> ExplainAsync(string path, int pageNumber, CancellationToken cancellationToken) =>

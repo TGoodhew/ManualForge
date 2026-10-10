@@ -403,6 +403,10 @@ public sealed class LibraryProcessor(
                 {
                     RasterWorkers = configured.RasterWorkers,
                     GpuConcurrency = configured.GpuConcurrency,
+                    Tuner = configured.Tuner,
+                    ReadMemory = configured.ReadMemory,
+                    OnTuned = configured.OnTuned,
+                    TuningWindow = configured.TuningWindow,
                     RasterQueueDepth = configured.RasterQueueDepth,
                     Progress = configured.Progress,
                     Completed = completed.Writer,

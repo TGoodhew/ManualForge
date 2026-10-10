@@ -112,9 +112,8 @@ internal static class StatusCommand
 
         if (pages > 0)
         {
-            Console.WriteLine(
-                $"  At the measured {MeasuredThroughput.PagesPerMinuteOnGpu:F0} pages/min on CUDA: " +
-                $"{MeasuredThroughput.HoursFor(pages):F1} hours");
+            var speed = MeasuredThroughput.ForThisMachine();
+            Console.WriteLine($"  At {speed}: {speed.HoursFor(pages):F1} hours");
 
             // The rate is a library-wide average and the work runs smallest first, so the estimate
             // is optimistic exactly where it matters — near the end, when somebody is deciding
