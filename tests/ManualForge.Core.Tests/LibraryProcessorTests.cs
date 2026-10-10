@@ -1161,6 +1161,41 @@ public class LibraryProcessorTests : IDisposable
     }
 
     [Fact]
+    public void AFinishedFileReadAgainHasItsUnreadableTextSilencedAndIsRenamed()
+    {
+        // The six files of the 9 October run: finished, with the printed text kept and the new
+        // layer mostly left out around it. Reading them again from their originals repairs them.
+        var path = TestPdf.ScannedWithUnreadableText(InRoot("hp", "83620A User.pdf"), pages: 2);
+        var before = File.ReadAllBytes(path);
+        var repaired = InRoot("hp", "83620A User_repaired.pdf");
+
+        var (first, _) = NewProcessor();
+        var options = NewOptions(PolicyOf(ClassAction.Ocr));
+        first.Survey(options);
+        Assert.Null(Assert.Single(first.Run(options)).RenamedTo);
+        Assert.DoesNotContain("HEWLETT", ExtractText(path), StringComparison.Ordinal);
+
+        var redo = new LibraryOptions { Root = _root, ReadCompletedAgain = true };
+        var (second, _) = NewProcessor();
+        second.Survey(redo);
+        var outcome = Assert.Single(second.Run(redo));
+
+        Assert.Equal(FileStatus.Completed, outcome.Status);
+        Assert.Equal(repaired, outcome.RenamedTo);
+        Assert.False(File.Exists(path));
+        Assert.Contains("HEWLETT", ExtractText(repaired), StringComparison.Ordinal);
+
+        // The original stays where it was; the copy it replaces is kept as any re-read keeps one.
+        Assert.Equal(before, File.ReadAllBytes(InRoot("_Originals", "hp", "83620A User.pdf")));
+        Assert.True(File.Exists(InRoot("_Originals", "_superseded", "hp", "83620A User.pdf")));
+
+        using var store = LibraryProcessor.OpenStore(redo);
+        Assert.Null(store.Find(path));
+        Assert.Equal(FileStatus.Completed, store.Find(repaired)!.Status);
+        Assert.Equal(InRoot("_Originals", "hp", "83620A User.pdf"), store.Find(repaired)!.OriginalPath);
+    }
+
+    [Fact]
     public void AFileAlreadyHoldingTheRepairedNameIsLeftAlone()
     {
         var path = TestPdf.ScannedWithUnreadableText(InRoot("oven.pdf"));
