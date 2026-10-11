@@ -112,6 +112,12 @@ public sealed record FileOutcome(
     /// <see cref="LibraryProcessor.RepairedSuffix"/> because its printed text was silenced.
     /// </summary>
     public string? RenamedTo { get; init; }
+
+    /// <summary>
+    /// Pages recognised in this run, not taken from an earlier attempt's cache. What a run's speed is
+    /// measured over (#63): a page that was already cached costs no recognition.
+    /// </summary>
+    public int PagesRecognised { get; init; }
 }
 
 /// <summary>
@@ -397,6 +403,14 @@ public sealed class LibraryProcessor(
 
         var remaining = outstanding.Except(prefetched).ToList();
 
+        // What each was already holding in the cache before the pipeline adds to it, so that a file's
+        // outcome can say how much of it this run recognised (#63). The serial path needs no such count:
+        // nothing fills the cache for it but the build that reports what it reused.
+        var cachedBefore = prefetched.ToDictionary(
+            r => Path.GetFullPath(r.Path),
+            r => CachedPages(Path.GetFullPath(r.Path), r.PageCount, checks[Path.GetFullPath(r.Path)].Identity),
+            StringComparer.OrdinalIgnoreCase);
+
         if (prefetched.Count > 0)
         {
             var byKey = prefetched.ToDictionary(r => Path.GetFullPath(r.Path), StringComparer.OrdinalIgnoreCase);
@@ -434,7 +448,8 @@ public sealed class LibraryProcessor(
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                var outcome = ProcessOne(store, options, byKey[job.CacheKey], cancellationToken, checks[job.CacheKey]);
+                var outcome = ProcessOne(store, options, byKey[job.CacheKey], cancellationToken, checks[job.CacheKey],
+                    cachedBefore[job.CacheKey]);
                 outcomes.Add(outcome);
                 progress?.Report(outcome);
             }
@@ -519,6 +534,20 @@ public sealed class LibraryProcessor(
         return new Dictionary<string, SourceCheck>(checks, StringComparer.OrdinalIgnoreCase);
     }
 
+    /// <summary>How many of a file's pages the cache holds under the scope this run will ask for.</summary>
+    private int CachedPages(string cacheKey, int pageCount, string sourceIdentity)
+    {
+        var scope = PageCacheScope.For(_builder!.SettingsFingerprint, sourceIdentity);
+        var cached = 0;
+        for (var page = 1; page <= pageCount; page++)
+        {
+            if (_pageCache.TryGet(cacheKey, page, scope) is not null)
+                cached++;
+        }
+
+        return cached;
+    }
+
     /// <summary>
     /// What a file's recognition is cached under besides the settings: a hash of every byte (#58).
     /// <see cref="FileFingerprint"/> is not enough. It hashes only the two ends, and the original
@@ -533,7 +562,7 @@ public sealed class LibraryProcessor(
 
     private FileOutcome ProcessOne(
         JobStore store, LibraryOptions options, FileRecord record, CancellationToken cancellationToken,
-        SourceCheck? check = null)
+        SourceCheck? check = null, int? cachedBeforeRun = null)
     {
         var stopwatch = Stopwatch.StartNew();
         var path = record.Path;
@@ -727,6 +756,11 @@ public sealed class LibraryProcessor(
                     report.ResumedPages, report.Pages.Count, path);
             }
 
+            // The pages this run recognised. The build reports every page it took from the cache, and
+            // for a file the pipeline read ahead that includes the pipeline's own work, so it is
+            // counted against what the cache held when the run began.
+            var recognised = Math.Max(0, report.Pages.Count - (cachedBeforeRun ?? report.ResumedPages));
+
             // Step 4: verify before anything is replaced. Opens cleanly, same page count, and a
             // text layer that is actually there.
             var verifications = _builder!.Verify(outputPath, report.SourcePageCount);
@@ -734,8 +768,11 @@ public sealed class LibraryProcessor(
             var totalLetters = verifications.Sum(v => v.ExtractedLetters);
 
             if (totalLetters == 0)
+            {
                 return Failed(store, record, "The output carried no text layer.", stopwatch,
-                    words: report.TotalWordsWritten, deviation: worstDeviation, flattened: flattened);
+                    words: report.TotalWordsWritten, deviation: worstDeviation, flattened: flattened)
+                    with { PagesRecognised = recognised };
+            }
 
             // Adding a text layer must change nothing else about the document. Compare the output's
             // structure against the input's: page count, per-page geometry and rotation, and the
@@ -753,7 +790,8 @@ public sealed class LibraryProcessor(
                 var detail = "The output is not structurally identical to the source: "
                     + string.Join(" ", structuralChanges.Take(3));
                 return Failed(store, record, detail, stopwatch,
-                    words: report.TotalWordsWritten, deviation: worstDeviation, flattened: flattened);
+                    words: report.TotalWordsWritten, deviation: worstDeviation, flattened: flattened)
+                    with { PagesRecognised = recognised };
             }
 
             // Pages left without text for a reason in the page itself (#21). The document is still
@@ -780,7 +818,8 @@ public sealed class LibraryProcessor(
                     _pageCache.Clear(path);
                     _logger.LogWarning("{Path}: {Detail}", path, kept);
                     return Outcome(record, FileStatus.Completed, 0, worstDeviation, flattened, stopwatch.Elapsed,
-                        kept, signatureInvalidated: false, pagesWithoutText: gapPages);
+                        kept, signatureInvalidated: false, pagesWithoutText: gapPages)
+                        with { PagesRecognised = recognised };
                 }
             }
 
@@ -800,12 +839,15 @@ public sealed class LibraryProcessor(
                 _logger.LogInformation("Dry run: {Path} would gain {Words} words{Renamed}", path, report.TotalWordsWritten,
                     destination == path ? "" : $" and become {Path.GetFileName(destination)}");
                 return Outcome(record, FileStatus.Classified, report.TotalWordsWritten, worstDeviation, flattened, stopwatch.Elapsed, null)
-                    with { RenamedTo = destination == path ? null : destination };
+                    with { RenamedTo = destination == path ? null : destination, PagesRecognised = recognised };
             }
 
             if (readAgain)
+            {
                 return ReplaceEarlierCopy(store, options, record, outputPath, destination, report.TotalWordsWritten,
-                    worstDeviation, flattened, stopwatch, signatureInvalidated, gapNote, gapPages);
+                    worstDeviation, flattened, stopwatch, signatureInvalidated, gapNote, gapPages)
+                    with { PagesRecognised = recognised };
+            }
 
             // Step 5: move the original aside, then put the new file in its place. Both are moves
             // on the same volume, so each is atomic, and the original exists in exactly one place
@@ -851,7 +893,7 @@ public sealed class LibraryProcessor(
 
             return Outcome(record, FileStatus.Completed, report.TotalWordsWritten, worstDeviation, flattened,
                 stopwatch.Elapsed, gapNote, signatureInvalidated, gapPages)
-                with { RenamedTo = destination == path ? null : destination };
+                with { RenamedTo = destination == path ? null : destination, PagesRecognised = recognised };
         }
         catch (OperationCanceledException)
         {

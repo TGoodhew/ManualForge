@@ -64,8 +64,16 @@ again. The best setting and the speeds are kept.
 |---|---|---|
 | `BestConcurrency` | the most pages in flight a run of 100+ pages held without spilling; one less after a spill | the next run starts one above it (a new card starts at 2) |
 | `UnsafeConcurrency` | a spill at a setting being tried for the first time | not tried again while the driver stays the same; only ever lowered |
-| `RunPagesPerMinute` | a run of 100 pages or more, end to end, averaged with the last | `survey`, `status` and `run` estimates |
-| `RepairPagesPerMinute` | per page kind and resolution, 30 pages or more, first page excluded, averaged with the last | `repair`'s estimate |
+| `RunPagesPerMinute` | a run that recognised 100 pages or more itself, end to end; pages reused from an earlier attempt don't count | `survey`, `status` and `run` estimates |
+| `RepairPagesPerMinute` | per page kind and resolution, 30 pages or more, first page excluded | `repair`'s estimate |
+| `RunPagesMeasured`, `RepairPagesMeasured` | the pages behind each figure, up to 5,000 | weighing the next figure against it |
+
+A new figure is weighed against the one before by the pages behind each, and the older figure counts
+for 5,000 pages at most, so a figure measured on a whole library can still move when the card's speed
+changes (#63). Both used to be averaged half and half. On 11 October, a re-read whose 992 pages all
+came from the cache reported 9,870 pages a minute, and two such averages took the card's run speed
+from 164 to 2,580; two one-file repairs moved a repair rate measured over 14,679 pages from 64 to 76.
+A figure written before page counts were kept counts as 5,000.
 
 Until a card has a figure, the estimates use the 5070 Ti's measurements and say so ("as measured on
 an RTX 5070 Ti; this <card> has not been timed yet"). With no NVIDIA card they use the CPU figure.

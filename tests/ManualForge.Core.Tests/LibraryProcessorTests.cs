@@ -973,8 +973,43 @@ public class LibraryProcessorTests : IDisposable
         Assert.Equal(12, outcome.WordsWritten);
         Assert.Equal(needsFlattening, outcome.WasFlattened);
 
-        // Pages 1 and 2 came from the cache; only 3 and 4 needed the engine.
+        // Pages 1 and 2 came from the cache; only 3 and 4 needed the engine, and only they count
+        // towards the run's speed (#63).
         Assert.Equal([3, 4], second.PagesSeen);
+        Assert.Equal(2, outcome.PagesRecognised);
+    }
+
+    [Fact]
+    public void ARunReadAheadCountsOnlyThePagesItRecognisedItself()
+    {
+        // #63. The pipeline fills the cache before the build reads it, so the build sees every page
+        // as cached. What the run recognised is counted against the cache as the run found it: the
+        // re-read of 11 October whose pages were all cached reported 9,870 pages a minute.
+        var path = TestPdf.Scanned(InRoot("long.pdf"), pages: 4);
+        var options = NewOptions();
+        var cache = NewCache();
+
+        using var cancellation = new CancellationTokenSource();
+        var first = new FakeOcrEngine
+        {
+            BeforePage = page =>
+            {
+                if (page == 3)
+                    cancellation.Cancel();
+            },
+        };
+
+        var (interrupted, _) = NewProcessor(first, cache);
+        interrupted.Survey(options);
+        Assert.ThrowsAny<OperationCanceledException>(() => interrupted.Run(options, cancellationToken: cancellation.Token));
+
+        var (resumed, second) = NewPipelinedProcessor(new FakeOcrEngine(), cache);
+        var outcome = Assert.Single(resumed.Run(options));
+
+        Assert.Equal(FileStatus.Completed, outcome.Status);
+        Assert.Equal([3, 4], second.PagesSeen.Order());
+        Assert.Equal(2, outcome.PagesRecognised);
+        Assert.True(File.Exists(path));
     }
 
     [Fact]
@@ -1030,6 +1065,7 @@ public class LibraryProcessorTests : IDisposable
 
         Assert.Equal(FileStatus.Completed, outcome.Status);
         Assert.Equal([1, 2, 3, 4], second.PagesSeen.Order());
+        Assert.Equal(4, outcome.PagesRecognised);
     }
 
     [Fact]
