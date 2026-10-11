@@ -153,9 +153,12 @@ begin
     'ManualForge reads and searches this folder. It never deletes a manual: every file it replaces with ' +
     'a searchable copy is kept, untouched, in an _Originals folder inside it.', False, '');
   LibraryPage.Add('Library folder:');
-  if not RegQueryStringValue(HKCU, StateKey, 'Library', Existing) then
-    if not RegQueryStringValue(HKCU, EnvironmentKey, LibraryVariable, Existing) then
-      Existing := ExpandConstant('{userdocs}\Manuals');
+  { /LIBRARY="D:\Manuals" answers this page on the command line, for a silent install. }
+  Existing := ExpandConstant('{param:LIBRARY|}');
+  if Existing = '' then
+    if not RegQueryStringValue(HKCU, StateKey, 'Library', Existing) then
+      if not RegQueryStringValue(HKCU, EnvironmentKey, LibraryVariable, Existing) then
+        Existing := ExpandConstant('{userdocs}\Manuals');
   LibraryPage.Values[0] := Existing;
 
   NvidiaPage := CreateInputOptionPage(wpSelectTasks, 'NVIDIA''s licences',

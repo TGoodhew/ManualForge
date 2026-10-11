@@ -123,23 +123,44 @@ if ($LASTEXITCODE -ne 0) { throw 'Inno Setup failed.' }
 $package = Get-ChildItem $out -Filter 'ManualForge-Setup-*.exe' | Sort-Object LastWriteTime -Descending | Select-Object -First 1
 Write-Host ("   {0}: {1:N0} MB" -f $package.Name, ($package.Length / 1MB))
 
-# A clean Windows to try it in: double-click this with Windows Sandbox enabled, then run the installer
-# from C:\Installer inside. The sandbox has no GPU, so it tests the CPU path, the runtimes, the Start
-# menu entry and uninstalling; and it is thrown away when closed.
-$sandbox = Join-Path $out 'test-in-sandbox.wsb'
-@"
+# A clean Windows to try it in, with Windows Sandbox enabled; the sandbox has no GPU, so this tests the
+# CPU path, the runtimes, the Start menu entry and uninstalling, and it is thrown away when closed.
+#   test-in-sandbox.wsb  runs installer\test-in-sandbox.ps1 at logon: installs silently, checks,
+#                        uninstalls, and writes what it found to sandbox-results (summary.txt last).
+#   try-in-sandbox.wsb   just opens C:\Installer, to click through the wizard by hand.
+# A sample.pdf put beside the installer is OCR'd on the CPU by the unattended test.
+$results = Join-Path $out 'sandbox-results'
+New-Item -ItemType Directory -Force $results | Out-Null
+function Write-Sandbox([string] $name, [string] $extraFolders, [string] $command) {
+    $path = Join-Path $out $name
+    @"
 <Configuration>
   <MappedFolders>
     <MappedFolder>
       <HostFolder>$out</HostFolder>
       <SandboxFolder>C:\Installer</SandboxFolder>
       <ReadOnly>true</ReadOnly>
-    </MappedFolder>
+    </MappedFolder>$extraFolders
   </MappedFolders>
   <Networking>Enable</Networking>
   <LogonCommand>
-    <Command>explorer.exe C:\Installer</Command>
+    <Command>$command</Command>
   </LogonCommand>
 </Configuration>
-"@ | Set-Content -Path $sandbox -Encoding UTF8
-Write-Host "   Sandbox test: $sandbox"
+"@ | Set-Content -Path $path -Encoding UTF8
+    Write-Host "   Sandbox: $path"
+}
+Write-Sandbox 'test-in-sandbox.wsb' @"
+
+    <MappedFolder>
+      <HostFolder>$(Join-Path $repo 'installer')</HostFolder>
+      <SandboxFolder>C:\Test</SandboxFolder>
+      <ReadOnly>true</ReadOnly>
+    </MappedFolder>
+    <MappedFolder>
+      <HostFolder>$results</HostFolder>
+      <SandboxFolder>C:\Results</SandboxFolder>
+      <ReadOnly>false</ReadOnly>
+    </MappedFolder>
+"@ 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Test\test-in-sandbox.ps1'
+Write-Sandbox 'try-in-sandbox.wsb' '' 'explorer.exe C:\Installer'
