@@ -321,18 +321,35 @@ public static class CudaLibraries
     }
 
     /// <summary>
-    /// The real machine: <c>PATH</c>, the environment variables the CUDA installer sets, and the
-    /// places these two things are conventionally put.
+    /// Where the installer puts the NVIDIA libraries it downloads (#26): <c>cuda</c>, <c>cudnn</c> and
+    /// <c>tensorrt</c> folders of DLLs, outside the program folder and off <c>PATH</c>, so they never
+    /// collide with a toolkit installed for other work and uninstalling removes them cleanly.
+    /// <c>MANUALFORGE_GPU_LIBRARIES</c> points somewhere else, for testing a set of libraries
+    /// without installing it.
     /// </summary>
-    private static CudaSearch FromEnvironment()
+    public static string ChainedLibrariesRoot =>
+        Environment.GetEnvironmentVariable("MANUALFORGE_GPU_LIBRARIES") is { Length: > 0 } overridden
+            ? overridden
+            : Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ManualForge", "gpu");
+
+    /// <summary>
+    /// The real machine: the installer's own copies, <c>PATH</c>, the environment variables the CUDA
+    /// installer sets, and the places these two things are conventionally put.
+    /// </summary>
+    internal static CudaSearch FromEnvironment()
     {
         var programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
         var toolkit = Path.Combine(programFiles, "NVIDIA GPU Computing Toolkit", "CUDA");
+        var chained = ChainedLibrariesRoot;
 
+        // The installer's own copies first (#26). They are the versions it pinned and the ones its
+        // measurements were made with, and they are there only because nothing else was found when it
+        // ran - so a toolkit installed since then for other work does not change what is read.
         // CUDA_PATH points at the active install and CUDA_PATH_V13_4 and friends at every install
-        // present. Taking them first means an explicitly selected toolkit beats whatever happens to
-        // be newest on disk.
-        var cudaRoots = new List<string>();
+        // present. Taking them next means an explicitly selected toolkit beats whatever happens to be
+        // newest on disk.
+        var cudaRoots = new List<string> { Path.Combine(chained, "cuda") };
         foreach (System.Collections.DictionaryEntry entry in Environment.GetEnvironmentVariables())
         {
             if (entry.Key is string key
@@ -346,7 +363,7 @@ public static class CudaLibraries
 
         cudaRoots.Add(toolkit);
 
-        var cudnnRoots = new List<string>();
+        var cudnnRoots = new List<string> { Path.Combine(chained, "cudnn") };
         if (Environment.GetEnvironmentVariable("CUDNN_PATH") is { Length: > 0 } cudnnPath)
             cudnnRoots.Add(cudnnPath);
         cudnnRoots.Add(Path.Combine(programFiles, "NVIDIA", "CUDNN"));
@@ -357,7 +374,7 @@ public static class CudaLibraries
 
         // TensorRT: tools/setup-cuda.ps1 puts it in C:\Tools beside cuDNN. NVIDIA's own zip has no
         // fixed home, so TENSORRT_PATH can name one.
-        var tensorRtRoots = new List<string>();
+        var tensorRtRoots = new List<string> { Path.Combine(chained, "tensorrt") };
         if (Environment.GetEnvironmentVariable("TENSORRT_PATH") is { Length: > 0 } tensorRtPath)
             tensorRtRoots.Add(tensorRtPath);
         tensorRtRoots.Add(Path.Combine(Path.GetPathRoot(programFiles) ?? @"C:\", "Tools"));

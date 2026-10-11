@@ -7,6 +7,7 @@ Nothing in here is hand-edited. If a number looks wrong, re-run the harness and 
 
 | File | What it measures |
 |---|---|
+| **`installer-gpu-libraries.md`** | **#26: what an installer must download for the GPU.** NVIDIA's per-component archives hold the toolkit's own DLLs, byte for byte. NVRTC is never loaded: four A/B runs, TensorRT and CUDA on both books, read identical words without it, and the CUDA runs match the pre-#34 baselines. So the installer fetches cudart, cuBLAS, cuDNN and optionally TensorRT, and nothing else. |
 | **`reread-with-tensorrt.md`** | **#46: the whole library read again with TensorRT and re-audited with reverse video**, in 8 h 28 min. Under-extracted pages 19,712 → 20,569, nearly all reverse video. Search text +0.07%: the re-read hardly moved scanned text, and the gains are screenshots. Every harness identical or one place better. What it found: the damaged 8340B manual's record pointed at the copy as received (now kept in `_Originals\broken`); a refused file's cached pages survive the failure; and one marginal spill held the card at one page in flight (#56). |
 | `ground-truth-before-reread.md` / `ground-truth-after-reread.md` | The 33 strings either side of it. Identical, rank for rank: 33 found, 33 in the first 25, 32 in the first ten. |
 | `ordinary-pages-before-reread.md` / `ordinary-pages-after-reread.md` | The harm control either side of it. Identical: 40 found, 38 in the first ten, 26 first. |

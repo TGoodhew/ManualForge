@@ -330,6 +330,67 @@ public class CudaLibraryTests
     private static CudaSearch WithTensorRt(FakeTree tree, IEnumerable<string>? path = null) =>
         Search(tree, path) with { TensorRtRoots = ["C:\\Tools"] };
 
+    // ---------------------------------------------------------------- the installer's own copies (#26)
+
+    private const string Chained = "C:\\Users\\someone\\AppData\\Local\\ManualForge\\gpu";
+
+    /// <summary>What the installer leaves: three flat folders of DLLs, nothing on PATH.</summary>
+    private static FakeTree ChainedInstall() => new FakeTree()
+        .Add(Chained + "\\cuda", "cublas64_13.dll", "cublasLt64_13.dll", "cudart64_13.dll")
+        .Add(Chained + "\\cudnn", "cudnn64_9.dll", "cudnn_graph64_9.dll")
+        .Add(Chained + "\\tensorrt", "nvinfer_10.dll", "nvonnxparser_10.dll");
+
+    private static CudaSearch AsTheMachineSearches(FakeTree tree) => new(
+        PathDirectories: [],
+        CudaRoots: [Chained + "\\cuda", "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA"],
+        CudnnRoots: [Chained + "\\cudnn", "C:\\Tools"],
+        FileExists: tree.FileExists,
+        Subdirectories: tree.Subdirectories,
+        TensorRtRoots: [Chained + "\\tensorrt", "C:\\Tools"]);
+
+    [Fact]
+    public void TheInstallersOwnCopiesAreFoundWithNothingOnPath()
+    {
+        var location = CudaLibraries.Locate(AsTheMachineSearches(ChainedInstall()));
+
+        Assert.True(location.Complete);
+        Assert.Equal(Chained + "\\cuda", location.CudaDirectory);
+        Assert.Equal(Chained + "\\cudnn", location.CudnnDirectory);
+        Assert.Equal(Chained + "\\tensorrt", location.TensorRtDirectory);
+    }
+
+    [Fact]
+    public void TheInstallersOwnCopiesBeatAToolkitInstalledSince()
+    {
+        // The installer downloads only when nothing was found, so a toolkit beside its copies came
+        // later, for other work. What the installer pinned and measured is what keeps being read.
+        var tree = ChainedInstall();
+        foreach (var (directory, files) in new[]
+        {
+            ("C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v13.5\\bin\\x64", new[] { "cublas64_13.dll", "cublasLt64_13.dll", "cudart64_13.dll" }),
+            ("C:\\Tools\\cudnn-9.30\\bin\\x64", new[] { "cudnn64_9.dll", "cudnn_graph64_9.dll" }),
+        })
+        {
+            tree.Add(directory, files);
+        }
+
+        var location = CudaLibraries.Locate(AsTheMachineSearches(tree));
+
+        Assert.Equal(Chained + "\\cuda", location.CudaDirectory);
+        Assert.Equal(Chained + "\\cudnn", location.CudnnDirectory);
+    }
+
+    [Fact]
+    public void TheRealSearchLooksInTheInstallersFolderFirst()
+    {
+        var search = CudaLibraries.FromEnvironment();
+        var root = CudaLibraries.ChainedLibrariesRoot;
+
+        Assert.Equal(Path.Combine(root, "cuda"), search.CudaRoots[0]);
+        Assert.Equal(Path.Combine(root, "cudnn"), search.CudnnRoots[0]);
+        Assert.Equal(Path.Combine(root, "tensorrt"), search.TensorRtRoots![0]);
+    }
+
     [Fact]
     public void TensorRtIsFoundBesideCudnnInTools()
     {
