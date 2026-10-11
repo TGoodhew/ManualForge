@@ -138,12 +138,39 @@ those plans by shape. cuDNN has features meant for this, a cache for runtime-com
 dynamic-shape graphs, but they have to be used by the caller, which here is ONNX Runtime's CUDA
 provider.
 
+## TensorRT, on the recogniser
+
+`tools/probe-tensorrt.cs`, 10 Oct 2026. ONNX Runtime 1.30's TensorRT provider (it ships in the
+`Microsoft.ML.OnnxRuntime.Gpu` package) with TensorRT 10.16.1.11 for CUDA 13. The TensorRT DLLs came
+from NVIDIA's `tensorrt_cu13_libs` wheel on pypi.nvidia.com (SHA-256 checked), extracted to
+`C:\Tools\tensorrt-10.16.1.11\bin` and put on the probe's PATH only. One dynamic-shape profile:
+batch 1–8, height 48, width 48–3,200, optimised for 8 × 640. FP32, engine and timing caches on.
+
+| Recogniser, per call | CUDA provider (as shipped) | TensorRT provider |
+|---|---|---|
+| Fixed width 640, 1 thread | 4.39 ms | **2.33 ms** |
+| Fixed width 640, 3 threads | 5.80 | **2.09** |
+| Widths varying 96–1,392, 1 thread | 28.66 | **2.97** |
+| Widths varying, 3 threads | 16.31 | **2.68** |
+| The same widths a second time | 28.35 | 3.11 |
+
+- **The per-shape cost is all but gone.** TensorRT builds one engine for the whole range of shapes
+  ahead of time, instead of planning per shape. Building it took 44 s the first time on this card,
+  and it is cached after that.
+- **The outputs agree on synthetic input.** On the same 60 batches of random input, the largest
+  difference between the two providers' scores was 0.0056. The highest-scoring class, which is what
+  decoding reads, was the same at all 45,888 positions.
+
+That is synthetic input on one model. Whether the words are identical has to be shown on real pages,
+end to end, against the baselines. PaddleOcrNet 2.2.1 cannot select the TensorRT provider, so that
+needs either a local build of it or an upstream change.
+
 ## Ways out, and what each costs
 
 | Route | What it would take | Expected effect on words |
 |---|---|---|
 | ONNX Runtime keeps cuDNN plans per shape, or uses cuDNN's dynamic-shape kernel cache | An upstream change to ONNX Runtime's CUDA provider; report with the probe as a repro | None: same kernels chosen per shape |
-| TensorRT execution provider with dynamic-shape profiles and its engine cache | TensorRT installed alongside CUDA and cuDNN (#26's installer would have to carry it); a build of PaddleOcrNet that can select it | Must be measured: different kernels, possibly different arithmetic |
+| TensorRT execution provider with dynamic-shape profiles and its engine cache | TensorRT's DLLs (2.2 GB) alongside CUDA and cuDNN (#26's installer would have to carry them); a build of PaddleOcrNet that can select it; an engine build per card (44 s, cached) | Probe: identical decoding on synthetic input. Must be measured on real pages |
 | A different cuDNN 9.x | Only if an older or newer release has precompiled kernels for these shapes on Blackwell; needs downloads to test | None expected |
 | Fewer shapes (width buckets) | Already tried in #32 | Changed 61 of 100 pages: rejected |
 
