@@ -305,8 +305,11 @@ try {
     Write-Host "Results go to $results"
     $identity = [Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
     $elevated = $identity.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-    Check 'script not run as administrator' (-not $elevated) $(if ($elevated) { 'run from an ordinary window: the installer is per user, and its prompts are part of the test' } else { '' })
-    if ($elevated -and -not (Ask 'This window is elevated. Carry on anyway?' $false)) { throw 'Stopped: run from a window that is not elevated.' }
+    if ($Silent) { Note 'elevated' "$elevated (a silent rehearsal has no prompts to test)" }
+    else {
+        Check 'script not run as administrator' (-not $elevated) $(if ($elevated) { 'run from an ordinary window: the installer is per user, and its prompts are part of the test' } else { '' })
+        if ($elevated -and -not (Ask 'This window is elevated. Carry on anyway?' $false)) { throw 'Stopped: run from a window that is not elevated.' }
+    }
 
     $needGitHub = -not ($Installer -and $Sample) -or -not $NoUpload
     if ($needGitHub) {
@@ -438,7 +441,7 @@ try {
         $log = Get-Content "$results\install.log"
         $runCodes = @($log | Select-String 'Process exit code: (\d+)' | ForEach-Object { [int] $_.Matches[0].Groups[1].Value })
         Check "installer's own steps exit 0" (-not ($runCodes | Where-Object { $_ -ne 0 })) ("codes " + ($runCodes -join ', '))
-        $log | Select-String 'Runtimes missing|Installing the|: exit code|Parameters:' | ForEach-Object { Note 'install log' ($_.Line -replace '^\S+ \S+\s+', '') }
+        $log | Select-String 'Runtimes missing|Installing the (Visual|\.NET|Windows)|: exit code|Parameters:' | ForEach-Object { Note 'install log' ($_.Line -replace '^\S+ \S+\s+', '') }
     }
 
     # ------------------------------------------------------------ 3. what was installed
