@@ -30,7 +30,8 @@ most the card has held cleanly, unless that is the setting known to spill:
 - A run that reads at least 100 pages **without spilling** vouches for its setting. The next run
   tries one more.
 - A run that **spills** at a setting being tried for the first time marks that setting unsafe for the
-  card, for good. The next run goes back to the one below.
+  card. The next run goes back to the one below, and the setting isn't tried again until the
+  display driver changes.
 - A run that spills at a setting the card **has held before** may have been pushed over by something
   else (a game, a browser). The next run starts one lower and climbs back. The setting isn't ruled out.
 - A run too short to say, or one where the counter could not be read, learns nothing about the card.
@@ -42,22 +43,27 @@ That isn't a figure for any card: it's above anything one has been seen to want.
 
 **Within a run, only down.** Every 20 seconds and `max(12, 4 × pages in flight)` pages, the run reads
 how much of its own GPU memory Windows has moved out to system RAM (the
-`GPU Process Memory\Shared Usage` performance counter for the process). If that has risen more than
-128 MiB above what the process held before its first page, the card is over the edge, and the run
-steps down one at once. After a step down, the mark moves up to what is out now, because the memory
+`GPU Process Memory\Shared Usage` performance counter for the process). If that has risen above what
+the process held before its first page by more than the engine's margin, the card is over the edge,
+and the run steps down one at once. The margin is 128 MiB on CUDA and 512 on TensorRT, which moves
+some memory out while it warms up and brings it back (see "TensorRT on the card" below). After a step down, the mark moves up to what is out now, because the memory
 pool doesn't hand back what was moved. What counts after that is whether more goes. A step down
 takes effect as pages finish; nothing in flight is interrupted.
 
 ## What is remembered
 
-`%LOCALAPPDATA%\ManualForge\gpu-profiles.json`, one entry per card, keyed by name and total memory.
-The driver version is recorded but not part of the key. A driver update moves speed by a few per
-cent, which isn't worth re-tuning from nothing.
+`%LOCALAPPDATA%\ManualForge\gpu-profiles.json`, one entry per card and engine, keyed by name and
+total memory, plus the engine when it's TensorRT. CUDA keeps the key every profile had before engines
+were told apart. TensorRT reads about twice as fast and holds memory differently, so what one learns
+would mislead the other (#56). The driver version is recorded but not part of the key: a driver
+update moves speed by a few per cent, which isn't worth re-tuning from nothing. It does drop the unsafe
+setting, because a driver changes how memory goes out to system RAM, so the next run finds the edge
+again. The best setting and the speeds are kept.
 
 | Field | Learned from | Used for |
 |---|---|---|
 | `BestConcurrency` | the most pages in flight a run of 100+ pages held without spilling; one less after a spill | the next run starts one above it (a new card starts at 2) |
-| `UnsafeConcurrency` | a spill at a setting being tried for the first time | never tried again; only ever lowered |
+| `UnsafeConcurrency` | a spill at a setting being tried for the first time | not tried again while the driver stays the same; only ever lowered |
 | `RunPagesPerMinute` | a run of 100 pages or more, end to end, averaged with the last | `survey`, `status` and `run` estimates |
 | `RepairPagesPerMinute` | per page kind and resolution, 30 pages or more, first page excluded, averaged with the last | `repair`'s estimate |
 
@@ -67,7 +73,9 @@ an RTX 5070 Ti; this <card> has not been timed yet"). With no NVIDIA card they u
 speed and never clears a known cliff.
 
 Each run's log records the card, its driver, the setting and why it was chosen, any step down with
-the reason, and what the next run will try. Deleting the file starts the card again from two.
+the reason, and what the next run will try. `manualforge gpu` shows what has been learned for the
+card and engine in use. `manualforge gpu --retune` forgets the pages in flight, so the next run starts
+again from two, and keeps the measured speeds; deleting the file forgets the speeds as well.
 
 ## Free memory is the wrong signal
 
@@ -171,6 +179,39 @@ The driver's sysmem fallback can be turned off for ManualForge (NVIDIA Control P
 Fallback Policy"), which would make an allocation that does not fit fail on the card instead of
 spilling. Whether ONNX Runtime then recovers or the run fails is untested.
 
+## TensorRT on the card (#56)
+
+The library's re-read on the night of 10 October (#46) was the first tuned run with TensorRT. With no
+profile it started at two pages. After 105 files the guard saw 132 MiB go out to system RAM, 4 MiB over
+CUDA's margin, stepped down to one, and marked two unsafe. Every later run on the card would have
+started at one.
+
+A sweep on 11 October settled it. `tools/measure-gpu-settings.ps1`, which now traces the process's
+spilled memory, ran all seven test books in `_compare` (345 pages) on TensorRT, at a fixed setting,
+twice each:
+
+| Pages in flight | Pages/min | Peak on the card | Spilled: least → most | Words |
+|---|---|---|---|---|
+| 1 | 96.1, 102.3 | 7.3 GB | 74 → 78 MiB | 122,925 |
+| 2 | 157.9, 151.2 | 12.2 GB | 74 → 78 | 122,925 |
+| 3 | **177.7, 185.8** | 15.6 GB | 74 → **206**, 74 → 142 | 122,925 |
+| 4 | 125.4, 188.2 | 16.0 GB | 74 → **3,940**, 74 → **5,172** | 122,925 |
+
+**At three, TensorRT moves memory out and brings it back.** In the first run, 206 MiB was out 11
+seconds in, 142 by the 43rd, and it stayed there; in the second, 142 at 37 seconds and 76 by 72. Three
+was the fastest setting both times. That is the 132 MiB the night run saw at two, and it isn't a
+spill. **At four it is one:** 1.1 GB out seven seconds in, past 2 GB by the 16th, growing to the end,
+with the card full. One of those runs still averaged 188 pages a minute and the other 125, which is
+the coin toss #31 found at the edge on CUDA.
+
+So TensorRT runs get their own margin, 512 MiB: well clear of the warm-up's 132, and well short of the
+1.1 GB a real spill reached within seconds. CUDA keeps 128. Its smallest real spill was 246 MiB and
+nearly halved the speed, and nothing like TensorRT's warm-up has been seen on it. The engine is now
+part of the profile's key, so neither engine's limits or speeds set the other's.
+
+Three pages is the setting for this card on TensorRT: 182 pages a minute against 155 at two and 99 at
+one. The words were identical at every setting.
+
 ## Evidence so far
 
 `ConcurrencyControllerTests`, on the readings measured above:
@@ -189,6 +230,12 @@ spilling. Whether ONNX Runtime then recovers or the run fails is untested.
 - A short clean run, or one without the counter, vouches for nothing. A short run that spills is
   still believed.
 - A run with a fixed setting leaves what is known about the card alone.
+- **TensorRT's warm-up (74 → 206 → 142 MiB) is not a spill.** The card climbs past three. The same
+  readings on CUDA are one, as they should be. A real TensorRT spill (1.1 GB, then 2.3) is still
+  caught, and four is marked unsafe.
+- TensorRT and CUDA profiles are kept apart. CUDA's key is the one profiles had before.
+- A new driver drops the unsafe setting and keeps the best one and the speeds. `--retune` forgets
+  both pages-in-flight figures and keeps the speeds.
 
 A real pipeline (`RecognitionPipelineTests.ARunWhoseMemoryStartsGoingOutStepsDownAndFinishes`) with
 a simulated engine and counter steps from three to two and still reads every page. The counter

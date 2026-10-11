@@ -104,7 +104,7 @@ public sealed class LibraryService(
 
         // Pages in flight are tuned as the run goes, from where this card settled last time (#31).
         var profiles = new GpuProfileStore();
-        var tuning = GpuTuning.For(engine.Runtime.UsingGpu, _options.GpuConcurrency, profiles);
+        var tuning = GpuTuning.For(engine.Runtime.UsingGpu, _options.GpuConcurrency, profiles, engine.Runtime.ExecutionProvider);
         var pipelineOptions = tuning.Options(_options.RasterWorkers, progress: pages);
 
         var watch = System.Diagnostics.Stopwatch.StartNew();

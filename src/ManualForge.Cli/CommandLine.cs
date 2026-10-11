@@ -139,7 +139,8 @@ internal sealed class CommandLine
               manualforge reconcile <folder>             Which PDFs are not in the index, and why
               manualforge truth <input.pdf> --pages …     Seed hand-correctable ground-truth pages
               manualforge benchmark --truth <folder>      Measure character and word error rates
-              manualforge gpu                            Report which execution provider is active
+              manualforge gpu                            Report which execution provider is active, and the
+                                                         pages in flight learned for it; --retune forgets them
               manualforge version                        Which build this is, and where it was loaded from
               manualforge pages <folder> --shape drawn   Find test pages by shape, from the audit's geometry
               manualforge assemble --pages <list>        Collect pages from many PDFs into one image-only PDF

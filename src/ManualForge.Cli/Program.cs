@@ -118,6 +118,23 @@ namespace ManualForge.Cli
             if (!string.IsNullOrWhiteSpace(engine.Runtime.AccelerationHint))
                 Console.WriteLine($"Hint                  : {engine.Runtime.AccelerationHint}");
 
+            // What runs on this card and engine have learned, and the way to make them learn it again
+            // when it looks wrong: one marginal reading once held a card at one page for good (#56).
+            if (engine.Runtime.UsingGpu)
+            {
+                var profiles = new GpuProfileStore();
+                var gpu = GpuMemoryProbe.TryIdentify(engine.Runtime.ExecutionProvider);
+                if (arguments.Has("retune"))
+                {
+                    GpuTuning.Retune(profiles, gpu);
+                    Console.WriteLine("Retuned               : pages in flight forgotten; measured speeds kept. The next run starts at " +
+                                      $"{GpuTuning.FirstGuess} and tunes from there.");
+                }
+
+                var learned = profiles.Find(gpu);
+                Console.WriteLine($"Pages in flight       : {DescribeLearned(learned)}");
+            }
+
             if (!engine.Runtime.UsingGpu && options.Accelerator != OcrAccelerator.Cpu)
             {
                 Console.WriteLine();
@@ -128,6 +145,14 @@ namespace ManualForge.Cli
 
             return 0;
         }
+
+        private static string DescribeLearned(GpuProfile? learned) => learned?.BestConcurrency switch
+        {
+            null => $"not tuned yet on this card and engine; the first run starts at {GpuTuning.FirstGuess}",
+            { } best => $"{best}, learned on this card and engine" +
+                        (learned.UnsafeConcurrency is { } bad ? $"; {bad} spilled" : "") +
+                        $". The next run starts at {GpuTuning.StartFor(learned)}",
+        };
     }
 
     /// <summary>Reports what a PDF looks like before anything is done to it.</summary>

@@ -36,6 +36,25 @@ public sealed class GpuTuning
     /// </summary>
     public const int FirstGuess = 2;
 
+    /// <summary>
+    /// How far a CUDA run's memory in system RAM may rise before it counts as spilling. Measured on the
+    /// RTX 5070 Ti (#31): a healthy run holds a steady 76 MiB there, and the smallest real spill added
+    /// 246 and nearly halved the speed.
+    /// </summary>
+    public const int CudaSpillMarginMiB = 128;
+
+    /// <summary>
+    /// The same for TensorRT, which moves about 130 MiB out early in a run and brings most of it back
+    /// within a minute, at no cost to speed: 132 and 68 MiB at three pages in flight, the fastest
+    /// setting, on 11 Oct 2026. CUDA's margin took that for a spill and held the card at one page for
+    /// good (#56). Its real spills were past 1.1 GB within seconds and went on growing, so anything
+    /// between the two tells them apart.
+    /// </summary>
+    public const int TensorRtSpillMarginMiB = 512;
+
+    /// <summary>The spill margin for the engine on this card.</summary>
+    public static int SpillMarginFor(GpuIdentity? gpu) => gpu?.IsTensorRt == true ? TensorRtSpillMarginMiB : CudaSpillMarginMiB;
+
     private GpuTuning(GpuIdentity? gpu, GpuProfile? profile, ConcurrencyController? tuner, int fixedConcurrency)
     {
         Gpu = gpu;
@@ -61,25 +80,54 @@ public sealed class GpuTuning
     /// On the GPU, tuned unless <paramref name="fixedConcurrency"/> says otherwise. On the CPU, one: the
     /// engine already spreads a page across every core, and more pages only contend.
     /// </summary>
-    public static GpuTuning For(bool usingGpu, int? fixedConcurrency, GpuProfileStore store)
+    /// <param name="engine">The execution provider the run is using, which the card's profile is filed under.</param>
+    public static GpuTuning For(bool usingGpu, int? fixedConcurrency, GpuProfileStore store, string? engine = null)
     {
         ArgumentNullException.ThrowIfNull(store);
 
         if (!usingGpu)
             return new GpuTuning(null, null, null, Math.Max(1, fixedConcurrency ?? 1));
 
-        var gpu = GpuMemoryProbe.TryIdentify();
+        var gpu = GpuMemoryProbe.TryIdentify(engine);
         return ForCard(gpu, store.Find(gpu), fixedConcurrency);
     }
 
     /// <summary>The same, on a card already identified.</summary>
     internal static GpuTuning ForCard(GpuIdentity? gpu, GpuProfile? profile, int? fixedConcurrency)
     {
+        profile = Forgiven(profile, gpu);
+
         if (fixedConcurrency is { } n)
             return new GpuTuning(gpu, profile, null, Math.Max(1, n));
 
-        var tuner = new ConcurrencyController(StartFor(profile));
+        var tuner = new ConcurrencyController(StartFor(profile)) { SpillMarginMiB = SpillMarginFor(gpu) };
         return new GpuTuning(gpu, profile, tuner, tuner.Level);
+    }
+
+    /// <summary>
+    /// A profile with its unsafe setting dropped when the card is on a different driver from the one
+    /// it was learned on. A spill is a fact about the card, the engine and the driver together, and a
+    /// driver changes how memory goes out to system RAM. Only the ceiling goes: the best setting and the
+    /// measured speeds still hold, and the next run finds the edge again if it is still there.
+    /// </summary>
+    internal static GpuProfile? Forgiven(GpuProfile? profile, GpuIdentity? gpu)
+        => profile is { UnsafeConcurrency: not null, Driver: { } learnedOn }
+           && gpu?.Driver is { } now
+           && !string.Equals(learnedOn, now, StringComparison.OrdinalIgnoreCase)
+            ? profile with { UnsafeConcurrency = null }
+            : profile;
+
+    /// <summary>
+    /// Forgets the pages in flight learned for this card and engine, so the next run tunes them again
+    /// from <see cref="FirstGuess"/>. The measured speeds are kept: they are what every estimate on the
+    /// card is made from, and nothing about tuning made them wrong. `manualforge gpu --retune`.
+    /// </summary>
+    public static GpuProfile? Retune(GpuProfileStore store, GpuIdentity? gpu)
+    {
+        ArgumentNullException.ThrowIfNull(store);
+        return gpu is null
+            ? null
+            : store.Update(gpu, p => p with { BestConcurrency = null, UnsafeConcurrency = null });
     }
 
     /// <summary>
@@ -134,8 +182,9 @@ public sealed class GpuTuning
         if (Gpu is null)
             return null;
 
-        return store.Update(Gpu, p =>
+        return store.Update(Gpu, stored =>
         {
+            var p = Forgiven(stored, Gpu)!;
             var learned = p with
             {
                 // Averaged with the last, so one unusual library does not set every estimate after it.
