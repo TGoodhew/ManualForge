@@ -5,7 +5,9 @@ namespace ManualForge.Core.Ocr;
 /// <summary>Which ONNX Runtime execution provider to try. Mirrors PaddleOcrNet's own enum.</summary>
 public enum OcrAccelerator
 {
-    /// <summary>Let the library pick: CUDA if usable, else DirectML, else CPU.</summary>
+    /// <summary>
+    /// TensorRT if it is installed, then CUDA, then whatever the library finds: DirectML, else CPU.
+    /// </summary>
     Auto,
 
     /// <summary>
@@ -19,6 +21,15 @@ public enum OcrAccelerator
 
     /// <summary>CPU only.</summary>
     Cpu,
+
+    /// <summary>
+    /// NVIDIA TensorRT on top of CUDA: about twice CUDA's speed here, because CUDA plans every
+    /// convolution again for each new input shape and OCR changes shape on nearly every call. Needs
+    /// everything CUDA does plus TensorRT 10 for CUDA 13; without it, runs on CUDA. Reads about 0.6%
+    /// of words differently from CUDA - near ties, at the same accuracy - so the page cache keeps the
+    /// two apart. Issues #34, #53; docs/measurements/recognition-shape-changes.md.
+    /// </summary>
+    TensorRt,
 }
 
 public sealed class OcrEngineOptions
@@ -160,11 +171,17 @@ public sealed class OcrEngineOptions
     /// </summary>
     public int? CpuThreads { get; init; }
 
-    internal OcrExecutionProvider ToExecutionProvider() => Accelerator switch
+    /// <summary>
+    /// The provider to ask PaddleOcrNet for. <see cref="OcrAccelerator.Auto"/> takes TensorRT when it
+    /// was found, because PaddleOcrNet's own Auto never will; asking for CUDA by name stays on CUDA.
+    /// </summary>
+    internal OcrExecutionProvider ToExecutionProvider(bool tensorRtInstalled = false) => Accelerator switch
     {
+        OcrAccelerator.TensorRt => OcrExecutionProvider.TensorRt,
         OcrAccelerator.Cuda => OcrExecutionProvider.Cuda,
         OcrAccelerator.DirectMl => OcrExecutionProvider.DirectMl,
         OcrAccelerator.Cpu => OcrExecutionProvider.Cpu,
+        _ when tensorRtInstalled => OcrExecutionProvider.TensorRt,
         _ => OcrExecutionProvider.Auto,
     };
 }

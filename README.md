@@ -51,8 +51,8 @@ dotnet test        # optional: about 500 tests, a few seconds, no GPU or network
 
 ### 2. Set up the GPU (optional)
 
-ManualForge needs **CUDA 13** and **cuDNN 9**. CUDA 12 will not load. A script installs both and
-checks the result:
+ManualForge needs **CUDA 13** and **cuDNN 9**. CUDA 12 will not load. **TensorRT 10** is optional, and
+makes recognition about twice as fast. A script installs all three and checks the result:
 
 ```powershell
 ./tools/setup-cuda.ps1 -CheckOnly   # what this machine already has; changes nothing
@@ -60,8 +60,9 @@ checks the result:
 ./tools/setup-cuda.ps1              # install what is missing
 ```
 
-It installs the CUDA toolkit, extracts cuDNN under `C:\Tools`, and adds both to your user `PATH`.
-It never replaces a newer display driver. Skip this step to run on the CPU.
+It installs the CUDA toolkit and extracts cuDNN and TensorRT under `C:\Tools`, then adds them to your
+user `PATH`. TensorRT is a 1.9 GB download from NVIDIA; add `-SkipTensorRt` to leave it out. It never
+replaces a newer display driver. Skip this step to run on the CPU.
 
 ### 3. Publish
 
@@ -239,6 +240,10 @@ manualforge index  D:\Manuals     # build or update the search index
   time, and say when they don't have one yet. `--gpu-concurrency <n>` fixes the number instead.
   What was learned is kept in `%LOCALAPPDATA%\ManualForge\gpu-profiles.json`; delete that file
   to start again.
+- **TensorRT:** when it's installed, ManualForge uses it automatically. The first run on a card spends
+  about a minute preparing it, and later runs reuse that preparation, which is kept under
+  `%LOCALAPPDATA%\ManualForge\models\tensorrt`. TensorRT reads a few uncertain words differently from
+  plain CUDA (about 1 in 200); `--engine cuda` turns it off. `manualforge gpu` shows which one is in use.
 
 ### One file
 

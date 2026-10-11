@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
-    Prepares a Windows machine for ManualForge's GPU path: CUDA 13 and cuDNN 9, checked rather
-    than assumed.
+    Prepares a Windows machine for ManualForge's GPU path: CUDA 13 and cuDNN 9, and optionally
+    TensorRT 10, checked rather than assumed.
 
 .DESCRIPTION
     ONNX Runtime's CUDA provider does not fail loudly. When it cannot load a library it declines to
@@ -16,12 +16,21 @@
       * The cuDNN zip extracts into a nested folder; its DLLs are three levels below where the zip
         lands.
 
+    TensorRT is optional. With it, recognition runs about twice as fast (#34, #53); without it,
+    everything works on CUDA alone. It comes from NVIDIA's own package index as the
+    tensorrt_cu13_libs wheel (about 1.9 GB), checked against the SHA-256 the index publishes, and only
+    its DLLs are kept. No Python is needed or installed.
+
     It does not install .NET, Visual Studio or the display driver, and it does not touch the manual
     library. It does not build or publish the application either - that is a different script for a
     different occasion, because this one is run after a rebuild and that one after every change.
 
 .PARAMETER WhatIf
     Prints what would be downloaded and installed, with sizes, and changes nothing.
+
+.PARAMETER SkipTensorRt
+    Leave TensorRT out. ManualForge then runs on CUDA, which reads a few words differently from
+    TensorRT and takes about twice as long.
 
 .EXAMPLE
     ./tools/setup-cuda.ps1 -WhatIf
@@ -35,6 +44,10 @@ param(
     # has an answer rather than a guess.
     [string] $CudaVersion = '13.4',
     [string] $CudnnVersion = '9.26.0.51',
+    [string] $TensorRtVersion = '10.16.1.11',
+
+    # TensorRT is optional; see the description.
+    [switch] $SkipTensorRt,
 
     # Re-used if the installers are already here, because 2 GB is worth not fetching twice.
     [string] $DownloadDirectory = "$env:USERPROFILE\Downloads",
@@ -61,6 +74,10 @@ $RequiredDlls = @(
 
 $CudaProbe = 'cublasLt64_13.dll'
 $CudnnProbe = 'cudnn64_9.dll'
+
+# What ONNX Runtime 1.30's TensorRT provider imports, both from one directory. Kept in step with
+# CudaLibraries.TensorRtLibraries.
+$TensorRtDlls = @('nvinfer_10.dll', 'nvonnxparser_10.dll')
 
 function Write-Step([string] $text) { Write-Host "`n== $text" -ForegroundColor Cyan }
 function Write-Good([string] $text) { Write-Host "   $text" -ForegroundColor Green }
@@ -134,6 +151,24 @@ function Get-CudnnRoots {
     ) | Where-Object { $_ }
 }
 
+function Get-TensorRtRoots {
+    @(
+        $env:TENSORRT_PATH,
+        $InstallRoot,
+        "$env:ProgramFiles\NVIDIA\TensorRT"
+    ) | Where-Object { $_ }
+}
+
+# The TensorRT directory, or null. Both libraries must be there: half an install fails to attach
+# exactly as no install does.
+function Find-TensorRt {
+    $directory = Find-DllDirectory -Roots (Get-TensorRtRoots) -FileName $TensorRtDlls[0]
+    if ($directory -and -not ($TensorRtDlls | Where-Object { -not (Test-Path (Join-Path $directory $_)) })) {
+        return $directory
+    }
+    return $null
+}
+
 function Test-Everything {
     $cuda = Find-DllDirectory -Roots (Get-CudaRoots) -FileName $CudaProbe
     $cudnn = Find-DllDirectory -Roots (Get-CudnnRoots) -FileName $CudnnProbe
@@ -145,7 +180,7 @@ function Test-Everything {
         if (-not $found) { $missing += $dll }
     }
 
-    [pscustomobject]@{ Cuda = $cuda; Cudnn = $cudnn; Missing = $missing }
+    [pscustomobject]@{ Cuda = $cuda; Cudnn = $cudnn; Missing = $missing; TensorRt = (Find-TensorRt) }
 }
 
 # ---------------------------------------------------------------------------------------------
@@ -153,6 +188,7 @@ function Test-Everything {
 Write-Host "ManualForge GPU prerequisites"
 Write-Host "  CUDA  : $CudaVersion"
 Write-Host "  cuDNN : $CudnnVersion"
+Write-Host "  TensorRT : $(if ($SkipTensorRt) { 'skipped' } else { "$TensorRtVersion (optional)" })"
 Write-Host "  Cache : $DownloadDirectory"
 Write-Host "  cuDNN goes to: $InstallRoot"
 Write-Host ""
@@ -176,6 +212,7 @@ $state = Test-Everything
 
 if ($state.Cuda) { Write-Good "CUDA libraries in $($state.Cuda)" } else { Write-Warn 'No CUDA 13 libraries found' }
 if ($state.Cudnn) { Write-Good "cuDNN libraries in $($state.Cudnn)" } else { Write-Warn 'No cuDNN 9 libraries found' }
+if ($state.TensorRt) { Write-Good "TensorRT libraries in $($state.TensorRt)" } else { Write-Warn 'No TensorRT 10 libraries found (optional)' }
 
 if ($state.Missing.Count -eq 0) {
     Write-Step 'Already configured'
@@ -255,12 +292,63 @@ if ($state.Missing -contains $CudnnProbe -or -not $state.Cudnn) {
     }
 }
 
+if (-not $SkipTensorRt -and -not $state.TensorRt) {
+    Write-Step "TensorRT $TensorRtVersion (optional)"
+
+    $wheelName = "tensorrt_cu13_libs-$TensorRtVersion-py3-none-win_amd64.whl"
+    $wheel = Join-Path $DownloadDirectory $wheelName
+    $index = 'https://pypi.nvidia.com/tensorrt-cu13-libs/'
+
+    # The index page links each file with its SHA-256 in the URL fragment, which is what the
+    # download is checked against.
+    $page = Invoke-WebRequest -Uri $index -UseBasicParsing
+    $link = $page.Links | Where-Object { $_.href -like "*$wheelName*" } | Select-Object -First 1
+    if (-not $link) { throw "$wheelName is not listed at $index. Pass -TensorRtVersion with a version that is." }
+    $href = $link.href
+    $expected = if ($href -match 'sha256=([0-9a-f]{64})') { $Matches[1] } else { $null }
+    $url = if ($href -like 'http*') { ($href -split '#')[0] } else { $index + ($href -split '#')[0] }
+
+    if (Test-Path $wheel) {
+        Write-Good "Using the wheel already in $DownloadDirectory"
+    }
+    elseif ($PSCmdlet.ShouldProcess($url, 'Download TensorRT (about 1.9 GB)')) {
+        Invoke-WebRequest -Uri $url -OutFile $wheel
+        Write-Good "Downloaded to $wheel"
+    }
+
+    if ((Test-Path $wheel) -and $PSCmdlet.ShouldProcess($InstallRoot, 'Check and extract the TensorRT DLLs')) {
+        if ($expected) {
+            $actual = (Get-FileHash -Algorithm SHA256 -Path $wheel).Hash.ToLowerInvariant()
+            if ($actual -ne $expected) { throw "$wheelName does not match the SHA-256 the index publishes. Delete it and run again." }
+            Write-Good 'SHA-256 matches the index'
+        }
+        else {
+            Write-Warn 'The index gave no SHA-256 for this file, so it could not be checked.'
+        }
+
+        # A wheel is a zip. Only its DLLs are wanted; nothing of Python is installed.
+        $target = Join-Path $InstallRoot "tensorrt-$TensorRtVersion\bin"
+        New-Item -ItemType Directory -Force -Path $target | Out-Null
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        $archive = [IO.Compression.ZipFile]::OpenRead($wheel)
+        try {
+            foreach ($entry in $archive.Entries | Where-Object { $_.FullName -like 'tensorrt_libs/*.dll' }) {
+                [IO.Compression.ZipFileExtensions]::ExtractToFile($entry, (Join-Path $target $entry.Name), $true)
+            }
+        }
+        finally { $archive.Dispose() }
+
+        if (-not (Find-TensorRt)) { throw "Extracted TensorRT but could not find $($TensorRtDlls -join ' and ') under $InstallRoot." }
+        Write-Good "Extracted; libraries are in $target"
+    }
+}
+
 # ---------------------------------------------------------------------------------------------
 
 Write-Step 'PATH'
 
 $state = Test-Everything
-$wanted = @($state.Cuda, $state.Cudnn) | Where-Object { $_ }
+$wanted = @($state.Cuda, $state.Cudnn, $(if (-not $SkipTensorRt) { $state.TensorRt })) | Where-Object { $_ }
 
 if ($wanted.Count -eq 0) {
     Write-Warn 'Nothing to add: no library directories were found.'
@@ -279,7 +367,7 @@ else {
     }
 
     if ($added.Count -eq 0) {
-        Write-Good 'Both directories are already on the user PATH.'
+        Write-Good 'They are all already on the user PATH.'
     }
     elseif ($PSCmdlet.ShouldProcess('user PATH', "Add $($added -join ', ')")) {
         [Environment]::SetEnvironmentVariable('Path', ($entries -join ';'), 'User')
@@ -304,6 +392,8 @@ if ($state.Missing.Count -gt 0) {
 }
 
 Write-Good 'Every required library is present.'
+if ($state.TensorRt) { Write-Good "TensorRT is present too: ManualForge will use it ($($state.TensorRt))." }
+else { Write-Warn 'No TensorRT, so ManualForge will run on CUDA. That works; TensorRT is about twice as fast.' }
 
 # The only verification that counts is the application's own, because it is the thing whose loader
 # has to be satisfied. `gpu` prints which provider it actually got, rather than which it wanted.
@@ -319,5 +409,5 @@ if ($manualforge) {
 }
 else {
     Write-Warn 'manualforge is not installed yet, so the last check was not run. After publishing it:'
-    Write-Warn '  manualforge gpu     # expect "Active provider : Cuda"'
+    Write-Warn '  manualforge gpu     # expect "Active provider : TensorRt" (or "Cuda" without TensorRT)'
 }

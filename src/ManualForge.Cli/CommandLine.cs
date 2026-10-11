@@ -62,6 +62,7 @@ internal sealed class CommandLine
 
     public OcrAccelerator Accelerator() => Get("engine")?.ToLowerInvariant() switch
     {
+        "tensorrt" or "trt" => OcrAccelerator.TensorRt,
         "cuda" => OcrAccelerator.Cuda,
         "directml" or "dml" => OcrAccelerator.DirectMl,
         "cpu" => OcrAccelerator.Cpu,
@@ -123,7 +124,8 @@ internal sealed class CommandLine
               --out <path>            Output file. Default: <input>.searchable.pdf next to the source.
               --dpi <n>               Rasterisation resolution. Default 300.
               --pages <spec>          Pages to process, e.g. 1,4,7-9. Default: all.
-              --engine <name>         auto | cuda | directml | cpu. Default auto.
+              --engine <name>         auto | tensorrt | cuda | directml | cpu. Default auto, which
+                                      uses TensorRT when it is installed and CUDA otherwise.
               --batch <n>             Recognition batch size. Default 8.
               --min-confidence <x>    Drop words below this score when WRITING the text layer.
                                       Default 0.30. It does not change what the recogniser

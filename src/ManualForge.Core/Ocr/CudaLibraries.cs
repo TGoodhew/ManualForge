@@ -16,16 +16,36 @@ namespace ManualForge.Core.Ocr;
 /// machine set up by hand, and worth distinguishing from a successful search: it means the
 /// environment is right rather than that we rescued it.
 /// </param>
+/// <param name="TensorRtDirectory">The directory holding TensorRT 10, when it was found off PATH.</param>
+/// <param name="TensorRtOnPath">TensorRT 10 was already resolvable on PATH.</param>
+/// <param name="TensorRtLookedFor">TensorRT was searched for, so its absence is worth saying.</param>
 public sealed record CudaLibraryLocation(
     string? CudaDirectory,
     string? CudnnDirectory,
     IReadOnlyList<string> Missing,
-    bool AlreadyOnPath)
+    bool AlreadyOnPath,
+    string? TensorRtDirectory = null,
+    bool TensorRtOnPath = false,
+    bool TensorRtLookedFor = false)
 {
     public bool Complete => Missing.Count == 0;
 
+    /// <summary>
+    /// TensorRT can be used: optional, and only worth anything on top of a complete CUDA install,
+    /// which it runs on. Its absence costs speed, never correctness (#53).
+    /// </summary>
+    public bool HasTensorRt => Complete && (TensorRtOnPath || TensorRtDirectory is not null);
+
     /// <summary>A line for the log and the <c>gpu</c> command. Never null, never a stack trace.</summary>
-    public string Describe()
+    public string Describe() => DescribeCuda() + DescribeTensorRt();
+
+    private string DescribeTensorRt() =>
+        !Complete || !TensorRtLookedFor ? ""
+        : TensorRtOnPath ? "; TensorRT already on PATH"
+        : TensorRtDirectory is not null ? $"; TensorRT at {TensorRtDirectory}"
+        : "; no TensorRT (plain CUDA)";
+
+    private string DescribeCuda()
     {
         if (AlreadyOnPath)
             return "already on PATH";
@@ -85,6 +105,13 @@ public static class CudaLibraries
     private const string CudnnProbe = "cudnn64_9.dll";
 
     /// <summary>
+    /// What ONNX Runtime 1.30's TensorRT provider imports from TensorRT 10 (#53). Both, from the same
+    /// directory: a folder with the core library and not the ONNX parser is a partial install, and
+    /// attaching the provider fails on it exactly as it does with nothing at all.
+    /// </summary>
+    public static readonly IReadOnlyList<string> TensorRtLibraries = ["nvinfer_10.dll", "nvonnxparser_10.dll"];
+
+    /// <summary>
     /// How far below a root to look. Four covers the toolkit root down to v13.4/bin/x64, and
     /// C:\Tools down to the nested cuDNN archive's bin/x64, with one level to spare. Bounded
     /// because a root given by mistake must cost a moment, not a walk of the volume.
@@ -126,9 +153,9 @@ public static class CudaLibraries
 
             var location = Locate(FromEnvironment());
 
-            if (!location.AlreadyOnPath)
+            if (!location.AlreadyOnPath || location.TensorRtDirectory is not null)
             {
-                var added = new[] { location.CudaDirectory, location.CudnnDirectory }
+                var added = new[] { location.CudaDirectory, location.CudnnDirectory, location.TensorRtDirectory }
                     .Where(directory => !string.IsNullOrEmpty(directory))
                     .ToArray();
 
@@ -153,7 +180,7 @@ public static class CudaLibraries
             {
                 logger.LogWarning(
                     "The GPU path will not load: {Location}. OCR will run on CPU, which is roughly ten "
-                    + "times slower. Install CUDA 13 and cuDNN 9 for CUDA 13, or pass --accelerator cpu "
+                    + "times slower. Install CUDA 13 and cuDNN 9 for CUDA 13, or pass --engine cpu "
                     + "to choose CPU deliberately.",
                     location.Describe());
             }
@@ -171,8 +198,13 @@ public static class CudaLibraries
     {
         ArgumentNullException.ThrowIfNull(search);
 
+        // TensorRT is looked for whatever CUDA's state, because CUDA being on PATH already says
+        // nothing about where TensorRT is. Found or not, it never makes CUDA incomplete.
+        var tensorRtOnPath = TensorRtLibraries.All(library => ResolvableIn(search.PathDirectories, library, search));
+        var tensorRt = tensorRtOnPath ? null : FirstDirectoryContainingAll(search.TensorRtRoots ?? [], TensorRtLibraries, search);
+
         if (RequiredLibraries.All(library => ResolvableIn(search.PathDirectories, library, search)))
-            return new CudaLibraryLocation(null, null, [], AlreadyOnPath: true);
+            return new CudaLibraryLocation(null, null, [], AlreadyOnPath: true, tensorRt, tensorRtOnPath, search.TensorRtRoots is not null);
 
         var cuda = FirstDirectoryContaining(search.CudaRoots, CudaProbe, search);
         var cudnn = FirstDirectoryContaining(search.CudnnRoots, CudnnProbe, search);
@@ -190,7 +222,17 @@ public static class CudaLibraries
             .Where(library => !ResolvableIn(resolvable, library, search))
             .ToList();
 
-        return new CudaLibraryLocation(cuda, cudnn, missing, AlreadyOnPath: false);
+        return new CudaLibraryLocation(cuda, cudnn, missing, AlreadyOnPath: false, tensorRt, tensorRtOnPath, search.TensorRtRoots is not null);
+    }
+
+    /// <summary>The first directory under the roots holding every one of the files.</summary>
+    private static string? FirstDirectoryContainingAll(
+        IReadOnlyList<string> roots,
+        IReadOnlyList<string> fileNames,
+        CudaSearch search)
+    {
+        var found = FirstDirectoryContaining(roots, fileNames[0], search);
+        return found is not null && fileNames.All(file => search.FileExists(found, file)) ? found : null;
     }
 
     private static bool ResolvableIn(IEnumerable<string> directories, string library, CudaSearch search)
@@ -313,6 +355,14 @@ public static class CudaLibraries
         // Some installs copy cuDNN in beside the CUDA binaries, so the toolkit is worth a look too.
         cudnnRoots.AddRange(cudaRoots);
 
+        // TensorRT: tools/setup-cuda.ps1 puts it in C:\Tools beside cuDNN. NVIDIA's own zip has no
+        // fixed home, so TENSORRT_PATH can name one.
+        var tensorRtRoots = new List<string>();
+        if (Environment.GetEnvironmentVariable("TENSORRT_PATH") is { Length: > 0 } tensorRtPath)
+            tensorRtRoots.Add(tensorRtPath);
+        tensorRtRoots.Add(Path.Combine(Path.GetPathRoot(programFiles) ?? @"C:\", "Tools"));
+        tensorRtRoots.Add(Path.Combine(programFiles, "NVIDIA", "TensorRT"));
+
         var pathDirectories = (Environment.GetEnvironmentVariable("PATH") ?? string.Empty)
             .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .ToList();
@@ -321,6 +371,7 @@ public static class CudaLibraries
             PathDirectories: pathDirectories,
             CudaRoots: cudaRoots,
             CudnnRoots: cudnnRoots,
+            TensorRtRoots: tensorRtRoots,
             FileExists: static (directory, file) =>
             {
                 try { return File.Exists(Path.Combine(directory, file)); }
@@ -351,9 +402,11 @@ public static class CudaLibraries
 /// <param name="CudnnRoots">Where to start looking for cuDNN, in order of preference.</param>
 /// <param name="FileExists">Whether a directory holds a named file.</param>
 /// <param name="Subdirectories">A directory's immediate children; empty when it does not exist.</param>
+/// <param name="TensorRtRoots">Where to start looking for TensorRT 10; none means it is not looked for.</param>
 public sealed record CudaSearch(
     IReadOnlyList<string> PathDirectories,
     IReadOnlyList<string> CudaRoots,
     IReadOnlyList<string> CudnnRoots,
     Func<string, string, bool> FileExists,
-    Func<string, IReadOnlyList<string>> Subdirectories);
+    Func<string, IReadOnlyList<string>> Subdirectories,
+    IReadOnlyList<string>? TensorRtRoots = null);
