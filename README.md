@@ -64,6 +64,19 @@ It installs the CUDA toolkit and extracts cuDNN and TensorRT under `C:\Tools`, t
 user `PATH`. TensorRT is a 1.9 GB download from NVIDIA; add `-SkipTensorRt` to leave it out. It never
 replaces a newer display driver. Skip this step to run on the CPU.
 
+**Or, without administrator rights:** once ManualForge is published (step 3), it can fetch only the
+libraries it loads, straight from NVIDIA, into a folder of its own:
+
+```powershell
+manualforge setup gpu --plan                     # what it would download, and NVIDIA's licences
+manualforge setup gpu --accept-nvidia-licences   # download, check each SHA-256, keep only the DLLs
+```
+
+That is about 1.7 GB, or 3.6 GB with TensorRT (`--no-tensorrt` leaves it out), into
+`%LOCALAPPDATA%\ManualForge\gpu`. Nothing goes on `PATH` and the display driver is never touched.
+ManualForge uses these copies ahead of any CUDA install on the machine. On a machine that already has
+CUDA, cuDNN and TensorRT, it downloads nothing.
+
 ### 3. Publish
 
 ```powershell
@@ -341,6 +354,7 @@ manualforge index D:\Manuals
 | `manualforge doctor <library> --trim-missing` | The same for the audit: forget findings and repairs of files that are gone. Files `run` renames are forgotten under their old names automatically, in the audit and the index. |
 | `manualforge gpu` / `manualforge version` | Which execution provider is active, and how many pages it reads at once on your card; which build is installed. |
 | `manualforge gpu --retune` | Forget how many pages your card reads at once, so the next run learns it again. Measured speeds are kept. |
+| `manualforge setup gpu` / `--remove` | Download CUDA, cuDNN and TensorRT from NVIDIA into ManualForge's own folder, without administrator rights; or take them away again. |
 
 `manualforge` with no arguments lists every command and option.
 
@@ -371,7 +385,14 @@ claude mcp remove manualforge --scope user
 
 For Claude Desktop, delete the `"manualforge"` entry from `claude_desktop_config.json`.
 
-**3. Remove the program**, and its `PATH` entry if you added one:
+**3. Remove the GPU libraries ManualForge downloaded**, if `manualforge setup gpu` fetched them. This
+removes only those; a CUDA toolkit or anything else on the machine is left alone:
+
+```powershell
+manualforge setup gpu --remove
+```
+
+**Then remove the program**, and its `PATH` entry if you added one:
 
 ```powershell
 $target = "$env:LOCALAPPDATA\Programs\ManualForge"

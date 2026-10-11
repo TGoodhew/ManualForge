@@ -340,13 +340,14 @@ public class CudaLibraryTests
         .Add(Chained + "\\cudnn", "cudnn64_9.dll", "cudnn_graph64_9.dll")
         .Add(Chained + "\\tensorrt", "nvinfer_10.dll", "nvonnxparser_10.dll");
 
-    private static CudaSearch AsTheMachineSearches(FakeTree tree) => new(
-        PathDirectories: [],
+    private static CudaSearch AsTheMachineSearches(FakeTree tree, IReadOnlyList<string>? path = null) => new(
+        PathDirectories: path ?? [],
         CudaRoots: [Chained + "\\cuda", "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA"],
         CudnnRoots: [Chained + "\\cudnn", "C:\\Tools"],
         FileExists: tree.FileExists,
         Subdirectories: tree.Subdirectories,
-        TensorRtRoots: [Chained + "\\tensorrt", "C:\\Tools"]);
+        TensorRtRoots: [Chained + "\\tensorrt", "C:\\Tools"],
+        Pinned: [Chained + "\\cuda", Chained + "\\cudnn", Chained + "\\tensorrt"]);
 
     [Fact]
     public void TheInstallersOwnCopiesAreFoundWithNothingOnPath()
@@ -363,22 +364,47 @@ public class CudaLibraryTests
     public void TheInstallersOwnCopiesBeatAToolkitInstalledSince()
     {
         // The installer downloads only when nothing was found, so a toolkit beside its copies came
-        // later, for other work. What the installer pinned and measured is what keeps being read.
-        var tree = ChainedInstall();
-        foreach (var (directory, files) in new[]
-        {
-            ("C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v13.5\\bin\\x64", new[] { "cublas64_13.dll", "cublasLt64_13.dll", "cudart64_13.dll" }),
-            ("C:\\Tools\\cudnn-9.30\\bin\\x64", new[] { "cudnn64_9.dll", "cudnn_graph64_9.dll" }),
-        })
-        {
-            tree.Add(directory, files);
-        }
+        // later, for other work - and a toolkit's installer puts itself on PATH, which is the case a
+        // first version of this missed. What the installer pinned and measured is what keeps loading:
+        // its folders are reported for Ensure to put in front of PATH.
+        const string toolkit = "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v13.5\\bin\\x64";
+        const string cudnn = "C:\\Tools\\cudnn-9.30\\bin\\x64";
+        const string tensorRt = "C:\\Tools\\TensorRT-10.20\\lib";
+        var tree = ChainedInstall()
+            .Add(toolkit, "cublas64_13.dll", "cublasLt64_13.dll", "cudart64_13.dll")
+            .Add(cudnn, "cudnn64_9.dll", "cudnn_graph64_9.dll")
+            .Add(tensorRt, "nvinfer_10.dll", "nvonnxparser_10.dll");
 
-        var location = CudaLibraries.Locate(AsTheMachineSearches(tree));
+        var location = CudaLibraries.Locate(AsTheMachineSearches(tree, path: [toolkit, cudnn, tensorRt]));
 
+        Assert.False(location.AlreadyOnPath);
         Assert.Equal(Chained + "\\cuda", location.CudaDirectory);
         Assert.Equal(Chained + "\\cudnn", location.CudnnDirectory);
+        Assert.Equal(Chained + "\\tensorrt", location.TensorRtDirectory);
+        Assert.False(location.TensorRtOnPath);
     }
+
+    [Fact]
+    public void AnIncompleteSetOfTheInstallersCopiesIsPassedOver()
+    {
+        // cuDNN missing from its folder: the copies are not a working set, so the machine's own
+        // libraries are used as they would have been.
+        var tree = new FakeTree()
+            .Add(Chained + "\\cuda", "cublas64_13.dll", "cublasLt64_13.dll", "cudart64_13.dll");
+        foreach (var (directory, files) in CompleteInstallOnPath())
+            tree.Add(directory, files);
+
+        var location = CudaLibraries.Locate(AsTheMachineSearches(tree, path: CompleteInstallOnPath().Select(d => d.Directory).ToList()));
+
+        Assert.True(location.AlreadyOnPath);
+        Assert.True(location.Complete);
+    }
+
+    private static IEnumerable<(string Directory, string[] Files)> CompleteInstallOnPath() =>
+    [
+        ("C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v13.4\\bin\\x64", ["cublas64_13.dll", "cublasLt64_13.dll", "cudart64_13.dll"]),
+        ("C:\\Tools\\cudnn-9.26.0.51\\bin\\x64", ["cudnn64_9.dll", "cudnn_graph64_9.dll"]),
+    ];
 
     [Fact]
     public void TheRealSearchLooksInTheInstallersFolderFirst()

@@ -48,6 +48,7 @@ try
     return arguments.Command switch
     {
         "gpu" => await GpuCommand.RunAsync(arguments, loggerFactory),
+        "setup" => await SetupCommand.RunAsync(arguments, cancellation.Token),
         "ocr" => await OcrCommand.RunAsync(arguments, loggerFactory, logPath, cancellation.Token),
         "inspect" => InspectCommand.Run(arguments),
         "survey" => SurveyCommand.Run(arguments, loggerFactory, cancellation.Token),

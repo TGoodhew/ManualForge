@@ -141,6 +141,8 @@ internal sealed class CommandLine
               manualforge benchmark --truth <folder>      Measure character and word error rates
               manualforge gpu                            Report which execution provider is active, and the
                                                          pages in flight learned for it; --retune forgets them
+              manualforge setup gpu                      Download CUDA, cuDNN and TensorRT from NVIDIA into
+                                                         ManualForge's own folder; --remove takes them away
               manualforge version                        Which build this is, and where it was loaded from
               manualforge pages <folder> --shape drawn   Find test pages by shape, from the audit's geometry
               manualforge assemble --pages <list>        Collect pages from many PDFs into one image-only PDF
@@ -315,6 +317,15 @@ internal sealed class CommandLine
               --score-existing        Also score the text already in the files - point the truth
                                       set at another engine's output to compare against it.
               --csv <path>            Write per-page detail.
+
+            setup gpu options:
+              --plan                  Say what would be downloaded, and the licences, and stop.
+              --accept-nvidia-licences  Required to download: NVIDIA's libraries come under its licences.
+              --no-tensorrt           Leave TensorRT out (1.9 GB less; about half the speed).
+              --force                 Download ManualForge's own copies even if CUDA is already found.
+              --downloads <folder>    Keep the archives there and reuse them; otherwise they are
+                                      deleted once their DLLs are in place.
+              --remove                Delete the libraries `setup gpu` downloaded, and nothing else.
 
             general options:
               --models <path>         Model cache directory.

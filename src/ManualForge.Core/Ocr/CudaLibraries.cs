@@ -198,6 +198,27 @@ public static class CudaLibraries
     {
         ArgumentNullException.ThrowIfNull(search);
 
+        // The installer's own copies, when they are all there, are used whatever else the machine has,
+        // PATH included: they go in front of it, so they are what loads. A toolkit installed later for
+        // other work puts itself on PATH, and would otherwise quietly replace the libraries every
+        // measurement was made with (#26).
+        if (search.Pinned is { } pinned)
+        {
+            var pinnedCuda = pinned.FirstOrDefault(directory => search.FileExists(directory, CudaProbe));
+            var pinnedCudnn = pinned.FirstOrDefault(directory => search.FileExists(directory, CudnnProbe));
+            if (pinnedCuda is not null && pinnedCudnn is not null
+                && RequiredLibraries.All(library => ResolvableIn([pinnedCuda, pinnedCudnn], library, search)))
+            {
+                var pinnedTensorRt = pinned.FirstOrDefault(directory => TensorRtLibraries.All(library => search.FileExists(directory, library)));
+                var tensorRtElsewhere = pinnedTensorRt is null
+                    && TensorRtLibraries.All(library => ResolvableIn(search.PathDirectories, library, search));
+                return new CudaLibraryLocation(
+                    pinnedCuda, pinnedCudnn, [], AlreadyOnPath: false,
+                    pinnedTensorRt ?? (tensorRtElsewhere ? null : FirstDirectoryContainingAll(search.TensorRtRoots ?? [], TensorRtLibraries, search)),
+                    tensorRtElsewhere, search.TensorRtRoots is not null);
+            }
+        }
+
         // TensorRT is looked for whatever CUDA's state, because CUDA being on PATH already says
         // nothing about where TensorRT is. Found or not, it never makes CUDA incomplete.
         var tensorRtOnPath = TensorRtLibraries.All(library => ResolvableIn(search.PathDirectories, library, search));
@@ -327,6 +348,12 @@ public static class CudaLibraries
     /// <c>MANUALFORGE_GPU_LIBRARIES</c> points somewhere else, for testing a set of libraries
     /// without installing it.
     /// </summary>
+    /// <summary>
+    /// Where the libraries are on this machine now, searched afresh: unlike <see cref="Ensure"/>, which
+    /// answers once per process, so that a setup step can see what it has just put in place.
+    /// </summary>
+    public static CudaLibraryLocation LocateOnThisMachine() => Locate(FromEnvironment());
+
     public static string ChainedLibrariesRoot =>
         Environment.GetEnvironmentVariable("MANUALFORGE_GPU_LIBRARIES") is { Length: > 0 } overridden
             ? overridden
@@ -389,6 +416,7 @@ public static class CudaLibraries
             CudaRoots: cudaRoots,
             CudnnRoots: cudnnRoots,
             TensorRtRoots: tensorRtRoots,
+            Pinned: [Path.Combine(chained, "cuda"), Path.Combine(chained, "cudnn"), Path.Combine(chained, "tensorrt")],
             FileExists: static (directory, file) =>
             {
                 try { return File.Exists(Path.Combine(directory, file)); }
@@ -420,10 +448,15 @@ public static class CudaLibraries
 /// <param name="FileExists">Whether a directory holds a named file.</param>
 /// <param name="Subdirectories">A directory's immediate children; empty when it does not exist.</param>
 /// <param name="TensorRtRoots">Where to start looking for TensorRT 10; none means it is not looked for.</param>
+/// <param name="Pinned">
+/// Directories whose libraries are used ahead of anything else, PATH included, when CUDA and cuDNN are
+/// complete there: the installer's own copies (#26).
+/// </param>
 public sealed record CudaSearch(
     IReadOnlyList<string> PathDirectories,
     IReadOnlyList<string> CudaRoots,
     IReadOnlyList<string> CudnnRoots,
     Func<string, string, bool> FileExists,
     Func<string, IReadOnlyList<string>> Subdirectories,
-    IReadOnlyList<string>? TensorRtRoots = null);
+    IReadOnlyList<string>? TensorRtRoots = null,
+    IReadOnlyList<string>? Pinned = null);
