@@ -15,6 +15,13 @@ namespace ManualForge.Core.Ocr;
 /// different execution provider, must not silently reuse results produced under the old settings —
 /// the word boxes would be in the wrong coordinate space, and every one of them would be wrong in a
 /// way nothing downstream could detect.
+///
+/// The bytes read belong in that scope as much as the settings do (#58), and
+/// <see cref="PageCacheScope.For"/> folds them in. A file that fails keeps its cached pages, so a
+/// retry after a transient failure costs nothing. When the file read is replaced between the two
+/// attempts, those pages describe a file that is no longer there. On 10 October a damaged original's
+/// reading was reused for the patched copy put in its place, page 31 left blank where the damage had
+/// stopped it rendering.
 /// </summary>
 public interface IPageOcrCache
 {
@@ -49,6 +56,17 @@ public interface IPageOcrCache
 public sealed record CachedPage(int PixelWidth, int PixelHeight, IReadOnlyList<RecognisedWord> Words)
 {
     public bool HasDimensions => PixelWidth > 0 && PixelHeight > 0;
+}
+
+/// <summary>What a cached page is scoped by: the settings it was read with, and the bytes it was read from.</summary>
+public static class PageCacheScope
+{
+    /// <summary>
+    /// <paramref name="settingsFingerprint"/> alone when the source is not identified, as for a single
+    /// file built outside a library; otherwise with the source's identity appended.
+    /// </summary>
+    public static string For(string settingsFingerprint, string? sourceIdentity)
+        => string.IsNullOrEmpty(sourceIdentity) ? settingsFingerprint : $"{settingsFingerprint};source={sourceIdentity}";
 }
 
 /// <summary>A cache that remembers nothing, for callers that do not want resume.</summary>

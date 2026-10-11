@@ -58,6 +58,11 @@ showed up along the way:
 - the `Cannot be opened` failure reached the console but not the JSON log;
 - a file PDFsharp will refuse is recognised in full before it is refused, which wastes GPU time.
 
+All three are fixed (#58, #59, #60). Cached pages are now scoped by a SHA-256 of every byte read
+as well as by the settings. `FileFingerprint` hashes only the two ends, and could not have told the
+patched copy from the damaged one. Every failure is logged. A file's source is checked before any
+of it is recognised: hashing all 173 originals takes about 3 seconds.
+
 **3. One marginal spill held the card at one page in flight for good** (#56). The run started at
 two pages in flight, the first guess for a card with no profile. At file 105 the spill guard saw
 132 MiB go out to system RAM, 4 MiB over its 128 MiB margin, and recorded two as unsafe. Every
@@ -99,4 +104,3 @@ pages are 5440A-SM page 43 and 8340B User page 6. Both moved from not found to f
 - The index file is 436.7 MB with 113 MB of free pages. `manualforge index <library> --compact`
   rewrites it without them.
 - #56: the GPU profile, and the TensorRT repair rates.
-- The two smaller things found under item 2. Neither has an issue yet.
