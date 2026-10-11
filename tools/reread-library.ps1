@@ -3,15 +3,18 @@
     Reads the whole library again with the current recogniser, overnight, unattended.
 
 .DESCRIPTION
-    The four steps in docs/DEVELOPMENT-HISTORY.md, "Reading the library again when the recogniser improves", in
+    The steps in docs/DEVELOPMENT-HISTORY.md, "Reading the library again when the recogniser improves", in
     order, each only after the one before it succeeded:
 
+      0. backup                  the library's three databases, copied aside: the "before", and the way back
       1. run --redo-completed    the files ManualForge recognised end to end, from their originals
-      2. doctor                  re-audit the files step 1 changed
-      3. repair --redo-before    every repaired page, again
+      2. doctor                  re-audit the files step 1 changed (with -Reaudit, every file: #46)
+      3. repair --redo-before    every flagged page, read again, and any newly flagged
       4. index                   so search sees all of it
 
-    About 13 hours as timed on 28 September 2026 (10½ to 15).
+    It reads with whatever the installed build uses: TensorRT where it is installed (#53), which
+    roughly halves the reading steps against CUDA. The log starts with what `manualforge gpu` reports,
+    so the morning can tell which it was.
 
     It is safe to start again. Progress is kept in <library>\_Originals\reread-progress.json: a
     step that finished is not repeated, step 1 carries on with the files it had not reached, and
@@ -37,16 +40,28 @@ param(
     [string] $Exe = "$env:LOCALAPPDATA\Programs\ManualForge\manualforge.exe",
 
     # Show the steps, what is already done and the expected finish time, and stop.
-    [switch] $Plan
+    [switch] $Plan,
+
+    # Re-audit every file, not only the ones the re-read changed. Needed when the audit itself has
+    # changed - reverse video on by default (#12, #46) - and about 80 minutes of CPU instead of 5.
+    [switch] $Reaudit,
+
+    # Where step 0 copies the databases: a new dated folder under here.
+    [string] $BackupRoot = "$env:USERPROFILE\ManualForge-baselines"
 )
 
 $ErrorActionPreference = 'Stop'
 
-# Minutes per step, from the timed samples in docs/DEVELOPMENT-HISTORY.md. Only used to say when it should finish.
+# Minutes per step, only used to say when it should finish. From the 10 Oct 2026 numbers on an RTX
+# 5070 Ti with TensorRT (#53): 24,037 pages to re-read at about twice the 151.7 pages/min CUDA managed
+# over the whole library; the doctor's full re-audit as measured for #46; and the repair at the
+# 6.9 hours its --plan quotes on CUDA rates, cut by a third because it reads one page at a time and
+# gains less from TensorRT than run does. The repair is the least certain of them.
 $steps = @(
-    [pscustomobject]@{ Name = 'redo';   Title = 'Read every finished file again from its original';      Minutes = 350 }
-    [pscustomobject]@{ Name = 'doctor'; Title = 'Re-audit the files that changed';                     Minutes = 5 }
-    [pscustomobject]@{ Name = 'repair'; Title = 'Read every repaired page again';                      Minutes = 620 }
+    [pscustomobject]@{ Name = 'backup'; Title = 'Copy the library''s databases aside';                  Minutes = 1 }
+    [pscustomobject]@{ Name = 'redo';   Title = 'Read every finished file again from its original';      Minutes = 130 }
+    [pscustomobject]@{ Name = 'doctor'; Title = $(if ($Reaudit) { 'Re-audit every file' } else { 'Re-audit the files that changed' }); Minutes = $(if ($Reaudit) { 80 } else { 5 }) }
+    [pscustomobject]@{ Name = 'repair'; Title = 'Read every flagged page again';                       Minutes = 300 }
     [pscustomobject]@{ Name = 'index';  Title = 'Rebuild the search index';                            Minutes = 10 }
 )
 
@@ -64,7 +79,7 @@ $log = Join-Path $logFolder ("reread-{0:yyyyMMdd-HHmmss}.log" -f (Get-Date))
 # The options this script relies on arrived in 108df12. An older build would reject them, or worse,
 # run plain --redo and lose the ability to resume.
 $help = (& $Exe 2>&1) -join "`n"
-foreach ($option in '--redo-completed', '--redo-before') {
+foreach ($option in '--redo-completed', '--redo-before', '--recheck') {
     if ($help -notmatch [regex]::Escape($option)) {
         throw "The installed manualforge does not know $option. Publish a build from 108df12 or later."
     }
@@ -85,9 +100,10 @@ function Read-Progress {
             RedoStarted  = [bool]$p.RedoStarted
             RepairCutoff = & $exact $p.RepairCutoff
             Started      = & $exact $p.Started
+            Backup       = $p.Backup
         }
     }
-    return @{ Done = @(); RedoStarted = $false; RepairCutoff = $null; Started = $null }
+    return @{ Done = @(); RedoStarted = $false; RepairCutoff = $null; Started = $null; Backup = $null }
 }
 
 function Save-Progress($progress) {
@@ -124,7 +140,7 @@ if (-not $remaining) {
     Write-Line "Every step is done. Delete $progressPath to start a fresh pass."
     return
 }
-Write-Line ("Expected to finish around {0:ddd HH:mm} (10½-15 hours for a whole pass; the repair estimate is +/- a fifth)." -f $finish)
+Write-Line ("Expected to finish around {0:ddd HH:mm}. The repair is the least certain step: it could be an hour or two either side." -f $finish)
 
 if ($Plan) {
     Write-Line "-Plan given: nothing was run."
@@ -184,6 +200,34 @@ try {
         Save-Progress $progress
     }
 
+    # What this pass reads with: TensorRT or CUDA, and the card. Recorded before anything changes.
+    if (-not $progress.Done) {
+        Write-Line ""
+        Write-Line "=== What the installed build will read with"
+        & $Exe gpu 2>&1 | ForEach-Object { Write-Line "    $_" }
+    }
+
+    # 0. The databases, copied aside before anything changes them: the "before" for comparing this
+    #    pass, and the way back. Their write-ahead logs should be empty with nothing running; if one
+    #    is not, something has the library open, and the copy would miss what it holds.
+    if ($progress.Done -notcontains 'backup') {
+        $backup = Join-Path $BackupRoot ("{0:yyyy-MM-dd-HHmm}-before-reread" -f (Get-Date))
+        New-Item -ItemType Directory -Force -Path $backup | Out-Null
+        foreach ($db in 'manualforge.db', 'manualforge-doctor.db', 'manualforge-index.db') {
+            $source = Join-Path $originals $db
+            if (-not (Test-Path -LiteralPath $source)) { continue }
+            $wal = "$source-wal"
+            if ((Test-Path -LiteralPath $wal) -and (Get-Item -LiteralPath $wal).Length -gt 0) {
+                throw "$db has an unwritten log ($wal): something has the library open. Close the ManualForge app and Claude Desktop, then start this again."
+            }
+            Copy-Item -LiteralPath $source -Destination (Join-Path $backup $db)
+        }
+        Write-Line ""
+        Write-Line "=== Databases copied to $backup"
+        $progress.Backup = $backup
+        $progress.Done += 'backup'; Save-Progress $progress
+    }
+
     # 1. The files recognised end to end. --redo-completed only on the first start: it puts every
     #    finished file back in the queue, and given twice it would queue again the ones this pass
     #    has already read. On a restart plain `run` carries on with what is still queued.
@@ -200,7 +244,7 @@ try {
 
     # 2. Repair will not attach text to a file that has changed since it was audited.
     if ($progress.Done -notcontains 'doctor') {
-        Invoke-Step 'doctor' @('doctor', $Library)
+        Invoke-Step 'doctor' $(if ($Reaudit) { @('doctor', $Library, '--recheck') } else { @('doctor', $Library) })
         $progress.Done += 'doctor'; Save-Progress $progress
     }
 
@@ -232,6 +276,7 @@ try {
         Write-Line "  Files that failed in 'redo' stay queued; 'manualforge run `"$Library`"' tries them again."
     }
     Write-Line "Earlier searchable copies are kept in $(Join-Path $originals '_superseded'); delete them once you are happy."
+    if ($progress.Backup) { Write-Line "The databases as they were before this pass are in $($progress.Backup)." }
 }
 finally {
     [void][ManualForge.Power]::SetThreadExecutionState($allowSleep)
