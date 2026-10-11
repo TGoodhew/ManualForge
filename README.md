@@ -240,10 +240,11 @@ manualforge index  D:\Manuals     # build or update the search index
   time, and say when they don't have one yet. `--gpu-concurrency <n>` fixes the number instead.
   What was learned is kept in `%LOCALAPPDATA%\ManualForge\gpu-profiles.json`; delete that file
   to start again.
-- **TensorRT:** when it's installed, ManualForge uses it automatically. The first run on a card spends
-  about a minute preparing it, and later runs reuse that preparation, which is kept under
-  `%LOCALAPPDATA%\ManualForge\models\tensorrt`. TensorRT reads a few uncertain words differently from
-  plain CUDA (about 1 in 200); `--engine cuda` turns it off. `manualforge gpu` shows which one is in use.
+- **TensorRT:** when it's installed, ManualForge uses it automatically, and reads pages almost twice as
+  fast. The first run on a card spends about a minute preparing it; later runs reuse that preparation,
+  which is kept under `%LOCALAPPDATA%\ManualForge\models\tensorrt`. TensorRT reads about 1 word in 100
+  differently from plain CUDA, mostly words the reading was unsure of, some better and some worse.
+  `--engine cuda` turns it off. `manualforge gpu` shows which one is in use.
 
 ### One file
 

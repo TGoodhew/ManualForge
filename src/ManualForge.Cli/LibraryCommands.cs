@@ -222,6 +222,7 @@ internal static class RunCommand
         var engineOptions = new OcrEngineOptions
         {
             Accelerator = arguments.Accelerator(),
+            TensorRtModels = arguments.TensorRtModels(),
             ModelCachePath = arguments.Get("models") ?? new OcrEngineOptions().ModelCachePath,
             BatchSize = arguments.GetInt("batch") ?? 8,
             CpuThreads = arguments.GetInt("cpu-threads"),

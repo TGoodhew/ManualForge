@@ -107,6 +107,11 @@ foreach (var config in configs)
         await using var engine = new PaddleOcrEngine(new OcrEngineOptions
         {
             Accelerator = accelerator, OfflineModels = true,
+            // ENGINE_TENSORRT_MODELS=All (or Detector,Classifier,Recognizer) overrides the engine's
+            // default, which leaves the detector on CUDA.
+            TensorRtModels = Environment.GetEnvironmentVariable("ENGINE_TENSORRT_MODELS") is { Length: > 0 } models
+                ? Enum.Parse<PaddleOcrNet.Services.TensorRtModels>(models, ignoreCase: true)
+                : new OcrEngineOptions().TensorRtModels,
             RescueOrphanGlyphs = config != "engine-off", SplitTallStacks = config is not ("engine-off" or "engine-rescue"),
             Deskew = config == "engine-deskew",
             Denoise = config != "engine-nodenoise",

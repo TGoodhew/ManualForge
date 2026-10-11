@@ -23,11 +23,12 @@ public enum OcrAccelerator
     Cpu,
 
     /// <summary>
-    /// NVIDIA TensorRT on top of CUDA: about twice CUDA's speed here, because CUDA plans every
+    /// NVIDIA TensorRT on top of CUDA: nearly twice CUDA's speed here, because CUDA plans every
     /// convolution again for each new input shape and OCR changes shape on nearly every call. Needs
-    /// everything CUDA does plus TensorRT 10 for CUDA 13; without it, runs on CUDA. Reads about 0.6%
-    /// of words differently from CUDA - near ties, at the same accuracy - so the page cache keeps the
-    /// two apart. Issues #34, #53; docs/measurements/recognition-shape-changes.md.
+    /// everything CUDA does plus TensorRT 10 for CUDA 13; without it, runs on CUDA. Reads about 1% of
+    /// words differently from CUDA - near ties, at the same accuracy - so the page cache keeps the two
+    /// apart. See <see cref="OcrEngineOptions.TensorRtModels"/>. Issues #34, #53;
+    /// docs/measurements/tensorrt.md.
     /// </summary>
     TensorRt,
 }
@@ -41,6 +42,20 @@ public sealed class OcrEngineOptions
     public OcrAccelerator Accelerator { get; init; } = OcrAccelerator.Auto;
 
     public int DeviceId { get; init; } = 0;
+
+    /// <summary>
+    /// Which models run on TensorRT when it is in use; the rest run on CUDA. The classifier and the
+    /// recogniser by default, with the detector left on CUDA.
+    ///
+    /// <para>
+    /// The detector moves its output furthest from CUDA's, because a slightly different box is a
+    /// differently cropped line. On the 280 test pages, 3 at once, an RTX 5070 Ti read 78.4 pages a
+    /// minute on CUDA, 151.4 with the detector on CUDA and 165.0 with all three on TensorRT; on 100
+    /// typical pages those changed 1.0% and 2.3% of words, at the same accuracy against Acrobat. Most
+    /// of the speed for under half the change. Issue #53; docs/measurements/tensorrt.md.
+    /// </para>
+    /// </summary>
+    public TensorRtModels TensorRtModels { get; init; } = TensorRtModels.Classifier | TensorRtModels.Recognizer;
 
     /// <summary>
     /// How many line crops the recogniser reads in one pass. Fixed at 8, not sized from VRAM.
