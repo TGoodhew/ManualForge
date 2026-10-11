@@ -23,14 +23,29 @@ public sealed record GpuMemory(int TotalMiB, int UsedMiB, string? Name, int? Uti
         + (UtilisationPercent is { } u ? $", {u}% busy" : string.Empty);
 }
 
-/// <summary>A card, as far as tuning is concerned: its name and how much memory it has.</summary>
-public sealed record GpuIdentity(string Name, int TotalMiB, string? Driver)
+/// <summary>A card, as far as tuning is concerned: its name, how much memory it has, and the engine on it.</summary>
+/// <param name="Engine">
+/// The execution provider the run uses. What a card holds and how fast it goes is a fact about the
+/// card and the engine together: on the RTX 5070 Ti, TensorRT reads about twice as fast as CUDA and
+/// keeps its memory differently, so a profile learned under one misleads the other (#56). Null is
+/// CUDA, which keeps the key every profile had before engines were told apart.
+/// </param>
+public sealed record GpuIdentity(string Name, int TotalMiB, string? Driver, string? Engine = null)
 {
     /// <summary>What a profile is filed under. Two cards of the same model are the same card here.</summary>
-    public string Key => $"{Name}|{TotalMiB}";
+    public string Key => IsCuda(Engine) ? $"{Name}|{TotalMiB}" : $"{Name}|{TotalMiB}|{Engine}";
+
+    /// <summary>The same card, with the engine a run on it uses.</summary>
+    public GpuIdentity On(string? engine) => this with { Engine = engine };
+
+    /// <summary>Whether this engine is TensorRT, whose memory is judged by its own margin (#56).</summary>
+    public bool IsTensorRt => string.Equals(Engine, "TensorRt", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsCuda(string? engine) =>
+        engine is null || string.Equals(engine, "Cuda", StringComparison.OrdinalIgnoreCase);
 
     public override string ToString() =>
-        $"{Name} ({TotalMiB:N0} MiB{(Driver is null ? "" : $", driver {Driver}")})";
+        $"{Name} ({TotalMiB:N0} MiB{(Driver is null ? "" : $", driver {Driver}")}{(Engine is null ? "" : $", {Engine}")})";
 }
 
 /// <summary>
@@ -59,6 +74,21 @@ public static class GpuMemoryProbe
     /// nvidia-smi. The driver is reported, not keyed on - a driver update moves speed by a few per
     /// cent, and re-tuning from nothing for that would cost more than it learned.
     /// </summary>
+    /// <param name="engine">The execution provider in use, which the profile is filed under as well.</param>
+    public static GpuIdentity? TryIdentify(string? engine) => TryIdentify()?.On(engine);
+
+    /// <summary>
+    /// The engine a run asking for this accelerator will get, for an estimate made before any model is
+    /// loaded: TensorRT when asked for, or when <see cref="OcrAccelerator.Auto"/> finds it installed.
+    /// </summary>
+    public static string ExpectedEngine(OcrAccelerator accelerator) => accelerator switch
+    {
+        OcrAccelerator.TensorRt => "TensorRt",
+        OcrAccelerator.Auto when CudaLibraries.Ensure().HasTensorRt => "TensorRt",
+        OcrAccelerator.DirectMl => "DirectMl",
+        _ => "Cuda",
+    };
+
     public static GpuIdentity? TryIdentify()
     {
         var line = RunNvidiaSmi("--query-gpu=name,memory.total,driver_version --format=csv,noheader,nounits");

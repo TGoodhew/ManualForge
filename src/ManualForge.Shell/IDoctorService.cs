@@ -148,7 +148,7 @@ public sealed class DoctorService(
 
         // What this card was measured doing, for the next estimate made on it (#31).
         if (engine.Runtime.UsingGpu)
-            RepairThroughput.Remember(new GpuProfileStore(), GpuMemoryProbe.TryIdentify(), report);
+            RepairThroughput.Remember(new GpuProfileStore(), GpuMemoryProbe.TryIdentify(engine.Runtime.ExecutionProvider), report);
 
         return report;
     }

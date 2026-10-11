@@ -52,9 +52,10 @@ public sealed class ConcurrencyController
     /// <summary>
     /// How far this process's memory in system RAM may rise above the least it has held there before
     /// it counts as spilling. A healthy run holds a steady few dozen MiB there (76 on the 5070 Ti); the
-    /// smallest spill measured added 246.
+    /// smallest spill measured added 246. That is CUDA: TensorRT moves more out for a while and brings it
+    /// back, and runs on it are given <see cref="GpuTuning.TensorRtSpillMarginMiB"/> instead (#56).
     /// </summary>
-    public int SpillMarginMiB { get; init; } = 128;
+    public int SpillMarginMiB { get; init; } = GpuTuning.CudaSpillMarginMiB;
 
     /// <summary>Pages in flight now.</summary>
     public int Level { get; private set; }

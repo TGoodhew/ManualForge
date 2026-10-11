@@ -70,7 +70,7 @@ internal static class SurveyCommand
     }
 
     public static void PrintSummary(
-        IReadOnlyList<FileRecord> allRecords, LibraryOptions options, bool trimmingMissing = false)
+        IReadOnlyList<FileRecord> allRecords, LibraryOptions options, bool trimmingMissing = false, string? engine = null)
     {
         // Records for files that have gone from disk are excluded, so the table describes the
         // library as it stands rather than as it once did.
@@ -118,7 +118,7 @@ internal static class SurveyCommand
         // "Marked for work" must mean work still to do, not merely a non-Skip action. Counting by
         // action alone reported 155 files outstanding when every one of them was already finished,
         // which flatly contradicted the run that followed it.
-        var speed = MeasuredThroughput.ForThisMachine();
+        var speed = MeasuredThroughput.ForThisMachine(engine: engine);
         var duplicates = records.Where(r => r.Action == ClassAction.CopyFromDuplicate).ToArray();
         if (duplicates.Length > 0)
         {
@@ -258,7 +258,8 @@ internal static class RunCommand
         // run finds out as it goes, starting where this card settled last time (#31).
         var vram = GpuMemoryProbe.TryRead();
         var profiles = new GpuProfileStore();
-        var tuning = GpuTuning.For(engine.Runtime.UsingGpu, arguments.GetInt("gpu-concurrency"), profiles);
+        var tuning = GpuTuning.For(
+            engine.Runtime.UsingGpu, arguments.GetInt("gpu-concurrency"), profiles, engine.Runtime.ExecutionProvider);
 
         var pipelineOptions = tuning.Options(
             arguments.GetInt("raster-workers") ?? 2,
@@ -292,7 +293,7 @@ internal static class RunCommand
         Console.WriteLine("Classifying...");
         var records = processor.Survey(options, null, cancellationToken);
         var trimMissing = arguments.Has("trim-missing");
-        SurveyCommand.PrintSummary(records, options, trimMissing);
+        SurveyCommand.PrintSummary(records, options, trimMissing, engine.Runtime.ExecutionProvider);
         if (trimMissing)
         {
             var trimmed = processor.TrimMissing(options);

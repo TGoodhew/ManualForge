@@ -233,13 +233,14 @@ manualforge index  D:\Manuals     # build or update the search index
 - **Speed on your GPU:** nothing needs setting for your card. ManualForge learns how many pages
   your card can read at once, one run at a time. The first run on a new card reads two at once.
   After any run of 100 pages or more that fits on the card, the next run tries one more, until one
-  overfills it. That number is remembered and never tried again, so after a few runs every run uses
-  the most your card holds. If a run overfills the card, for example because you open a game partway
+  overfills it. That number is remembered and not tried again until your display driver changes, so
+  after a few runs every run uses the most your card holds. If a run overfills the card, for example because you open a game partway
   through, it drops back by one straight away and carries on. The estimates from `survey`, `status` and
   `repair` use the speeds measured on your card once it has done a run or repair big enough to
   time, and say when they don't have one yet. `--gpu-concurrency <n>` fixes the number instead.
-  What was learned is kept in `%LOCALAPPDATA%\ManualForge\gpu-profiles.json`; delete that file
-  to start again.
+  What was learned is kept in `%LOCALAPPDATA%\ManualForge\gpu-profiles.json`, separately for
+  TensorRT and CUDA. `manualforge gpu` shows it, and `manualforge gpu --retune` makes the next run
+  learn it again, keeping the measured speeds. Deleting that file forgets the speeds too.
 - **TensorRT:** when it's installed, ManualForge uses it automatically, and reads pages almost twice as
   fast. The first run on a card spends about a minute preparing it; later runs reuse that preparation,
   which is kept under `%LOCALAPPDATA%\ManualForge\models\tensorrt`. TensorRT reads about 1 word in 100
@@ -338,7 +339,8 @@ manualforge index D:\Manuals
 | `manualforge doctor <file.pdf> --explain <page> --dump page.png` | Show why one page was or wasn't flagged. |
 | `manualforge survey <library> --trim-missing` | Forget records of files you have deleted or moved. |
 | `manualforge doctor <library> --trim-missing` | The same for the audit: forget findings and repairs of files that are gone. Files `run` renames are forgotten under their old names automatically, in the audit and the index. |
-| `manualforge gpu` / `manualforge version` | Which execution provider is active; which build is installed. |
+| `manualforge gpu` / `manualforge version` | Which execution provider is active, and how many pages it reads at once on your card; which build is installed. |
+| `manualforge gpu --retune` | Forget how many pages your card reads at once, so the next run learns it again. Measured speeds are kept. |
 
 `manualforge` with no arguments lists every command and option.
 

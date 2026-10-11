@@ -92,9 +92,11 @@ public sealed class GpuProfileTests : IDisposable
     /// One run on the simulated card, as the pipeline would drive it: the pages it reads, and what the
     /// spill counter says after each window. Returns where the next run will start.
     /// </summary>
-    private int RunOnce(GpuProfileStore store, int pages, params int?[] spilled)
+    private int RunOnce(GpuProfileStore store, int pages, params int?[] spilled) => RunOnce(store, Card, pages, spilled);
+
+    private static int RunOnce(GpuProfileStore store, GpuIdentity card, int pages, params int?[] spilled)
     {
-        var tuning = GpuTuning.ForCard(Card, store.Find(Card), fixedConcurrency: null);
+        var tuning = GpuTuning.ForCard(card, store.Find(card), fixedConcurrency: null);
         var tuner = tuning.Tuner!;
         tuner.Begin(spilled.Length == 0 ? 0 : spilled.Any(x => x is not null) ? 0 : null);
 
@@ -104,6 +106,100 @@ public sealed class GpuProfileTests : IDisposable
             tuner.Observe(new ConcurrencyWindow(tuner.Level, 12, TimeSpan.FromSeconds(20), reading));
 
         return GpuTuning.StartFor(tuning.Remember(store, pagesPerMinute: null));
+    }
+
+    // ---------------------------------------------------------------- TensorRT (#56)
+
+    private static readonly GpuIdentity TensorRtCard = Card.On("TensorRt");
+
+    [Fact]
+    public void TensorRtsWarmUpIsNotASpill()
+    {
+        // The RTX 5070 Ti at three pages on TensorRT, 11 October: 74 MiB out, 206 eleven seconds in,
+        // back to 142 by the forty-third, and the fastest setting measured. CUDA's margin calls that a
+        // spill, which on the night of 10 October held the card at one page for good.
+        var store = Store();
+        Assert.Equal(3, RunOnce(store, TensorRtCard, 200, 74, 206, 142));   // 2 held: try 3
+        Assert.Equal(4, RunOnce(store, TensorRtCard, 200, 74, 206, 142));   // 3 held: try 4
+        Assert.Null(store.Find(TensorRtCard)?.UnsafeConcurrency);
+
+        // The same readings on CUDA are a spill, as they should be there.
+        var cuda = Store();
+        Assert.Equal(1, RunOnce(cuda, Card, 200, 74, 206, 142));
+    }
+
+    [Fact]
+    public void ARealTensorRtSpillIsStillCaught()
+    {
+        // Four pages on TensorRT: 1.1 GB out seven seconds in, 2.3 GB by the sixteenth.
+        var store = Store();
+        Store().Update(TensorRtCard, p => p with { BestConcurrency = 3 });
+
+        Assert.Equal(3, RunOnce(store, TensorRtCard, 200, 78, 1_102, 2_320));
+        Assert.Equal(4, store.Find(TensorRtCard)?.UnsafeConcurrency);
+    }
+
+    [Fact]
+    public void TensorRtAndCudaAreLearnedApart()
+    {
+        Store().Update(TensorRtCard, p => p with { BestConcurrency = 3, RunPagesPerMinute = 180 });
+
+        Assert.Null(Store().Find(Card));
+        Assert.Null(Store().Find(Card.On("Cuda")));
+        Assert.Equal(3, Store().Find(TensorRtCard)?.BestConcurrency);
+
+        // CUDA keeps the key every profile had before engines were told apart.
+        Assert.Equal(Card.Key, Card.On("Cuda").Key);
+        Assert.NotEqual(Card.Key, TensorRtCard.Key);
+    }
+
+    [Fact]
+    public void TheMarginFollowsTheEngine()
+    {
+        Assert.Equal(GpuTuning.TensorRtSpillMarginMiB, GpuTuning.ForCard(TensorRtCard, null, null).Tuner!.SpillMarginMiB);
+        Assert.Equal(GpuTuning.CudaSpillMarginMiB, GpuTuning.ForCard(Card, null, null).Tuner!.SpillMarginMiB);
+        Assert.Equal(GpuTuning.CudaSpillMarginMiB, GpuTuning.ForCard(Card.On("Cuda"), null, null).Tuner!.SpillMarginMiB);
+    }
+
+    [Fact]
+    public void ADriverUpdateLiftsTheCeilingAndKeepsTheRest()
+    {
+        // Held at one with two marked unsafe, as the night of 10 October left it. A new driver
+        // changes how memory goes out to system RAM, so the ceiling is worth finding again; what
+        // was measured is not thrown away.
+        Store().Update(Card, p => p with { BestConcurrency = 1, UnsafeConcurrency = 2, RunPagesPerMinute = 160 });
+        var updated = Card with { Driver = "1000.01" };
+
+        Assert.Equal(1, GpuTuning.StartFor(Store().Find(updated)));
+        Assert.Equal(3, RunOnce(Store(), updated, 200, 76, 76, 76));   // tries 2, which holds: next tries 3
+
+        var after = Store().Find(updated)!;
+        Assert.Null(after.UnsafeConcurrency);
+        Assert.Equal(2, after.BestConcurrency);
+        Assert.Equal(160, after.RunPagesPerMinute);
+        Assert.Equal("1000.01", after.Driver);
+    }
+
+    [Fact]
+    public void RetuningForgetsPagesInFlightAndKeepsTheSpeeds()
+    {
+        Store().Update(TensorRtCard, p => p with
+        {
+            BestConcurrency = 1,
+            UnsafeConcurrency = 2,
+            RunPagesPerMinute = 163.9,
+            RepairPagesPerMinute = new() { ["Drawn/300"] = 123.6, ["Raster/300"] = 64.3 },
+        });
+
+        GpuTuning.Retune(Store(), TensorRtCard);
+
+        var after = Store().Find(TensorRtCard)!;
+        Assert.Null(after.BestConcurrency);
+        Assert.Null(after.UnsafeConcurrency);
+        Assert.Equal(GpuTuning.FirstGuess, GpuTuning.StartFor(after));
+        Assert.Equal(163.9, after.RunPagesPerMinute);
+        Assert.Equal(123.6, after.RepairPagesPerMinute["Drawn/300"]);
+        Assert.Equal(64.3, after.RepairPagesPerMinute["Raster/300"]);
     }
 
     [Fact]

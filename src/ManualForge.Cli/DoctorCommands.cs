@@ -733,7 +733,7 @@ internal static class RepairCommand
         //
         // The rates are this card's own when a repair has run on it, and the table's until then.
         var profiles = new GpuProfileStore();
-        var gpu = GpuMemoryProbe.TryIdentify();
+        var gpu = GpuMemoryProbe.TryIdentify(GpuMemoryProbe.ExpectedEngine(arguments.Accelerator()));
         var learned = profiles.Find(gpu);
         var plan = PageRepairer.Plan(store, options);
         if (plan.Pages.Count > 0)
@@ -823,7 +823,7 @@ internal static class RepairCommand
         var report = await repairer.RepairAsync(store, options, progress, cancellationToken).ConfigureAwait(false);
 
         if (engine.Runtime.UsingGpu)
-            RepairThroughput.Remember(profiles, gpu, report);
+            RepairThroughput.Remember(profiles, gpu?.On(engine.Runtime.ExecutionProvider), report);
 
         Console.WriteLine();
         Console.WriteLine();

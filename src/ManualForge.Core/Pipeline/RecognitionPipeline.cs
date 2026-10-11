@@ -122,9 +122,13 @@ public static class MeasuredThroughput
     /// The rate to estimate from on this machine: what its own GPU was last measured doing, and
     /// failing that the figures above, said to be borrowed (#31).
     /// </summary>
-    public static ThroughputBasis ForThisMachine(GpuProfileStore? store = null)
+    /// <param name="engine">
+    /// The engine the run will use, whose speed on this card is what to estimate from. The one
+    /// <see cref="OcrAccelerator.Auto"/> would choose, unless said.
+    /// </param>
+    public static ThroughputBasis ForThisMachine(GpuProfileStore? store = null, string? engine = null)
     {
-        var gpu = GpuMemoryProbe.TryIdentify();
+        var gpu = GpuMemoryProbe.TryIdentify(engine ?? GpuMemoryProbe.ExpectedEngine(OcrAccelerator.Auto));
         if (gpu is null)
             return new ThroughputBasis(PagesPerMinuteOnCpu, "on the CPU, as no NVIDIA GPU was found");
 
