@@ -161,16 +161,65 @@ batch 1–8, height 48, width 48–3,200, optimised for 8 × 640. FP32, engine a
   difference between the two providers' scores was 0.0056. The highest-scoring class, which is what
   decoding reads, was the same at all 45,888 positions.
 
-That is synthetic input on one model. Whether the words are identical has to be shown on real pages,
-end to end, against the baselines. PaddleOcrNet 2.2.1 cannot select the TensorRT provider, so that
-needs either a local build of it or an upstream change.
+That is synthetic input on one model, so the next test was real pages, end to end.
+
+## TensorRT, end to end
+
+PaddleOcrNet 2.2.1 cannot select the TensorRT provider, so this used a local build of it, from tag
+`v2.2.1`. The patch was experimental and opt-in: an environment variable put TensorRT in front of CUDA
+for the named models, each with its own shape profile, because all three models call their input
+`x`. ManualForge was built against that copy on a branch that will not be merged. The patch and all
+outputs are in `C:\Users\Tony\ManualForge-baselines\2026-10-10-issue-34-evidence\e2e\`. The words
+are compared with the baselines kept before #34 began.
+
+**The local build itself changes nothing.** With TensorRT off, it read the typical book
+byte-for-byte as the package build had: identical `ours-engine.tsv`.
+
+**With TensorRT the words are close, but not identical:**
+
+| Typical book (100 pages) | Words read | Acrobat tokens matched (of 28,912) | Pages read differently |
+|---|---|---|---|
+| CUDA, the baseline | 32,178 | 17,568 | – |
+| TensorRT, recogniser only | 32,140 | 17,559 | 69 |
+| TensorRT, recogniser and classifier | 32,143 | 17,559 | – |
+| TensorRT, all three models | 32,071 | 17,556 | 83 |
+
+| Table book (100 pages) | Words read | Acrobat tokens matched (of 43,944) |
+|---|---|---|
+| CUDA, the baseline | 45,882 | 34,147 |
+| TensorRT, all three models | 45,877 | 34,145 |
+
+- **What changes.** With the recogniser alone on TensorRT, about 200 readings change at the same
+  place, about 0.6% of words, almost all where the recogniser was unsure. Some get better and some
+  worse: `OVEN` → `VEN`, `2038` → `20138`, `Q9` → `09`, `CLRCUIT` → `CLACUIT`.
+- **Why.** Different kernels add the same numbers in a different order, so a near-tie can fall the
+  other way. Exact identity with a different engine is probably not reachable.
+- **Accuracy.** Against Acrobat the difference is within noise: −9 tokens on the typical book, −2 on
+  the table book.
+- **No new damage.** Unlike batch 16 and width buckets (above), there is no new merging. The long
+  words only one side has are character-level variants on both sides, and the
+  `0007.5789.00ROEDERSTEI`-style merges are in the baseline too.
+
+**And it is twice as fast.** `run` on the 280 test pages, 3 pages in flight, the same build:
+
+| | Pages/min | Words |
+|---|---|---|
+| CUDA (as shipped) | 78.4 | 122,973 |
+| TensorRT, all three models | **156.2** | 122,838 |
+
+TensorRT built its three engines (detector 22 MB, recogniser 9.6 MB, classifier 7.3 MB) in about a
+minute the first time, and they are cached per card after that.
+
+So at this level there is no change that keeps every word identical and gains anything real; that is
+#34's second "done" condition, answered with a write-up. There is a change that doubles the speed at
+the same accuracy, but it reads about 0.6% of words differently.
 
 ## Ways out, and what each costs
 
 | Route | What it would take | Expected effect on words |
 |---|---|---|
 | ONNX Runtime keeps cuDNN plans per shape, or uses cuDNN's dynamic-shape kernel cache | An upstream change to ONNX Runtime's CUDA provider; report with the probe as a repro | None: same kernels chosen per shape |
-| TensorRT execution provider with dynamic-shape profiles and its engine cache | TensorRT's DLLs (2.2 GB) alongside CUDA and cuDNN (#26's installer would have to carry them); a build of PaddleOcrNet that can select it; an engine build per card (44 s, cached) | Probe: identical decoding on synthetic input. Must be measured on real pages |
+| TensorRT execution provider with dynamic-shape profiles and its engine cache | TensorRT's DLLs (2.2 GB) alongside CUDA and cuDNN (#26's installer would have to carry them); PaddleOcrNet able to select it, per model; an engine build per card (about a minute, cached) | **Twice as fast end to end**; about 0.6% of readings differ, accuracy within noise |
 | A different cuDNN 9.x | Only if an older or newer release has precompiled kernels for these shapes on Blackwell; needs downloads to test | None expected |
 | Fewer shapes (width buckets) | Already tried in #32 | Changed 61 of 100 pages: rejected |
 
