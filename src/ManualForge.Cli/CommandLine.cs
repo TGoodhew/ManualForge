@@ -143,6 +143,8 @@ internal sealed class CommandLine
                                                          pages in flight learned for it; --retune forgets them
               manualforge setup gpu                      Download CUDA, cuDNN and TensorRT from NVIDIA into
                                                          ManualForge's own folder; --remove takes them away
+              manualforge setup mcp                      Register the MCP server with every app here that can
+                                                         use it; --list shows where, --remove takes it out
               manualforge version                        Which build this is, and where it was loaded from
               manualforge pages <folder> --shape drawn   Find test pages by shape, from the audit's geometry
               manualforge assemble --pages <list>        Collect pages from many PDFs into one image-only PDF
@@ -326,6 +328,16 @@ internal sealed class CommandLine
               --downloads <folder>    Keep the archives there and reuse them; otherwise they are
                                       deleted once their DLLs are in place.
               --remove                Delete the libraries `setup gpu` downloaded, and nothing else.
+
+            setup mcp options:
+              --library <folder>      The library the server searches. Default: MANUALFORGE_LIBRARY.
+              --client <id,...>       Only these: claude-desktop-store, claude-desktop, claude-code,
+                                      vscode, vscode-insiders, visual-studio, cursor, windsurf,
+                                      gemini, codex, lmstudio, continue.
+              --server <exe>          The server to register. Default: the one beside this program.
+              --list                  Which apps are here, and whether each has ManualForge.
+              --plan                  What registering would change, changing nothing.
+              --remove                Take ManualForge's entry out of every app, and nothing else.
 
             general options:
               --models <path>         Model cache directory.

@@ -108,10 +108,27 @@ manualforge gpu        # "Active provider : Cuda" on a GPU; if it says Cpu, the 
 The OCR models (about 20–40 MB) download on first use into `%LOCALAPPDATA%\ManualForge\models`.
 After that, everything runs offline.
 
-### 4. Connect Claude (optional)
+### 4. Connect Claude and other apps (optional)
 
-The MCP server lets Claude Desktop and Claude Code search the library and read pages. Point
-`MANUALFORGE_LIBRARY` at your library folder.
+The MCP server lets Claude and other AI apps search the library and read pages. One command registers
+it with every app on the machine that can launch a local MCP server:
+
+```powershell
+manualforge setup mcp --list                       # which apps are here, and which already have it
+manualforge setup mcp --library "D:\Manuals"       # register it with all of them
+```
+
+It knows the following apps:
+- Claude Desktop (Store and classic) and Claude Code;
+- VS Code (and Insiders) and Visual Studio;
+- Cursor and Windsurf;
+- Gemini CLI, OpenAI Codex CLI, LM Studio and Continue.
+
+Each app's settings file is copied aside before it is first changed. ManualForge's entry is merged in,
+leaving everything else in the file as it was. Restart Claude Desktop afterwards. `--client` limits it
+to some apps, and `--plan` shows what would change without changing it.
+
+To do it by hand instead, point `MANUALFORGE_LIBRARY` at your library folder, as follows.
 
 **Claude Code:**
 
@@ -355,6 +372,7 @@ manualforge index D:\Manuals
 | `manualforge gpu` / `manualforge version` | Which execution provider is active, and how many pages it reads at once on your card; which build is installed. |
 | `manualforge gpu --retune` | Forget how many pages your card reads at once, so the next run learns it again. Measured speeds are kept. |
 | `manualforge setup gpu` / `--remove` | Download CUDA, cuDNN and TensorRT from NVIDIA into ManualForge's own folder, without administrator rights; or take them away again. |
+| `manualforge setup mcp` / `--list` / `--remove` | Register the MCP server with every app on the machine that can use it; see where it is registered; or take it out again. |
 
 `manualforge` with no arguments lists every command and option.
 
@@ -377,13 +395,15 @@ and close the app. This should print nothing:
 Get-Process ManualForge*, manualforge -ErrorAction SilentlyContinue
 ```
 
-**2. Disconnect Claude.**
+**2. Disconnect Claude and the other apps.** This takes ManualForge's entry out of every app's
+settings, leaves the rest of each file as it was, and deletes any file it created:
 
 ```powershell
-claude mcp remove manualforge --scope user
+manualforge setup mcp --remove
 ```
 
-For Claude Desktop, delete the `"manualforge"` entry from `claude_desktop_config.json`.
+By hand instead: `claude mcp remove manualforge --scope user` for Claude Code, and delete the
+`"manualforge"` entry from `claude_desktop_config.json` for Claude Desktop.
 
 **3. Remove the GPU libraries ManualForge downloaded**, if `manualforge setup gpu` fetched them. This
 removes only those; a CUDA toolkit or anything else on the machine is left alone:
