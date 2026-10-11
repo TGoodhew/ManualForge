@@ -6,6 +6,7 @@ using ManualForge.Core.Pipeline;
 using ManualForge.Core.Rendering;
 using ManualForge.Core.State;
 using ManualForge.Core.Text;
+using Microsoft.Extensions.Logging;
 
 namespace ManualForge.Core.Tests;
 
@@ -119,6 +120,28 @@ internal sealed class FakeOcrEngine(Func<int, IReadOnlyList<RecognisedWord>>? wo
     }
 }
 
+/// <summary>Keeps what was logged, so a test can ask whether something reached the log at all.</summary>
+internal sealed class RecordingLogger<T> : ILogger<T>
+{
+    private readonly List<(LogLevel Level, string Message)> _entries = [];
+
+    public IReadOnlyList<(LogLevel Level, string Message)> Entries
+    {
+        get { lock (_entries) return _entries.ToArray(); }
+    }
+
+    public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+    public bool IsEnabled(LogLevel logLevel) => true;
+
+    public void Log<TState>(
+        LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+    {
+        lock (_entries)
+            _entries.Add((logLevel, formatter(state, exception)));
+    }
+}
+
 /// <summary>
 /// The replace-in-place sequence, end to end.
 ///
@@ -175,6 +198,44 @@ public class LibraryProcessorTests : IDisposable
             pageCache: cache);
 
         return (new LibraryProcessor(builder, new DocumentClassifier(), pageCache: cache), engine);
+    }
+
+    /// <summary>The same, with the recognition pipeline running ahead as it does in a real run.</summary>
+    private (LibraryProcessor Processor, FakeOcrEngine Engine) NewPipelinedProcessor(
+        FakeOcrEngine engine, IPageOcrCache cache, ILogger<LibraryProcessor>? logger = null)
+    {
+        var rasteriser = new PageRasteriser(new RasterOptions { Dpi = Dpi });
+        var builder = new SearchablePdfBuilder(engine, rasteriser, new TextLayerWriter(), pageCache: cache);
+        var pipeline = new RecognitionPipeline(engine, rasteriser, cache, builder.SettingsFingerprint);
+
+        return (new LibraryProcessor(builder, new DocumentClassifier(), logger, cache, pipeline), engine);
+    }
+
+    /// <summary>What a library run caches a file's pages under: the settings, and every byte of its source.</summary>
+    private static string ScopeFor(string source)
+    {
+        using var stream = File.OpenRead(source);
+        return PageCacheScope.For(CacheSettings, Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(stream)));
+    }
+
+    /// <summary>
+    /// Damages a file the way the 8340B manual was damaged: <c>stream</c> spelled <c>struam</c> in one
+    /// image's object. PDFsharp refuses the whole file; PDFium reads past it.
+    /// </summary>
+    private static void MisspellFirstImageStream(string path)
+    {
+        var bytes = File.ReadAllBytes(path);
+        var image = IndexOf(bytes, "/Image"u8, 0);
+        var stream = IndexOf(bytes, "stream"u8, image);
+        Assert.True(image >= 0 && stream > image, "The fixture has no image stream to damage.");
+        bytes[stream + 3] = (byte)'u';
+        File.WriteAllBytes(path, bytes);
+
+        static int IndexOf(byte[] haystack, ReadOnlySpan<byte> needle, int from)
+        {
+            var at = haystack.AsSpan(from).IndexOf(needle);
+            return at < 0 ? -1 : from + at;
+        }
     }
 
     private SqlitePageOcrCache NewCache()
@@ -924,12 +985,85 @@ public class LibraryProcessorTests : IDisposable
         var options = NewOptions();
         var cache = NewCache();
         var (processor, _) = NewProcessor(cache: cache);
+        var scope = ScopeFor(path);
 
         processor.Survey(options);
         processor.Run(options);
 
         // The cache holds the documents in flight, not the library.
-        Assert.Null(cache.TryGet(path, 1, CacheSettings));
+        Assert.Null(cache.TryGet(path, 1, scope));
+    }
+
+    [Fact]
+    public void PagesRecognisedFromOtherBytesAreReadAgainNotReused()
+    {
+        // #58. A file that did not finish keeps its cached pages, which is what makes a retry cheap.
+        // Those pages are only good for the bytes they were read from: on 10 October a damaged
+        // original was put right and read again, and every page came back from the cache of the
+        // damaged one. Same path, same page count; only the bytes changed.
+        var path = TestPdf.Scanned(InRoot("long.pdf"), pages: 4);
+        var options = NewOptions();
+        var cache = NewCache();
+
+        using var cancellation = new CancellationTokenSource();
+        var first = new FakeOcrEngine
+        {
+            BeforePage = page =>
+            {
+                if (page == 3)
+                    cancellation.Cancel();
+            },
+        };
+
+        var (interrupted, _) = NewProcessor(first, cache);
+        interrupted.Survey(options);
+        Assert.ThrowsAny<OperationCanceledException>(() => interrupted.Run(options, cancellationToken: cancellation.Token));
+        Assert.NotNull(cache.TryGet(path, 1, ScopeFor(path)));
+
+        File.AppendAllText(path, "\n% the same pages, other bytes\n");
+
+        // Through the pipeline, so its scope and the builder's are both under test: a mismatch
+        // would show as pages recognised twice.
+        var (resumed, second) = NewPipelinedProcessor(new FakeOcrEngine(), cache);
+        resumed.Survey(options);
+        var outcome = Assert.Single(resumed.Run(options));
+
+        Assert.Equal(FileStatus.Completed, outcome.Status);
+        Assert.Equal([1, 2, 3, 4], second.PagesSeen.Order());
+    }
+
+    [Fact]
+    public void AnOriginalThatCannotBeOpenedIsRefusedBeforeAnythingIsRecognised()
+    {
+        // #60 and #59. The pipeline rasterises with PDFium, which reads past damage PDFsharp refuses,
+        // so a re-read of the damaged 8340B manual recognised all 992 pages before assembly could
+        // not open the file - and the failure reached the console but not the log.
+        var path = TestPdf.Scanned(InRoot("hp", "8340B.pdf"), pages: 2);
+        var original = InRoot("_Originals", "hp", "8340B.pdf");
+        var options = NewOptions();
+
+        var (first, _) = NewProcessor(EngineReading("HEWLETT"));
+        first.Survey(options);
+        first.Run(options);
+
+        MisspellFirstImageStream(original);
+        Assert.True(PdfInspector.Inspect(original).IsHopeless);
+        var libraryCopy = File.ReadAllBytes(path);
+
+        var redo = new LibraryOptions { Root = _root, ReadCompletedAgain = true };
+        var logger = new RecordingLogger<LibraryProcessor>();
+        var (second, engine) = NewPipelinedProcessor(EngineReading("AGILENT"), NewCache(), logger);
+        second.Survey(redo);
+        var outcome = Assert.Single(second.Run(redo));
+
+        Assert.Equal(FileStatus.Failed, outcome.Status);
+        Assert.Contains("struam", outcome.Error, StringComparison.Ordinal);
+        Assert.Equal(0, engine.PagesRecognised);
+        Assert.Equal(libraryCopy, File.ReadAllBytes(path));
+
+        Assert.Contains(logger.Entries, e => e.Level == LogLevel.Error
+            && e.Message.Contains("8340B.pdf", StringComparison.Ordinal)
+            && e.Message.Contains("struam", StringComparison.Ordinal));
     }
 
     // ---------------------------------------------------------------- surveying and discovery
@@ -1386,17 +1520,18 @@ public class LibraryProcessorTests : IDisposable
         };
 
         var (processor, _) = NewProcessor(engine, cache);
+        var scope = ScopeFor(path);
         processor.Survey(options);
         Assert.ThrowsAny<OperationCanceledException>(
             () => processor.Run(options, cancellationToken: cancellation.Token));
-        Assert.NotNull(cache.TryGet(path, 1, CacheSettings));
+        Assert.NotNull(cache.TryGet(path, 1, scope));
 
         File.Delete(path);
         processor.Survey(options);
         Assert.Equal([path], processor.TrimMissing(options));
 
         // Keyed on the path, so it could never be hit again.
-        Assert.Null(cache.TryGet(path, 1, CacheSettings));
+        Assert.Null(cache.TryGet(path, 1, scope));
     }
 
     // ---------------------------------------------------------------- paths

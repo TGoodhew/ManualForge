@@ -85,11 +85,6 @@ public sealed record PipelineReport(
     public double PagesPerMinute => Elapsed.TotalMinutes <= 0 ? 0 : PagesTotal / Elapsed.TotalMinutes;
 }
 
-/// <summary>A document the pipeline should recognise, and the identity to cache it under.</summary>
-/// <param name="CacheKey">
-/// The document's stable path in the library. Not <paramref name="SourcePath"/>, which for a
-/// flattened or stripped document is a temporary file with a different name on every attempt.
-/// </param>
 /// <summary>
 /// Throughput figures used to estimate how long work will take.
 ///
@@ -147,7 +142,19 @@ public sealed record ThroughputBasis(double PagesPerMinute, string Source)
     public override string ToString() => $"{PagesPerMinute:F0} pages/min {Source}";
 }
 
-public sealed record RecognitionJob(string SourcePath, string CacheKey, int PageCount);
+/// <summary>A document the pipeline should recognise, and the identity to cache it under.</summary>
+/// <param name="CacheKey">
+/// The document's stable path in the library. Not <paramref name="SourcePath"/>, which for a
+/// flattened or stripped document is a temporary file with a different name on every attempt.
+/// </param>
+/// <param name="SourceIdentity">
+/// The identity of the bytes at <paramref name="SourcePath"/>, which the cache is scoped by as well as
+/// the settings (#58). Null scopes it by the settings alone.
+/// </param>
+public sealed record RecognitionJob(string SourcePath, string CacheKey, int PageCount, string? SourceIdentity = null)
+{
+    internal string Scope(string settings) => PageCacheScope.For(settings, SourceIdentity);
+}
 
 /// <summary>
 /// Recognises pages ahead of the document that needs them, so the GPU is never waiting on a CPU.
@@ -256,7 +263,7 @@ public sealed class RecognitionPipeline(
 
                         // Asked here as well as in the builder, so a document that is already fully
                         // recognised costs nothing at all rather than a rasterised page each.
-                        if (_cache.TryGet(document.CacheKey, pageNumber, _settings) is { HasDimensions: true })
+                        if (_cache.TryGet(document.CacheKey, pageNumber, document.Scope(_settings)) is { HasDimensions: true })
                         {
                             Interlocked.Increment(ref reused);
                             AccountForPage(document);
@@ -375,7 +382,7 @@ public sealed class RecognitionPipeline(
                     }
 
                     var words = page.Words.Where(w => w.IsUsable).ToArray();
-                    _cache.Save(job.Document.CacheKey, job.PageNumber, _settings,
+                    _cache.Save(job.Document.CacheKey, job.PageNumber, job.Document.Scope(_settings),
                         new CachedPage(job.PixelWidth, job.PixelHeight, words));
 
                     Interlocked.Increment(ref recognised);

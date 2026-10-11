@@ -378,9 +378,22 @@ public sealed class LibraryProcessor(
         // render identically - true as far as anyone can tell, but not something to assume when
         // the cost of being wrong is every word box on the page in the wrong place. Those take the
         // serial path, which is correct, just not overlapped.
-        var prefetched = _pipeline is null
+        //
+        // Each one's source is checked first (#60). PDFium, which rasterises, reads files PDFsharp,
+        // which writes, refuses: on 10 October all 992 pages of a damaged manual were recognised and
+        // then thrown away when assembly could not open it. A file that cannot be opened, or whose
+        // original is missing, goes to the serial path, which fails it before any recognition.
+        var candidates = _pipeline is null
             ? []
             : outstanding.Where(CanRecogniseAhead).ToList();
+        var checks = CheckSources(candidates, cancellationToken);
+        var refused = checks.Values.Count(c => c.Capabilities.IsHopeless);
+        if (refused > 0)
+            _logger.LogWarning("{Count} file(s) cannot be opened, so will not be recognised; each fails with its reason", refused);
+
+        var prefetched = candidates
+            .Where(r => checks.TryGetValue(Path.GetFullPath(r.Path), out var c) && !c.Capabilities.IsHopeless)
+            .ToList();
 
         var remaining = outstanding.Except(prefetched).ToList();
 
@@ -388,7 +401,11 @@ public sealed class LibraryProcessor(
         {
             var byKey = prefetched.ToDictionary(r => Path.GetFullPath(r.Path), StringComparer.OrdinalIgnoreCase);
             var jobs = prefetched
-                .Select(r => new RecognitionJob(SourceFor(r), Path.GetFullPath(r.Path), r.PageCount))
+                .Select(r =>
+                {
+                    var key = Path.GetFullPath(r.Path);
+                    return new RecognitionJob(SourceFor(r), key, r.PageCount, checks[key].Identity);
+                })
                 .ToArray();
 
             var completed = Channel.CreateUnbounded<RecognitionJob>(new UnboundedChannelOptions
@@ -417,7 +434,7 @@ public sealed class LibraryProcessor(
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                var outcome = ProcessOne(store, options, byKey[job.CacheKey], cancellationToken);
+                var outcome = ProcessOne(store, options, byKey[job.CacheKey], cancellationToken, checks[job.CacheKey]);
                 outcomes.Add(outcome);
                 progress?.Report(outcome);
             }
@@ -429,7 +446,8 @@ public sealed class LibraryProcessor(
         foreach (var record in remaining)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var outcome = ProcessOne(store, options, record, cancellationToken);
+            var outcome = ProcessOne(store, options, record, cancellationToken,
+                checks.GetValueOrDefault(Path.GetFullPath(record.Path)));
             outcomes.Add(outcome);
             progress?.Report(outcome);
         }
@@ -458,8 +476,64 @@ public sealed class LibraryProcessor(
     private static string SourceFor(FileRecord record)
         => record.Action == ClassAction.ReadAgain ? record.OriginalPath! : record.Path;
 
+    /// <summary>
+    /// A file's source as found before any of it was recognised: what PDFsharp makes of it, and the
+    /// identity its recognition is cached under.
+    /// </summary>
+    private sealed record SourceCheck(string Source, PdfCapabilities Capabilities, string Identity);
+
+    /// <summary>
+    /// Checks the source of every file about to be recognised ahead, keyed by library path. A file
+    /// whose source is missing gets no entry. Two at a time: each check opens the whole file twice
+    /// and hashes it, and some of these files are hundreds of megabytes.
+    /// </summary>
+    private static Dictionary<string, SourceCheck> CheckSources(
+        IReadOnlyList<FileRecord> records, CancellationToken cancellationToken)
+    {
+        var checks = new System.Collections.Concurrent.ConcurrentDictionary<string, SourceCheck>(StringComparer.OrdinalIgnoreCase);
+
+        Parallel.ForEach(
+            records,
+            new ParallelOptions { MaxDegreeOfParallelism = 2, CancellationToken = cancellationToken },
+            record =>
+            {
+                var source = SourceFor(record);
+                if (!File.Exists(source))
+                    return;
+
+                try
+                {
+                    var capabilities = PdfInspector.Inspect(source);
+                    var identity = capabilities.IsHopeless ? "" : SourceIdentityOf(source);
+                    checks[Path.GetFullPath(record.Path)] = new SourceCheck(source, capabilities, identity);
+                }
+                catch (IOException)
+                {
+                    // Left unchecked, so it takes the serial path, which checks it again and says why.
+                }
+                catch (UnauthorizedAccessException)
+                {
+                }
+            });
+
+        return new Dictionary<string, SourceCheck>(checks, StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// What a file's recognition is cached under besides the settings: a hash of every byte (#58).
+    /// <see cref="FileFingerprint"/> is not enough. It hashes only the two ends, and the original
+    /// of the damaged 8340B manual was patched 990 KB into a 42 MB file with its size and date kept,
+    /// which it cannot tell apart; the cache then served the damaged copy's reading for the patched one.
+    /// </summary>
+    private static string SourceIdentityOf(string path)
+    {
+        using var stream = File.OpenRead(path);
+        return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(stream));
+    }
+
     private FileOutcome ProcessOne(
-        JobStore store, LibraryOptions options, FileRecord record, CancellationToken cancellationToken)
+        JobStore store, LibraryOptions options, FileRecord record, CancellationToken cancellationToken,
+        SourceCheck? check = null)
     {
         var stopwatch = Stopwatch.StartNew();
         var path = record.Path;
@@ -483,21 +557,24 @@ public sealed class LibraryProcessor(
             var readAgain = record.Action == ClassAction.ReadAgain;
             var source = readAgain ? record.OriginalPath : path;
             if (source is null || !File.Exists(source))
-            {
-                var reason = $"The original to read again from is not at {record.OriginalPath ?? "(none recorded)"}.";
-                store.SetStatus(path, FileStatus.Failed, reason);
-                return Outcome(record, FileStatus.Failed, 0, 0, false, stopwatch.Elapsed, reason);
-            }
+                return Failed(store, record,
+                    $"The original to read again from is not at {record.OriginalPath ?? "(none recorded)"}.", stopwatch);
 
             // Step 1: if the file refuses modification, rebuild it into one that does not. The
             // flattened copy is verified against the original's page geometry and image streams
-            // before it is used for anything.
-            var capabilities = PdfInspector.Inspect(source);
+            // before it is used for anything. A file the run already checked before recognising it
+            // is not opened twice.
+            var known = check is not null && string.Equals(check.Source, source, StringComparison.OrdinalIgnoreCase)
+                ? check
+                : null;
+            var capabilities = known?.Capabilities ?? PdfInspector.Inspect(source);
             if (capabilities.IsHopeless)
-            {
-                store.SetStatus(path, FileStatus.Failed, $"Cannot be opened: {capabilities.Detail}");
-                return Outcome(record, FileStatus.Failed, 0, 0, false, stopwatch.Elapsed, capabilities.Detail);
-            }
+                return Failed(store, record, capabilities.Detail ?? "Cannot be opened.", stopwatch,
+                    recorded: $"Cannot be opened: {capabilities.Detail}");
+
+            // What recognition of this file is cached under, beside the settings: the bytes being
+            // read, before any flattening or stripping, which are deterministic given them (#58).
+            var sourceIdentity = known?.Identity ?? SourceIdentityOf(source);
 
             // A digital signature is a claim about the bytes of the file, and adding a text layer
             // breaks it. Processing anyway is the default, but never silently: every signature
@@ -524,8 +601,8 @@ public sealed class LibraryProcessor(
                 if (!flattenResult.IsVerified)
                 {
                     var detail = string.Join(" ", flattenResult.Discrepancies.Take(3));
-                    store.SetStatus(path, FileStatus.Failed, "Flatten verification failed: " + detail);
-                    return Outcome(record, FileStatus.Failed, 0, 0, true, stopwatch.Elapsed, detail);
+                    return Failed(store, record, detail, stopwatch,
+                        recorded: "Flatten verification failed: " + detail, flattened: true);
                 }
 
                 source = flattenedPath;
@@ -597,8 +674,7 @@ public sealed class LibraryProcessor(
             {
                 var detail = $"Its printed text is unreadable and was to be silenced, but {Path.GetFileName(destination)} " +
                              "already exists beside it. Move or rename that file and run again.";
-                store.SetStatus(path, FileStatus.Failed, detail);
-                return Outcome(record, FileStatus.Failed, 0, 0, flattened, stopwatch.Elapsed, detail);
+                return Failed(store, record, detail, stopwatch, flattened: flattened);
             }
 
             // The invariant that matters more than any classification: a hidden text layer is
@@ -625,9 +701,7 @@ public sealed class LibraryProcessor(
                         ? "Stripping did not remove it."
                         : "Classify it again, or use StripAndRedo if the existing layer should be replaced.");
 
-                store.SetStatus(path, FileStatus.Failed, detail);
-                _logger.LogWarning("Refusing to add a second text layer to {Path}. {Detail}", path, detail);
-                return Outcome(record, FileStatus.Failed, 0, 0, flattened, stopwatch.Elapsed, detail);
+                return Failed(store, record, detail, stopwatch, flattened: flattened);
             }
 
             // Step 3: OCR into a new file in the working directory. Nothing in the library has
@@ -639,7 +713,7 @@ public sealed class LibraryProcessor(
                 outputPath,
                 // Keyed on the library path, not on `source`, which for a flattened or stripped
                 // document is a temporary file with a new name on every attempt.
-                new BuildOptions { Overwrite = true, CacheKey = path },
+                new BuildOptions { Overwrite = true, CacheKey = path, SourceIdentity = sourceIdentity },
                 progress: null,
                 cancellationToken).GetAwaiter().GetResult();
 
@@ -660,11 +734,8 @@ public sealed class LibraryProcessor(
             var totalLetters = verifications.Sum(v => v.ExtractedLetters);
 
             if (totalLetters == 0)
-            {
-                store.SetStatus(path, FileStatus.Failed, "The output carried no text layer.");
-                return Outcome(record, FileStatus.Failed, report.TotalWordsWritten, worstDeviation, flattened, stopwatch.Elapsed,
-                    "The output carried no text layer.");
-            }
+                return Failed(store, record, "The output carried no text layer.", stopwatch,
+                    words: report.TotalWordsWritten, deviation: worstDeviation, flattened: flattened);
 
             // Adding a text layer must change nothing else about the document. Compare the output's
             // structure against the input's: page count, per-page geometry and rotation, and the
@@ -681,9 +752,8 @@ public sealed class LibraryProcessor(
             {
                 var detail = "The output is not structurally identical to the source: "
                     + string.Join(" ", structuralChanges.Take(3));
-                store.SetStatus(path, FileStatus.Failed, detail);
-                return Outcome(record, FileStatus.Failed, report.TotalWordsWritten, worstDeviation, flattened,
-                    stopwatch.Elapsed, detail);
+                return Failed(store, record, detail, stopwatch,
+                    words: report.TotalWordsWritten, deviation: worstDeviation, flattened: flattened);
             }
 
             // Pages left without text for a reason in the page itself (#21). The document is still
@@ -893,11 +963,7 @@ public sealed class LibraryProcessor(
         // being repaired earlier in this run has its new name here and nowhere else.
         var duplicateOf = store.Find(path)?.DuplicateOf ?? record.DuplicateOf;
         if (duplicateOf is null)
-        {
-            const string reason = "Marked as a duplicate but with no primary recorded.";
-            store.SetStatus(path, FileStatus.Failed, reason);
-            return Outcome(record, FileStatus.Failed, 0, 0, false, stopwatch.Elapsed, reason);
-        }
+            return Failed(store, record, "Marked as a duplicate but with no primary recorded.", stopwatch);
 
         var primary = store.Find(duplicateOf);
         if (primary is null || primary.Status != FileStatus.Completed || !File.Exists(primary.Path))
@@ -919,8 +985,7 @@ public sealed class LibraryProcessor(
         {
             var reason = $"Its primary was renamed {Path.GetFileName(primary.Path)}, but {Path.GetFileName(destination)} " +
                          "already exists beside this copy. Move or rename that file and run again.";
-            store.SetStatus(path, FileStatus.Failed, reason);
-            return Outcome(record, FileStatus.Failed, 0, 0, false, stopwatch.Elapsed, reason);
+            return Failed(store, record, reason, stopwatch);
         }
 
         if (options.DryRun)
@@ -1031,6 +1096,23 @@ public sealed class LibraryProcessor(
         string? error, bool signatureInvalidated = false, IReadOnlyList<int>? pagesWithoutText = null)
         => new(record.Path, record.TextClass, record.Action, status, record.PageCount, words, deviation, flattened,
             duration, error, signatureInvalidated, pagesWithoutText ?? []);
+
+    /// <summary>
+    /// Records a file as failed, says so in the log, and returns the outcome. Every failure that is not
+    /// an exception goes through here, because each used to set the status and return on its own and
+    /// most of them never reached the log (#59): a file refused as unopenable on the night of 10 October
+    /// was on the console and in the job record, and nowhere in the log.
+    /// </summary>
+    /// <param name="recorded">What the job record keeps, when it says more than <paramref name="detail"/>.</param>
+    private FileOutcome Failed(
+        JobStore store, FileRecord record, string detail, Stopwatch stopwatch,
+        string? recorded = null, int words = 0, double deviation = 0, bool flattened = false)
+    {
+        recorded ??= detail;
+        store.SetStatus(record.Path, FileStatus.Failed, recorded);
+        _logger.LogError("Failed on {Path}: {Reason}", record.Path, recorded);
+        return Outcome(record, FileStatus.Failed, words, deviation, flattened, stopwatch.Elapsed, detail);
+    }
 
     /// <summary>
     /// Where a file's original is kept: one tree under the root, mirroring the source structure.

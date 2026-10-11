@@ -33,6 +33,13 @@ public sealed class BuildOptions
     /// document in the library.
     /// </summary>
     public string? CacheKey { get; init; }
+
+    /// <summary>
+    /// The identity of the bytes being read, cached beside the settings so that pages recognised from
+    /// one file are never reused for another put in its place (#58). Null leaves the cache scoped by
+    /// the settings alone.
+    /// </summary>
+    public string? SourceIdentity { get; init; }
 }
 
 public sealed record PageReport(
@@ -149,6 +156,7 @@ public sealed class SearchablePdfBuilder(
         // Recognition is cached against the document's stable identity, not against whatever
         // temporary file this attempt happens to be reading from.
         var cacheKey = Path.GetFullPath(options.CacheKey ?? full);
+        var cacheScope = PageCacheScope.For(SettingsFingerprint, options.SourceIdentity);
 
         var sourceBytes = await File.ReadAllBytesAsync(full, cancellationToken).ConfigureAwait(false);
 
@@ -192,7 +200,7 @@ public sealed class SearchablePdfBuilder(
             // Asked before rasterising, because a cached page carries the pixel dimensions it was
             // recognised at, and the raster would have been needed for nothing else. Skipping it
             // saves the 55 ms a page that a resumed run used to pay for a bitmap it discarded.
-            var cached = _pageCache.TryGet(cacheKey, pageNumber, SettingsFingerprint);
+            var cached = _pageCache.TryGet(cacheKey, pageNumber, cacheScope);
 
             var rasterWatch = Stopwatch.StartNew();
             RasterisedPage? raster = null;
@@ -275,7 +283,7 @@ public sealed class SearchablePdfBuilder(
                     meanConfidence = recognised.MeanConfidence;
 
                     // Persisted before the page is written, so a crash between the two loses nothing.
-                    _pageCache.Save(cacheKey, pageNumber, SettingsFingerprint,
+                    _pageCache.Save(cacheKey, pageNumber, cacheScope,
                         new CachedPage(pixelWidth, pixelHeight, words));
                 }
 
