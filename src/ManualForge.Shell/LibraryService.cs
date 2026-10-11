@@ -113,10 +113,8 @@ public sealed class LibraryService(
 
         if (!dryRun)
         {
-            var completedPages = outcomes.Where(o => o.Status == FileStatus.Completed).Sum(o => (long)o.PageCount);
-            tuning.Remember(profiles, completedPages >= MeasuredThroughput.PagesToLearnFrom
-                ? completedPages / watch.Elapsed.TotalMinutes
-                : null);
+            // Over the pages this run recognised, not those reused from an earlier attempt (#63).
+            tuning.Remember(profiles, MeasuredRun.From(outcomes.Sum(o => (long)o.PagesRecognised), watch.Elapsed));
         }
 
         return outcomes;

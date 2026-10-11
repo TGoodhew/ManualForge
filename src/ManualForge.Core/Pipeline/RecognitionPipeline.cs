@@ -138,6 +138,26 @@ public static class MeasuredThroughput
     }
 }
 
+/// <summary>
+/// What a run measured: the pages it recognised itself and how long it took. Pages reused from an
+/// earlier attempt don't count, because they cost no recognition (#63). On 11 October a re-read whose
+/// 992 pages all came from the cache reported 9,870 pages a minute, which was remembered as the
+/// card's speed.
+/// </summary>
+public sealed record MeasuredRun(long Pages, TimeSpan Elapsed)
+{
+    public double PagesPerMinute => Elapsed.TotalMinutes <= 0 ? 0 : Pages / Elapsed.TotalMinutes;
+
+    /// <summary>
+    /// A run worth remembering, or null: one that recognised fewer than
+    /// <see cref="MeasuredThroughput.PagesToLearnFrom"/> pages spent its time mostly loading models.
+    /// </summary>
+    public static MeasuredRun? From(long pagesRecognised, TimeSpan elapsed)
+        => pagesRecognised >= MeasuredThroughput.PagesToLearnFrom && elapsed > TimeSpan.Zero
+            ? new MeasuredRun(pagesRecognised, elapsed)
+            : null;
+}
+
 /// <summary>A speed to estimate from, and where it came from, which the estimate should say.</summary>
 public sealed record ThroughputBasis(double PagesPerMinute, string Source)
 {

@@ -105,7 +105,7 @@ public sealed class GpuProfileTests : IDisposable
         foreach (var reading in spilled)
             tuner.Observe(new ConcurrencyWindow(tuner.Level, 12, TimeSpan.FromSeconds(20), reading));
 
-        return GpuTuning.StartFor(tuning.Remember(store, pagesPerMinute: null));
+        return GpuTuning.StartFor(tuning.Remember(store, measured: null));
     }
 
     // ---------------------------------------------------------------- TensorRT (#56)
@@ -280,19 +280,58 @@ public sealed class GpuProfileTests : IDisposable
         Assert.Equal(GpuTuning.MaximumInFlight, GpuTuning.StartFor(store.Find(Card)));
     }
 
+    /// <summary>A run that recognised this many pages at this speed.</summary>
+    private static MeasuredRun Run(long pages, double pagesPerMinute) =>
+        new(pages, TimeSpan.FromMinutes(pages / pagesPerMinute));
+
     [Fact]
-    public void ARunsSpeedIsAveragedWithTheLast()
+    public void ARunsSpeedIsWeighedAgainstTheLastByItsPages()
     {
         var store = Store();
-        GpuTuning.ForCard(Card, null, null).Remember(store, pagesPerMinute: 100);
+        GpuTuning.ForCard(Card, null, null).Remember(store, Run(1_000, 100));
         Assert.Equal(100, store.Find(Card)?.RunPagesPerMinute);
 
-        GpuTuning.ForCard(Card, store.Find(Card), null).Remember(store, pagesPerMinute: 140);
-        Assert.Equal(120, store.Find(Card)?.RunPagesPerMinute);
+        GpuTuning.ForCard(Card, store.Find(Card), null).Remember(store, Run(1_000, 140));
+        Assert.Equal(120, store.Find(Card)!.RunPagesPerMinute!.Value, 6);
 
         // A run too short to measure leaves it alone.
-        GpuTuning.ForCard(Card, store.Find(Card), null).Remember(store, pagesPerMinute: null);
-        Assert.Equal(120, store.Find(Card)?.RunPagesPerMinute);
+        GpuTuning.ForCard(Card, store.Find(Card), null).Remember(store, measured: null);
+        Assert.Equal(120, store.Find(Card)!.RunPagesPerMinute!.Value, 6);
+    }
+
+    [Fact]
+    public void OneSmallRunNudgesAFigureMeasuredOverALibrary()
+    {
+        // #63. The night re-read measured 163.9 over 22,087 pages; a one-file re-read of 992 pages at
+        // 142.5 used to drag it halfway there. Now it counts for its pages against the library's,
+        // which stand for the cap.
+        var store = Store();
+        GpuTuning.ForCard(Card, null, null).Remember(store, Run(22_087, 163.9));
+        Assert.Equal(MeasuredRate.MostPagesRemembered, store.Find(Card)?.RunPagesMeasured);
+
+        GpuTuning.ForCard(Card, store.Find(Card), null).Remember(store, Run(992, 142.5));
+
+        var expected = (163.9 * MeasuredRate.MostPagesRemembered + 142.5 * 992) / (MeasuredRate.MostPagesRemembered + 992);
+        Assert.Equal(expected, store.Find(Card)!.RunPagesPerMinute!.Value, 6);
+        Assert.InRange(store.Find(Card)!.RunPagesPerMinute!.Value, 160, 161);
+    }
+
+    [Fact]
+    public void AFigureWrittenBeforePagesWereCountedStandsForTheCap()
+    {
+        var (rate, pages) = MeasuredRate.Fold(163.9, null, 142.5, 992);
+
+        Assert.Equal((163.9 * 5_000 + 142.5 * 992) / 5_992, rate, 6);
+        Assert.Equal(MeasuredRate.MostPagesRemembered, pages);
+    }
+
+    [Fact]
+    public void ARunServedFromTheCacheMeasuresNothing()
+    {
+        // The 08340 re-read whose 992 pages all came from the cache: nothing was recognised.
+        Assert.Null(MeasuredRun.From(0, TimeSpan.FromSeconds(6)));
+        Assert.Null(MeasuredRun.From(MeasuredThroughput.PagesToLearnFrom - 1, TimeSpan.FromMinutes(1)));
+        Assert.Equal(100, MeasuredRun.From(100, TimeSpan.FromMinutes(1))!.PagesPerMinute, 6);
     }
 
     [Fact]
@@ -301,7 +340,7 @@ public sealed class GpuProfileTests : IDisposable
         var store = Store();
         store.Update(Card, p => p with { BestConcurrency = 3, UnsafeConcurrency = 4 });
 
-        GpuTuning.ForCard(Card, store.Find(Card), fixedConcurrency: 6).Remember(store, 50);
+        GpuTuning.ForCard(Card, store.Find(Card), fixedConcurrency: 6).Remember(store, Run(500, 50));
 
         Assert.Equal(3, store.Find(Card)?.BestConcurrency);
         Assert.Equal(4, store.Find(Card)?.UnsafeConcurrency);
@@ -311,7 +350,7 @@ public sealed class GpuProfileTests : IDisposable
     public void WithNoCardIdentifiedNothingIsWritten()
     {
         var store = Store();
-        Assert.Null(GpuTuning.ForCard(null, null, fixedConcurrency: null).Remember(store, 100));
+        Assert.Null(GpuTuning.ForCard(null, null, fixedConcurrency: null).Remember(store, Run(1_000, 100)));
         Assert.False(File.Exists(store.Path));
     }
 
@@ -327,25 +366,45 @@ public sealed class GpuProfileTests : IDisposable
     public void ARepairRateIsLearnedOnlyFromEnoughPages()
     {
         var learned = RepairThroughput.Learn(
-            new Dictionary<string, double>(),
+            NewProfile(),
             [
                 new RepairTiming(PageKind.Drawn, 300, 60, TimeSpan.FromMinutes(1)),   // 60 pages/min
                 new RepairTiming(PageKind.Raster, 300, 5, TimeSpan.FromSeconds(5)),   // too few to say
             ]);
 
-        Assert.Equal(60, learned["Drawn/300"], 6);
-        Assert.False(learned.ContainsKey("Raster/300"));
+        Assert.Equal(60, learned.RepairPagesPerMinute["Drawn/300"], 6);
+        Assert.Equal(60, learned.RepairPagesMeasured["Drawn/300"], 6);
+        Assert.False(learned.RepairPagesPerMinute.ContainsKey("Raster/300"));
     }
 
     [Fact]
-    public void ANewRepairRateIsAveragedWithTheLast()
+    public void ANewRepairRateIsWeighedAgainstTheLastByItsPages()
     {
         var learned = RepairThroughput.Learn(
-            new Dictionary<string, double> { ["Raster/600"] = 20 },
+            NewProfile() with
+            {
+                RepairPagesPerMinute = new() { ["Raster/600"] = 20 },
+                RepairPagesMeasured = new() { ["Raster/600"] = 40 },
+            },
             [new RepairTiming(PageKind.Raster, 600, 40, TimeSpan.FromMinutes(1))]);
 
-        Assert.Equal(30, learned["Raster/600"], 6);
+        Assert.Equal(30, learned.RepairPagesPerMinute["Raster/600"], 6);
+        Assert.Equal(80, learned.RepairPagesMeasured["Raster/600"], 6);
     }
+
+    [Fact]
+    public void AOneFileRepairNudgesARateMeasuredOverALibrary()
+    {
+        // #63. Scanned pages at 300 dpi measured 64.3 over 14,679 pages in the night repair; the
+        // 8340B manual's 181 pages at 80 then moved it to 76 in two steps.
+        var learned = RepairThroughput.Learn(
+            NewProfile() with { RepairPagesPerMinute = new() { ["Raster/300"] = 64.34 } },
+            [new RepairTiming(PageKind.Raster, 300, 181, TimeSpan.FromMinutes(181 / 80.0))]);
+
+        Assert.InRange(learned.RepairPagesPerMinute["Raster/300"], 64.8, 65.0);
+    }
+
+    private static GpuProfile NewProfile() => new() { Name = Card.Name, TotalMiB = Card.TotalMiB };
 
     [Fact]
     public void TheEstimateUsesThisCardsRatesAndTheTableForTheRest()

@@ -363,26 +363,31 @@ internal static class RunCommand
         var worst = outcomes.Where(o => o.Status == FileStatus.Completed).Select(o => o.WorstDeviationPt).DefaultIfEmpty(0).Max();
         Console.WriteLine($"Worst alignment deviation: {worst:F3} pt");
 
+        // The speed is over the pages this run recognised. Pages reused from an earlier attempt cost no
+        // recognition, and counting them once made a re-read served from the cache report 9,870 pages
+        // a minute, which became the card's speed (#63).
         var completedPages = outcomes.Where(o => o.Status == FileStatus.Completed).Sum(o => (long)o.PageCount);
-        double? pagesPerMinute = null;
-        if (completedPages > 0 && runWatch.Elapsed.TotalMinutes > 0)
+        var recognised = outcomes.Sum(o => (long)o.PagesRecognised);
+        var minutes = runWatch.Elapsed.TotalMinutes;
+        if (completedPages > 0 && minutes > 0)
         {
             Console.WriteLine(
-                $"Throughput: {completedPages:N0} pages in {runWatch.Elapsed.TotalMinutes:F1} min, " +
-                $"{completedPages / runWatch.Elapsed.TotalMinutes:F1} pages/min");
-
-            // Too few pages and the rate is mostly model loading; it would make every estimate wrong.
-            if (completedPages >= MeasuredThroughput.PagesToLearnFrom)
-                pagesPerMinute = completedPages / runWatch.Elapsed.TotalMinutes;
+                $"Throughput: {completedPages:N0} pages in {minutes:F1} min" +
+                (recognised == 0 ? "; all from earlier attempts, so no speed was measured"
+                    : recognised >= completedPages ? $", {recognised / minutes:F1} pages/min"
+                    : $"; {recognised:N0} recognised now, at {recognised / minutes:F1} pages/min, " +
+                      $"the rest from earlier attempts"));
         }
 
-        var after = options.DryRun ? null : tuning.Remember(profiles, pagesPerMinute);
+        // Too few pages and the rate is mostly model loading; it would make every estimate wrong.
+        var measured = MeasuredRun.From(recognised, runWatch.Elapsed);
+        var after = options.DryRun ? null : tuning.Remember(profiles, measured);
         if (tuning.Tuner is not null)
         {
             var outcome = tuning.Outcome(after);
             Console.WriteLine($"Tuning    : {outcome}");
             runLog.LogInformation(
-                "Tuning: {Outcome}; {PagesPerMinute} pages/min", outcome, pagesPerMinute?.ToString("F1") ?? "not measured");
+                "Tuning: {Outcome}; {PagesPerMinute} pages/min", outcome, measured?.PagesPerMinute.ToString("F1") ?? "not measured");
         }
 
         // Renamed files are a caveat about their text, and the user needs to know which they are.

@@ -90,23 +90,31 @@ public static class RepairThroughput
     }
 
     /// <summary>
-    /// Folds what a repair measured into what was known: a rate read from enough pages is averaged
-    /// with the one before it, so one unusual run moves the estimate without deciding it.
+    /// Folds what a repair measured into what was known: a rate read from enough pages is weighed
+    /// against the one before it by the pages behind each (<see cref="MeasuredRate"/>, #63), so a
+    /// one-file repair nudges an estimate measured over a library rather than deciding it.
     /// </summary>
-    public static Dictionary<string, double> Learn(
-        IReadOnlyDictionary<string, double> before, IEnumerable<RepairTiming> timings)
+    public static GpuProfile Learn(GpuProfile before, IEnumerable<RepairTiming> timings)
     {
         ArgumentNullException.ThrowIfNull(before);
         ArgumentNullException.ThrowIfNull(timings);
 
-        var after = new Dictionary<string, double>(before, StringComparer.Ordinal);
+        var rates = new Dictionary<string, double>(before.RepairPagesPerMinute, StringComparer.Ordinal);
+        var pages = new Dictionary<string, double>(before.RepairPagesMeasured, StringComparer.Ordinal);
         foreach (var timing in timings.Where(t => t.Pages >= PagesToLearnFrom && t.Elapsed > TimeSpan.Zero))
         {
             var key = Key(timing.Kind, timing.Dpi);
-            after[key] = after.TryGetValue(key, out var earlier) ? (earlier + timing.PagesPerMinute) / 2 : timing.PagesPerMinute;
+            var (rate, measured) = MeasuredRate.Fold(
+                rates.TryGetValue(key, out var earlier) ? earlier : null,
+                pages.TryGetValue(key, out var behind) ? behind : null,
+                timing.PagesPerMinute,
+                timing.Pages);
+
+            rates[key] = rate;
+            pages[key] = measured;
         }
 
-        return after;
+        return before with { RepairPagesPerMinute = rates, RepairPagesMeasured = pages };
     }
 
     /// <summary>Keeps what a repair on this card measured, for the next estimate made on it.</summary>
@@ -119,7 +127,7 @@ public static class RepairThroughput
             || !timings.Any(t => t.Pages >= PagesToLearnFrom))
             return;
 
-        store.Update(gpu, p => p with { RepairPagesPerMinute = Learn(p.RepairPagesPerMinute, timings) });
+        store.Update(gpu, p => Learn(p, timings));
     }
 }
 

@@ -174,9 +174,10 @@ public sealed class GpuTuning
     /// Records what this run learned about the card and returns the profile as it now stands, or null
     /// with no card to file it under. A clean run that read fewer than
     /// <see cref="MeasuredThroughput.PagesToLearnFrom"/> pages has not met enough to vouch for a
-    /// setting. <paramref name="pagesPerMinute"/> is end to end, null for a run too short to say.
+    /// setting. <paramref name="measured"/> is end to end, over the pages this run recognised itself;
+    /// null for a run too short to say (<see cref="MeasuredRun.From"/>).
     /// </summary>
-    public GpuProfile? Remember(GpuProfileStore store, double? pagesPerMinute)
+    public GpuProfile? Remember(GpuProfileStore store, MeasuredRun? measured)
     {
         ArgumentNullException.ThrowIfNull(store);
         if (Gpu is null)
@@ -185,13 +186,16 @@ public sealed class GpuTuning
         return store.Update(Gpu, stored =>
         {
             var p = Forgiven(stored, Gpu)!;
-            var learned = p with
+
+            // Weighed against what was known by the pages behind each (#63), so one unusual run moves
+            // the estimate without setting it.
+            var learned = p;
+            if (measured is not null)
             {
-                // Averaged with the last, so one unusual library does not set every estimate after it.
-                RunPagesPerMinute = pagesPerMinute is not { } rate ? p.RunPagesPerMinute
-                    : p.RunPagesPerMinute is { } before ? (before + rate) / 2
-                    : rate,
-            };
+                var (rate, pages) = MeasuredRate.Fold(
+                    p.RunPagesPerMinute, p.RunPagesMeasured, measured.PagesPerMinute, measured.Pages);
+                learned = p with { RunPagesPerMinute = rate, RunPagesMeasured = pages };
+            }
 
             if (Tuner is not { Watched: true } tuner)
                 return learned;

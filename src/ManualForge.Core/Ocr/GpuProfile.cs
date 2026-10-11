@@ -37,10 +37,50 @@ public sealed record GpuProfile
     /// </summary>
     public double? RunPagesPerMinute { get; init; }
 
+    /// <summary>
+    /// How many pages <see cref="RunPagesPerMinute"/> stands for, up to
+    /// <see cref="MeasuredRate.MostPagesRemembered"/>: what it weighs against the next run's figure.
+    /// </summary>
+    public double? RunPagesMeasured { get; init; }
+
     /// <summary>Repair speed by page kind and resolution, keyed "Drawn/300" and the like.</summary>
     public Dictionary<string, double> RepairPagesPerMinute { get; init; } = [];
 
+    /// <summary>How many pages each repair speed stands for, as <see cref="RunPagesMeasured"/> does.</summary>
+    public Dictionary<string, double> RepairPagesMeasured { get; init; } = [];
+
     public DateTimeOffset? UpdatedUtc { get; init; }
+}
+
+/// <summary>
+/// How a speed just measured is folded into the one already known: each weighed by the pages behind
+/// it (#63). Both used to be averaged half and half, so a 181-page repair of one file moved a figure
+/// measured over 14,679 pages from 64 to 76 pages a minute, and a 992-page re-read served from the
+/// cache took the run speed from 164 to 5,017.
+/// </summary>
+public static class MeasuredRate
+{
+    /// <summary>
+    /// The most pages an earlier figure counts for. Without a cap, a figure measured on a whole
+    /// library could never be moved again, and a card's speed does change: a new engine, a new driver,
+    /// a fix. With it, a run of this size or more decides at least half of the new figure.
+    /// </summary>
+    public const double MostPagesRemembered = 5_000;
+
+    /// <summary>
+    /// The figure that results from <paramref name="pages"/> read at <paramref name="rate"/>, and the
+    /// pages it now stands for. A figure written before page counts were kept is taken to stand for
+    /// the cap: every one on record came from runs larger than that.
+    /// </summary>
+    public static (double Rate, double Pages) Fold(double? before, double? beforePages, double rate, double pages)
+    {
+        if (before is not { } earlier || earlier <= 0)
+            return (rate, Math.Min(pages, MostPagesRemembered));
+
+        var weight = Math.Min(beforePages ?? MostPagesRemembered, MostPagesRemembered);
+        var total = weight + pages;
+        return ((earlier * weight + rate * pages) / total, Math.Min(total, MostPagesRemembered));
+    }
 }
 
 /// <summary>
