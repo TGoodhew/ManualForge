@@ -182,20 +182,24 @@ end;
 procedure InstallRuntimes;
 var
   Code: Integer;
+  NeedDotNet, NeedAppRuntime: Boolean;
 begin
-  DownloadPage.Clear;
-  if not HasDotNet10 then
-    DownloadPage.Add('{#DotNetUrl}', 'windowsdesktop-runtime-{#DotNetVersion}-win-x64.exe', '{#DotNetSha256}');
-  if not HasWindowsAppRuntime18 then
-    DownloadPage.Add('{#AppRuntimeUrl}', 'WindowsAppRuntimeInstall-x64.exe', '{#AppRuntimeSha256}');
-  if DownloadPage.Count = 0 then
+  NeedDotNet := not HasDotNet10;
+  NeedAppRuntime := not HasWindowsAppRuntime18;
+  if not NeedDotNet and not NeedAppRuntime then
     Exit;
+
+  DownloadPage.Clear;
+  if NeedDotNet then
+    DownloadPage.Add('{#DotNetUrl}', 'windowsdesktop-runtime-{#DotNetVersion}-win-x64.exe', '{#DotNetSha256}');
+  if NeedAppRuntime then
+    DownloadPage.Add('{#AppRuntimeUrl}', 'WindowsAppRuntimeInstall-x64.exe', '{#AppRuntimeSha256}');
 
   DownloadPage.Show;
   try
     DownloadPage.Download;   { raises if a download fails or its SHA-256 differs }
 
-    if not HasDotNet10 then
+    if NeedDotNet then
     begin
       DownloadPage.SetText('Installing the .NET 10 Desktop Runtime...', 'Windows asks for permission: it is installed for every user of this PC.');
       if not ShellExec('runas', ExpandConstant('{tmp}\windowsdesktop-runtime-{#DotNetVersion}-win-x64.exe'),
@@ -204,7 +208,7 @@ begin
       RegWriteDWordValue(HKCU, StateKey, 'InstalledDotNet', 1);
     end;
 
-    if not HasWindowsAppRuntime18 then
+    if NeedAppRuntime then
     begin
       DownloadPage.SetText('Installing the Windows App Runtime 1.8...', '');
       if not Exec(ExpandConstant('{tmp}\WindowsAppRuntimeInstall-x64.exe'), '--quiet', '', SW_HIDE, ewWaitUntilTerminated, Code) or (Code <> 0) then
