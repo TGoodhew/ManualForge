@@ -123,8 +123,9 @@ if ($LASTEXITCODE -ne 0) { throw 'Inno Setup failed.' }
 $package = Get-ChildItem $out -Filter 'ManualForge-Setup-*.exe' | Sort-Object LastWriteTime -Descending | Select-Object -First 1
 Write-Host ("   {0}: {1:N0} MB" -f $package.Name, ($package.Length / 1MB))
 
-# A clean Windows to try it in, with Windows Sandbox enabled; the sandbox has no GPU, so this tests the
-# CPU path, the runtimes, the Start menu entry and uninstalling, and it is thrown away when closed.
+# A clean Windows to try it in, with Windows Sandbox enabled; the sandbox is given no GPU (vGPU off), so
+# this tests the CPU path, the runtimes, the Start menu entry and uninstalling, and it is thrown away
+# when closed.
 #   test-in-sandbox.wsb  runs installer\test-in-sandbox.ps1 at logon: installs silently, checks,
 #                        uninstalls, and writes what it found to sandbox-results (summary.txt last).
 #   try-in-sandbox.wsb   just opens C:\Installer, to click through the wizard by hand.
@@ -142,6 +143,7 @@ function Write-Sandbox([string] $name, [string] $extraFolders, [string] $command
       <ReadOnly>true</ReadOnly>
     </MappedFolder>$extraFolders
   </MappedFolders>
+  <vGPU>Disable</vGPU>
   <Networking>Enable</Networking>
   <LogonCommand>
     <Command>$command</Command>
