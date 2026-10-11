@@ -6,6 +6,7 @@
 ; SHA-256 pinned at build time:
 ;   * .NET 10 Desktop Runtime - machine-wide, the one administrator prompt, only when missing;
 ;   * Windows App Runtime 1.8 - only when missing;
+;   * Visual C++ Redistributable - machine-wide, only when missing or older than ONNX Runtime needs;
 ;   * NVIDIA's CUDA, cuDNN and TensorRT - by `manualforge setup gpu`, after NVIDIA's licences are accepted.
 ; Uninstalling takes away everything this put on the machine, and never touches the manual library.
 
@@ -85,6 +86,10 @@ const
   StateKey = 'Software\ManualForge';
   LibraryVariable = 'MANUALFORGE_LIBRARY';
   DotNetKey = 'SOFTWARE\dotnet\Setup\InstalledVersions\x64\sharedfx\Microsoft.WindowsDesktop.App';
+  VcRuntimeKey = 'SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64';
+  { ONNX Runtime is built with Visual Studio 17.10 or later, whose std::mutex crashes on a runtime
+    older than 14.40. }
+  VcRuntimeMinorNeeded = 40;
 
 var
   LibraryPage: TInputDirWizardPage;
@@ -109,6 +114,15 @@ begin
     for I := 0 to GetArrayLength(Names) - 1 do
       if Copy(Names[I], 1, 3) = '10.' then
         Result := True;
+end;
+
+function HasVcRuntime: Boolean;
+var
+  Installed, Major, Minor: Cardinal;
+begin
+  Result := RegQueryDWordValue(HKLM64, VcRuntimeKey, 'Installed', Installed) and (Installed = 1) and
+    RegQueryDWordValue(HKLM64, VcRuntimeKey, 'Major', Major) and (Major = 14) and
+    RegQueryDWordValue(HKLM64, VcRuntimeKey, 'Minor', Minor) and (Minor >= VcRuntimeMinorNeeded);
 end;
 
 function HasWindowsAppRuntime18: Boolean;
@@ -185,11 +199,13 @@ end;
 procedure InstallRuntimes;
 var
   Code: Integer;
-  NeedDotNet, NeedAppRuntime: Boolean;
+  NeedDotNet, NeedAppRuntime, NeedVcRuntime: Boolean;
 begin
   NeedDotNet := not HasDotNet10;
   NeedAppRuntime := not HasWindowsAppRuntime18;
-  if not NeedDotNet and not NeedAppRuntime then
+  NeedVcRuntime := not HasVcRuntime;
+  Log(Format('Runtimes missing: .NET 10 %d, Windows App Runtime 1.8 %d, Visual C++ %d', [Ord(NeedDotNet), Ord(NeedAppRuntime), Ord(NeedVcRuntime)]));
+  if not NeedDotNet and not NeedAppRuntime and not NeedVcRuntime then
     Exit;
 
   DownloadPage.Clear;
@@ -197,26 +213,44 @@ begin
     DownloadPage.Add('{#DotNetUrl}', 'windowsdesktop-runtime-{#DotNetVersion}-win-x64.exe', '{#DotNetSha256}');
   if NeedAppRuntime then
     DownloadPage.Add('{#AppRuntimeUrl}', 'WindowsAppRuntimeInstall-x64.exe', '{#AppRuntimeSha256}');
+  if NeedVcRuntime then
+    DownloadPage.Add('{#VcRedistUrl}', 'VC_redist.x64.exe', '{#VcRedistSha256}');
 
   DownloadPage.Show;
   try
     DownloadPage.Download;   { raises if a download fails or its SHA-256 differs }
 
+    if NeedVcRuntime then
+    begin
+      DownloadPage.SetText('Installing the Visual C++ Redistributable...', 'Windows asks for permission: it is installed for every user of this PC.');
+      Log('Installing the Visual C++ Redistributable {#VcRedistVersion}');
+      { 1638: a newer one is already there. }
+      if not ShellExec('runas', ExpandConstant('{tmp}\VC_redist.x64.exe'),
+        '/install /quiet /norestart', '', SW_SHOW, ewWaitUntilTerminated, Code) or ((Code <> 0) and (Code <> 3010) and (Code <> 1638)) then
+        RaiseException('The Visual C++ Redistributable did not install (code ' + IntToStr(Code) + ').');
+      Log('Visual C++ Redistributable: exit code ' + IntToStr(Code));
+      RegWriteDWordValue(HKCU, StateKey, 'InstalledVcRuntime', 1);
+    end;
+
     if NeedDotNet then
     begin
       DownloadPage.SetText('Installing the .NET 10 Desktop Runtime...', 'Windows asks for permission: it is installed for every user of this PC.');
+      Log('Installing the .NET 10 Desktop Runtime {#DotNetVersion}');
       if not ShellExec('runas', ExpandConstant('{tmp}\windowsdesktop-runtime-{#DotNetVersion}-win-x64.exe'),
         '/install /quiet /norestart', '', SW_SHOW, ewWaitUntilTerminated, Code) or ((Code <> 0) and (Code <> 3010)) then
         RaiseException('The .NET 10 Desktop Runtime did not install (code ' + IntToStr(Code) + ').');
+      Log('.NET 10 Desktop Runtime: exit code ' + IntToStr(Code));
       RegWriteDWordValue(HKCU, StateKey, 'InstalledDotNet', 1);
     end;
 
     if NeedAppRuntime then
     begin
       DownloadPage.SetText('Installing the Windows App Runtime 1.8...', '');
+      Log('Installing the Windows App Runtime 1.8');
       if not Exec(ExpandConstant('{tmp}\WindowsAppRuntimeInstall-x64.exe'), '--quiet', '', SW_HIDE, ewWaitUntilTerminated, Code) or (Code <> 0) then
         if not ShellExec('runas', ExpandConstant('{tmp}\WindowsAppRuntimeInstall-x64.exe'), '--quiet', '', SW_HIDE, ewWaitUntilTerminated, Code) or (Code <> 0) then
           RaiseException('The Windows App Runtime 1.8 did not install (code ' + IntToStr(Code) + ').');
+      Log('Windows App Runtime 1.8: exit code ' + IntToStr(Code));
       RegWriteDWordValue(HKCU, StateKey, 'InstalledWindowsAppRuntime', 1);
     end;
   finally
@@ -307,6 +341,7 @@ begin
     UninstallRuntimes := '';
     if Flag('InstalledDotNet') then UninstallRuntimes := UninstallRuntimes + #13#10 + '  .NET 10 Desktop Runtime';
     if Flag('InstalledWindowsAppRuntime') then UninstallRuntimes := UninstallRuntimes + #13#10 + '  Windows App Runtime 1.8';
+    if Flag('InstalledVcRuntime') then UninstallRuntimes := UninstallRuntimes + #13#10 + '  Microsoft Visual C++ Redistributable';
   end;
 
   if CurUninstallStep = usPostUninstall then

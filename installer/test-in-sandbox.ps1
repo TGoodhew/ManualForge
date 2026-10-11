@@ -71,6 +71,9 @@ try {
         "/LIBRARY=`"$library`"", "/LOG=`"$results\install.log`"")
     $minutes = ((Get-Date) - $started).TotalMinutes
     Check 'installer exit code 0' ($install.ExitCode -eq 0) ("code {0}, {1:N1} min" -f $install.ExitCode, $minutes)
+    # Setup succeeds whatever its [Run] steps return, so look at what they returned.
+    $runCodes = Select-String -Path "$results\install.log" -Pattern 'Process exit code: (\d+)' | ForEach-Object { [int] $_.Matches[0].Groups[1].Value }
+    Check "installer's own steps exit 0" (-not ($runCodes | Where-Object { $_ -ne 0 })) ("codes " + ($runCodes -join ', '))
 
     Write-Step 'What the installer put on the machine'
     Check 'manualforge.exe present' (Test-Path $cli)

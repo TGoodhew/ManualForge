@@ -7,10 +7,11 @@
     1. Publishes the command line, the MCP server and the desktop app into one folder, framework-
        dependent and without debug symbols. 296 MB, against the 896 MB of publishing them separately:
        the ONNX Runtime CUDA provider (178 MB) and SkiaSharp's symbols (85 MB) were each shipped twice.
-    2. Pins the two runtimes the installer chains in when a machine lacks them:
+    2. Pins the three runtimes the installer chains in when a machine lacks them:
          * .NET 10 Desktop Runtime, from Microsoft's release manifest, checked against its SHA-512;
-         * Windows App Runtime 1.8, resolved from Microsoft's "latest 1.8" link to the versioned
-           download behind it, checked for a valid Microsoft signature.
+         * Windows App Runtime 1.8 and the Visual C++ Redistributable (which ONNX Runtime needs),
+           each resolved from Microsoft's "latest" link to the versioned download behind it and
+           checked for a valid Microsoft signature.
        Each is downloaded here once, and its SHA-256 is written into the installer, which refuses a
        download that doesn't match.
     3. Compiles installer\ManualForge.iss with Inno Setup 6 into artifacts\installer.
@@ -80,24 +81,45 @@ if ($sha512 -ne $runtimeFile.hash.ToUpperInvariant()) { throw "$dotnet does not 
 $dotnetSha256 = (Get-FileHash $dotnet -Algorithm SHA256).Hash.ToLowerInvariant()
 Write-Host "   $($desktop.version), SHA-512 matches the manifest"
 
+# Where one of Microsoft's "latest" links points today: a versioned download, which is what gets pinned,
+# so an installer built now keeps fetching the build it was checked against.
+function Resolve-Latest([string] $url, [string] $expectedHost) {
+    $handler = [System.Net.Http.HttpClientHandler]::new(); $handler.AllowAutoRedirect = $false
+    $client = [System.Net.Http.HttpClient]::new($handler)
+    try {
+        while ($url -match '^https://aka\.ms/') {
+            $request = [System.Net.Http.HttpRequestMessage]::new([System.Net.Http.HttpMethod]::Head, $url)
+            $url = $client.SendAsync($request).GetAwaiter().GetResult().Headers.Location.AbsoluteUri
+        }
+    }
+    finally { $client.Dispose() }
+    if (-not $url -or $url -notmatch "^https://$([regex]::Escape($expectedHost))/") { throw "The link did not lead to $($expectedHost): $url" }
+    return $url
+}
+
+function Assert-SignedByMicrosoft([string] $path) {
+    $signature = Get-AuthenticodeSignature $path
+    if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'O=Microsoft Corporation') {
+        throw "$path is not validly signed by Microsoft ($($signature.Status))."
+    }
+}
+
 Write-Step 'Windows App Runtime 1.8'
-# Where Microsoft's "latest 1.8" link points today: a versioned download, which is what gets pinned, so
-# an installer built now keeps fetching the build it was checked against.
-$handler = [System.Net.Http.HttpClientHandler]::new(); $handler.AllowAutoRedirect = $false
-$client = [System.Net.Http.HttpClient]::new($handler)
-try {
-    $request = [System.Net.Http.HttpRequestMessage]::new([System.Net.Http.HttpMethod]::Head, 'https://aka.ms/windowsappsdk/1.8/latest/windowsappruntimeinstall-x64.exe')
-    $runtimeUrl = $client.SendAsync($request).GetAwaiter().GetResult().Headers.Location.AbsoluteUri
-}
-finally { $client.Dispose() }
-if (-not $runtimeUrl -or $runtimeUrl -notmatch '^https://download\.microsoft\.com/') { throw "The Windows App Runtime link did not lead to download.microsoft.com: $runtimeUrl" }
+$runtimeUrl = Resolve-Latest 'https://aka.ms/windowsappsdk/1.8/latest/windowsappruntimeinstall-x64.exe' 'download.microsoft.com'
 $appRuntime = Get-Pinned $runtimeUrl ('WindowsAppRuntimeInstall-x64-' + ($runtimeUrl -split '/')[-2] + '.exe')
-$signature = Get-AuthenticodeSignature $appRuntime
-if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'O=Microsoft Corporation') {
-    throw "$appRuntime is not validly signed by Microsoft ($($signature.Status))."
-}
+Assert-SignedByMicrosoft $appRuntime
 $appRuntimeSha256 = (Get-FileHash $appRuntime -Algorithm SHA256).Hash.ToLowerInvariant()
 Write-Host "   $((Get-Item $appRuntime).VersionInfo.ProductVersion), signed by Microsoft"
+
+Write-Step 'Visual C++ Redistributable'
+# ONNX Runtime imports MSVCP140, MSVCP140_1, VCRUNTIME140 and VCRUNTIME140_1, which a clean Windows does
+# not have: without them nothing can be read, on the CPU or the GPU (found in Windows Sandbox).
+$vcUrl = Resolve-Latest 'https://aka.ms/vc14/vc_redist.x64.exe' 'download.visualstudio.microsoft.com'
+$vcRedist = Get-Pinned $vcUrl ('VC_redist.x64-' + ($vcUrl -split '/')[-2].Substring(0, 12) + '.exe')
+Assert-SignedByMicrosoft $vcRedist
+$vcSha256 = (Get-FileHash $vcRedist -Algorithm SHA256).Hash.ToLowerInvariant()
+$vcVersion = (Get-Item $vcRedist).VersionInfo.ProductVersion
+Write-Host "   $vcVersion, signed by Microsoft"
 
 # ---------------------------------------------------------------- 3. the package
 
@@ -115,6 +137,9 @@ $defines = @{
     DotNetVersion     = $desktop.version
     AppRuntimeUrl     = $runtimeUrl
     AppRuntimeSha256  = $appRuntimeSha256
+    VcRedistUrl       = $vcUrl
+    VcRedistSha256    = $vcSha256
+    VcRedistVersion   = $vcVersion
 }
 $arguments = @($defines.GetEnumerator() | ForEach-Object { "/D$($_.Key)=$($_.Value)" }) + (Join-Path $repo 'installer\ManualForge.iss')
 & $Iscc /Q @arguments
