@@ -5,7 +5,9 @@ namespace ManualForge.Core.Ocr;
 /// <summary>Which ONNX Runtime execution provider to try. Mirrors PaddleOcrNet's own enum.</summary>
 public enum OcrAccelerator
 {
-    /// <summary>Let the library pick: CUDA if usable, else DirectML, else CPU.</summary>
+    /// <summary>
+    /// TensorRT if it is installed, then CUDA, then whatever the library finds: DirectML, else CPU.
+    /// </summary>
     Auto,
 
     /// <summary>
@@ -19,6 +21,16 @@ public enum OcrAccelerator
 
     /// <summary>CPU only.</summary>
     Cpu,
+
+    /// <summary>
+    /// NVIDIA TensorRT on top of CUDA: nearly twice CUDA's speed here, because CUDA plans every
+    /// convolution again for each new input shape and OCR changes shape on nearly every call. Needs
+    /// everything CUDA does plus TensorRT 10 for CUDA 13; without it, runs on CUDA. Reads about 1% of
+    /// words differently from CUDA - near ties, at the same accuracy - so the page cache keeps the two
+    /// apart. See <see cref="OcrEngineOptions.TensorRtModels"/>. Issues #34, #53;
+    /// docs/measurements/tensorrt.md.
+    /// </summary>
+    TensorRt,
 }
 
 public sealed class OcrEngineOptions
@@ -30,6 +42,20 @@ public sealed class OcrEngineOptions
     public OcrAccelerator Accelerator { get; init; } = OcrAccelerator.Auto;
 
     public int DeviceId { get; init; } = 0;
+
+    /// <summary>
+    /// Which models run on TensorRT when it is in use; the rest run on CUDA. The classifier and the
+    /// recogniser by default, with the detector left on CUDA.
+    ///
+    /// <para>
+    /// The detector moves its output furthest from CUDA's, because a slightly different box is a
+    /// differently cropped line. On the 280 test pages, 3 at once, an RTX 5070 Ti read 78.4 pages a
+    /// minute on CUDA, 151.4 with the detector on CUDA and 165.0 with all three on TensorRT; on 100
+    /// typical pages those changed 1.0% and 2.3% of words, at the same accuracy against Acrobat. Most
+    /// of the speed for under half the change. Issue #53; docs/measurements/tensorrt.md.
+    /// </para>
+    /// </summary>
+    public TensorRtModels TensorRtModels { get; init; } = TensorRtModels.Classifier | TensorRtModels.Recognizer;
 
     /// <summary>
     /// How many line crops the recogniser reads in one pass. Fixed at 8, not sized from VRAM.
@@ -160,11 +186,17 @@ public sealed class OcrEngineOptions
     /// </summary>
     public int? CpuThreads { get; init; }
 
-    internal OcrExecutionProvider ToExecutionProvider() => Accelerator switch
+    /// <summary>
+    /// The provider to ask PaddleOcrNet for. <see cref="OcrAccelerator.Auto"/> takes TensorRT when it
+    /// was found, because PaddleOcrNet's own Auto never will; asking for CUDA by name stays on CUDA.
+    /// </summary>
+    internal OcrExecutionProvider ToExecutionProvider(bool tensorRtInstalled = false) => Accelerator switch
     {
+        OcrAccelerator.TensorRt => OcrExecutionProvider.TensorRt,
         OcrAccelerator.Cuda => OcrExecutionProvider.Cuda,
         OcrAccelerator.DirectMl => OcrExecutionProvider.DirectMl,
         OcrAccelerator.Cpu => OcrExecutionProvider.Cpu,
+        _ when tensorRtInstalled => OcrExecutionProvider.TensorRt,
         _ => OcrExecutionProvider.Auto,
     };
 }

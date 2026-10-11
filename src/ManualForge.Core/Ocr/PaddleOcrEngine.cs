@@ -48,16 +48,18 @@ public sealed class PaddleOcrEngine : IOcrEngine
 
         // Before the service is constructed, because constructing it is what loads the CUDA
         // provider, and a DLL the loader has already failed to find is not looked for again.
-        var cudaLibraries = options.Accelerator == OcrAccelerator.Cpu
+        var libraries = options.Accelerator == OcrAccelerator.Cpu
             ? null
-            : CudaLibraries.Ensure(_logger).Describe();
+            : CudaLibraries.Ensure(_logger);
+        var cudaLibraries = libraries?.Describe();
 
         var serviceOptions = new PaddleOcrServiceOptions
         {
             ModelCachePath = options.ModelCachePath,
-            ExecutionProvider = options.ToExecutionProvider(),
+            ExecutionProvider = options.ToExecutionProvider(tensorRtInstalled: libraries?.HasTensorRt == true),
             UseGpu = options.Accelerator != OcrAccelerator.Cpu,
             DeviceId = options.DeviceId,
+            TensorRt = new TensorRtOptions { Models = options.TensorRtModels },
             Download = new ModelDownloadOptions { Offline = options.OfflineModels },
             IntraOpNumThreads = options.CpuThreads,
             InterOpNumThreads = options.CpuThreads is null ? null : 1,
@@ -120,7 +122,12 @@ public sealed class PaddleOcrEngine : IOcrEngine
             $"server={options.UseServerModels};deskew={options.Deskew};denoise={options.Denoise};" +
             $"drop={options.DropScore};orientation={(options.VerifyPageOrientation ? "verified" : "trusted")};" +
             $"orphans={(options.RescueOrphanGlyphs ? $"rescued@{options.OrphanConfidence}" : "left")};" +
-            $"stacks={(options.SplitTallStacks ? "split" : "left")}");
+            $"stacks={(options.SplitTallStacks ? "split" : "left")}" +
+            // TensorRT reads about 0.6% of words differently from CUDA (#34), so its pages must not be
+            // taken for CUDA's. Added only when it is in use, so every page CUDA cached keeps its key.
+            (_service.ActiveExecutionProvider != OcrExecutionProvider.TensorRt || options.TensorRtModels == TensorRtModels.None
+                ? ""
+                : $";engine=tensorrt({TensorRtModelNames(options.TensorRtModels)})"));
 
         _logger.LogInformation(
             "OCR engine ready: provider {Provider}, GPU {UsingGpu}, models in {ModelCache}",
@@ -128,6 +135,12 @@ public sealed class PaddleOcrEngine : IOcrEngine
     }
 
     public OcrRuntimeSummary Runtime { get; }
+
+    /// <summary>The models on TensorRT, as the page cache records them: <c>cls+rec</c>, <c>det+cls+rec</c>.</summary>
+    internal static string TensorRtModelNames(TensorRtModels models) => string.Join('+',
+        new[] { (TensorRtModels.Detector, "det"), (TensorRtModels.Classifier, "cls"), (TensorRtModels.Recognizer, "rec") }
+            .Where(m => models.HasFlag(m.Item1))
+            .Select(m => m.Item2));
 
     public async Task<RecognisedPage> RecognisePageAsync(
         byte[] imageBytes,

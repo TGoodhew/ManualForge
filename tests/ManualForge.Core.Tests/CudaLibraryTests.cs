@@ -325,6 +325,106 @@ public class CudaLibraryTests
         }
     }
 
+    private const string TensorRtBin = "C:\\Tools\\tensorrt-10.16.1.11\\bin";
+
+    private static CudaSearch WithTensorRt(FakeTree tree, IEnumerable<string>? path = null) =>
+        Search(tree, path) with { TensorRtRoots = ["C:\\Tools"] };
+
+    [Fact]
+    public void TensorRtIsFoundBesideCudnnInTools()
+    {
+        // Where tools/setup-cuda.ps1 puts it (#53): its own folder in C:\Tools, DLLs in bin.
+        var tree = CompleteInstall().Add(TensorRtBin, "nvinfer_10.dll", "nvonnxparser_10.dll", "nvinfer_plugin_10.dll");
+
+        var location = CudaLibraries.Locate(WithTensorRt(tree));
+
+        Assert.True(location.Complete);
+        Assert.True(location.HasTensorRt);
+        Assert.Equal(TensorRtBin, location.TensorRtDirectory);
+        Assert.Contains("TensorRT at " + TensorRtBin, location.Describe());
+    }
+
+    [Fact]
+    public void ACoreLibraryWithoutTheOnnxParserIsNotTensorRt()
+    {
+        // ONNX Runtime's TensorRT provider imports both; half an install fails to attach exactly as
+        // no install does, so it must not be offered.
+        var tree = CompleteInstall().Add(TensorRtBin, "nvinfer_10.dll");
+
+        var location = CudaLibraries.Locate(WithTensorRt(tree));
+
+        Assert.False(location.HasTensorRt);
+        Assert.True(location.Complete);
+    }
+
+    [Fact]
+    public void NoTensorRtLeavesCudaCompleteAndSaysSo()
+    {
+        // Optional: its absence costs speed, never the GPU.
+        var location = CudaLibraries.Locate(WithTensorRt(CompleteInstall()));
+
+        Assert.True(location.Complete);
+        Assert.False(location.HasTensorRt);
+        Assert.EndsWith("no TensorRT (plain CUDA)", location.Describe());
+    }
+
+    [Fact]
+    public void TensorRtIsLookedForEvenWhenCudaIsAlreadyOnPath()
+    {
+        // A machine set up by hand has CUDA on PATH and TensorRT wherever it was unzipped; the early
+        // answer for CUDA must not end the search for TensorRT.
+        var tree = CompleteInstall().Add(TensorRtBin, "nvinfer_10.dll", "nvonnxparser_10.dll");
+        var path = new[]
+        {
+            "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v13.4\\bin\\x64",
+            "C:\\Tools\\cudnn-9.26.0.51\\cudnn-windows-x86_64-9.26.0.51_cuda13-archive\\bin\\x64",
+        };
+
+        var location = CudaLibraries.Locate(WithTensorRt(tree, path));
+
+        Assert.True(location.AlreadyOnPath);
+        Assert.Equal(TensorRtBin, location.TensorRtDirectory);
+        Assert.True(location.HasTensorRt);
+    }
+
+    [Fact]
+    public void TensorRtAlreadyOnPathIsNotSearchedFor()
+    {
+        var tree = CompleteInstall().Add(TensorRtBin, "nvinfer_10.dll", "nvonnxparser_10.dll");
+
+        var location = CudaLibraries.Locate(WithTensorRt(tree, [TensorRtBin]));
+
+        Assert.True(location.TensorRtOnPath);
+        Assert.Null(location.TensorRtDirectory);
+        Assert.True(location.HasTensorRt);
+    }
+
+    [Fact]
+    public void TensorRtWithoutCudaIsNoUse()
+    {
+        // It runs on CUDA; found on its own it changes nothing.
+        var tree = new FakeTree().Add(TensorRtBin, "nvinfer_10.dll", "nvonnxparser_10.dll");
+
+        var location = CudaLibraries.Locate(WithTensorRt(tree));
+
+        Assert.False(location.Complete);
+        Assert.False(location.HasTensorRt);
+    }
+
+    [Theory]
+    [InlineData(OcrAccelerator.Auto, true, PaddleOcrNet.Services.OcrExecutionProvider.TensorRt)]
+    [InlineData(OcrAccelerator.Auto, false, PaddleOcrNet.Services.OcrExecutionProvider.Auto)]
+    [InlineData(OcrAccelerator.Cuda, true, PaddleOcrNet.Services.OcrExecutionProvider.Cuda)]
+    [InlineData(OcrAccelerator.TensorRt, false, PaddleOcrNet.Services.OcrExecutionProvider.TensorRt)]
+    [InlineData(OcrAccelerator.Cpu, true, PaddleOcrNet.Services.OcrExecutionProvider.Cpu)]
+    public void AutoTakesTensorRtWhenItIsThereAndCudaByNameStaysCuda(
+        OcrAccelerator requested, bool installed, PaddleOcrNet.Services.OcrExecutionProvider expected)
+    {
+        // PaddleOcrNet's own Auto never picks TensorRT, so ours has to. Asking for CUDA by name is the
+        // way to keep CUDA's exact readings when TensorRT is installed.
+        Assert.Equal(expected, new OcrEngineOptions { Accelerator = requested }.ToExecutionProvider(installed));
+    }
+
     [Fact]
     public void EnsureIsSafeOnAMachineWithNoCudaAtAll()
     {

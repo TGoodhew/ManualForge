@@ -93,13 +93,25 @@ foreach (var config in configs)
         // and split off (engine-off), rescue without split (engine-rescue), or with the old deskew
         // default back on (engine-deskew). Before 28 Sep deskew was on in all of these.
         // ENGINE_LOG=<path> writes the engine's debug log there, each page headed by a PAGE line.
+        // ENGINE_ACCELERATOR=tensorrt measures TensorRT (#53); the default stays CUDA, which every
+        // baseline before it was measured on.
+        var accelerator = Environment.GetEnvironmentVariable("ENGINE_ACCELERATOR")?.ToLowerInvariant() switch
+        {
+            "tensorrt" => OcrAccelerator.TensorRt,
+            _ => OcrAccelerator.Cuda,
+        };
         Serilog.ILogger? serilog = Environment.GetEnvironmentVariable("ENGINE_LOG") is { } logPath
             ? Serilog.FileLoggerConfigurationExtensions.File(new Serilog.LoggerConfiguration().MinimumLevel.Debug().WriteTo, logPath).CreateLogger()
             : null;
         using var logFactory = serilog is null ? null : new Serilog.Extensions.Logging.SerilogLoggerFactory(serilog);
         await using var engine = new PaddleOcrEngine(new OcrEngineOptions
         {
-            Accelerator = OcrAccelerator.Cuda, OfflineModels = true,
+            Accelerator = accelerator, OfflineModels = true,
+            // ENGINE_TENSORRT_MODELS=All (or Detector,Classifier,Recognizer) overrides the engine's
+            // default, which leaves the detector on CUDA.
+            TensorRtModels = Environment.GetEnvironmentVariable("ENGINE_TENSORRT_MODELS") is { Length: > 0 } models
+                ? Enum.Parse<PaddleOcrNet.Services.TensorRtModels>(models, ignoreCase: true)
+                : new OcrEngineOptions().TensorRtModels,
             RescueOrphanGlyphs = config != "engine-off", SplitTallStacks = config is not ("engine-off" or "engine-rescue"),
             Deskew = config == "engine-deskew",
             Denoise = config != "engine-nodenoise",

@@ -62,11 +62,36 @@ internal sealed class CommandLine
 
     public OcrAccelerator Accelerator() => Get("engine")?.ToLowerInvariant() switch
     {
+        "tensorrt" or "trt" => OcrAccelerator.TensorRt,
         "cuda" => OcrAccelerator.Cuda,
         "directml" or "dml" => OcrAccelerator.DirectMl,
         "cpu" => OcrAccelerator.Cpu,
         _ => OcrAccelerator.Auto,
     };
+
+    /// <summary>
+    /// <c>--tensorrt-models rec,cls,det</c>: which models TensorRT runs; the rest run on CUDA.
+    /// Absent, the engine's default (<see cref="OcrEngineOptions.TensorRtModels"/>).
+    /// </summary>
+    public PaddleOcrNet.Services.TensorRtModels TensorRtModels()
+    {
+        if (Get("tensorrt-models") is not { Length: > 0 } list)
+            return new OcrEngineOptions().TensorRtModels;
+
+        var models = PaddleOcrNet.Services.TensorRtModels.None;
+        foreach (var name in list.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            models |= name.ToLowerInvariant() switch
+            {
+                "det" or "detector" => PaddleOcrNet.Services.TensorRtModels.Detector,
+                "cls" or "classifier" => PaddleOcrNet.Services.TensorRtModels.Classifier,
+                "rec" or "recognizer" or "recogniser" => PaddleOcrNet.Services.TensorRtModels.Recognizer,
+                _ => throw new ArgumentException($"--tensorrt-models: '{name}' is not det, cls or rec."),
+            };
+        }
+
+        return models;
+    }
 
     /// <summary>Parses <c>--pages 1,4,7-9</c> into an explicit list of page numbers.</summary>
     public IReadOnlyList<int> PageRange()
@@ -123,7 +148,11 @@ internal sealed class CommandLine
               --out <path>            Output file. Default: <input>.searchable.pdf next to the source.
               --dpi <n>               Rasterisation resolution. Default 300.
               --pages <spec>          Pages to process, e.g. 1,4,7-9. Default: all.
-              --engine <name>         auto | cuda | directml | cpu. Default auto.
+              --engine <name>         auto | tensorrt | cuda | directml | cpu. Default auto, which
+                                      uses TensorRT when it is installed and CUDA otherwise.
+              --tensorrt-models <list> Which models TensorRT runs: any of det, cls, rec. Default
+                                      cls,rec; the rest run on CUDA. Adding det is about 9%
+                                      faster and reads about twice as many words differently.
               --batch <n>             Recognition batch size. Default 8.
               --min-confidence <x>    Drop words below this score when WRITING the text layer.
                                       Default 0.30. It does not change what the recogniser
