@@ -14,7 +14,7 @@
            checked for a valid Microsoft signature.
        Each is downloaded here once, and its SHA-256 is written into the installer, which refuses a
        download that doesn't match.
-    3. Compiles installer\ManualForge.iss with Inno Setup 6 into artifacts\installer.
+    3. Compiles installer\ManualForge.iss with Inno Setup 6 into artifacts\installer\package.
 
     Nothing NVIDIA publishes is in the package: the installer runs `manualforge setup gpu`, which
     fetches it from NVIDIA (docs/measurements/installer-gpu-libraries.md).
@@ -35,7 +35,8 @@ $repo = Split-Path $PSScriptRoot -Parent
 $out = Join-Path $repo 'artifacts\installer'
 $stage = Join-Path $out 'stage'
 $cache = Join-Path $out 'cache'
-New-Item -ItemType Directory -Force $out, $cache | Out-Null
+$packageDir = Join-Path $out 'package'
+New-Item -ItemType Directory -Force $out, $cache, $packageDir | Out-Null
 
 function Write-Step([string] $text) { Write-Host ''; Write-Host "== $text" -ForegroundColor Cyan }
 
@@ -130,7 +131,7 @@ Write-Step 'Compiling the installer'
 $defines = @{
     AppVersion        = $version
     StageDir          = $stage
-    OutputDir         = $out
+    OutputDir         = $packageDir
     RepoDir           = $repo
     DotNetUrl         = $runtimeFile.url
     DotNetSha256      = $dotnetSha256
@@ -145,25 +146,32 @@ $arguments = @($defines.GetEnumerator() | ForEach-Object { "/D$($_.Key)=$($_.Val
 & $Iscc /Q @arguments
 if ($LASTEXITCODE -ne 0) { throw 'Inno Setup failed.' }
 
-$package = Get-ChildItem $out -Filter 'ManualForge-Setup-*.exe' | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+$package = Get-ChildItem $packageDir -Filter 'ManualForge-Setup-*.exe' | Sort-Object LastWriteTime -Descending | Select-Object -First 1
 Write-Host ("   {0}: {1:N0} MB" -f $package.Name, ($package.Length / 1MB))
 
 # A clean Windows to try it in, with Windows Sandbox enabled; the sandbox is given no GPU (vGPU off), so
 # this tests the CPU path, the runtimes, the Start menu entry and uninstalling, and it is thrown away
-# when closed.
+# when closed. In sandbox\:
 #   test-in-sandbox.wsb  runs installer\test-in-sandbox.ps1 at logon: installs silently, checks,
-#                        uninstalls, and writes what it found to sandbox-results (summary.txt last).
+#                        uninstalls, and writes what it found to results\ (summary.txt last).
 #   try-in-sandbox.wsb   just opens C:\Installer, to click through the wizard by hand.
-# A sample.pdf put beside the installer is OCR'd on the CPU by the unattended test.
-$results = Join-Path $out 'sandbox-results'
-New-Item -ItemType Directory -Force $results | Out-Null
+#   kit\                 what the sandbox sees as C:\Installer: the package and the test script. A
+#                        sample.pdf put here is OCR'd on the CPU by the test, and kept across builds.
+# Only kit\ and results\ are mapped, never this folder: once a sandbox has mapped a folder, Windows
+# keeps it shared after the sandbox closes, and Inno Setup can no longer write a package into it.
+$sandboxDir = Join-Path $out 'sandbox'
+$kit = Join-Path $sandboxDir 'kit'
+$results = Join-Path $sandboxDir 'results'
+New-Item -ItemType Directory -Force $kit, $results | Out-Null
+Get-ChildItem $kit -Filter 'ManualForge-Setup-*.exe' | Remove-Item -Force
+Copy-Item -LiteralPath $package.FullName, (Join-Path $repo 'installer\test-in-sandbox.ps1') -Destination $kit
 function Write-Sandbox([string] $name, [string] $extraFolders, [string] $command) {
-    $path = Join-Path $out $name
+    $path = Join-Path $sandboxDir $name
     @"
 <Configuration>
   <MappedFolders>
     <MappedFolder>
-      <HostFolder>$out</HostFolder>
+      <HostFolder>$kit</HostFolder>
       <SandboxFolder>C:\Installer</SandboxFolder>
       <ReadOnly>true</ReadOnly>
     </MappedFolder>$extraFolders
@@ -180,14 +188,9 @@ function Write-Sandbox([string] $name, [string] $extraFolders, [string] $command
 Write-Sandbox 'test-in-sandbox.wsb' @"
 
     <MappedFolder>
-      <HostFolder>$(Join-Path $repo 'installer')</HostFolder>
-      <SandboxFolder>C:\Test</SandboxFolder>
-      <ReadOnly>true</ReadOnly>
-    </MappedFolder>
-    <MappedFolder>
       <HostFolder>$results</HostFolder>
       <SandboxFolder>C:\Results</SandboxFolder>
       <ReadOnly>false</ReadOnly>
     </MappedFolder>
-"@ 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Test\test-in-sandbox.ps1'
+"@ 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Installer\test-in-sandbox.ps1'
 Write-Sandbox 'try-in-sandbox.wsb' '' 'explorer.exe C:\Installer'
