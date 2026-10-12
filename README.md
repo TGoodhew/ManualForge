@@ -97,8 +97,8 @@ then **Run anyway**. The release page gives the installer's SHA-256, if you want
 The installer asks for:
 
 1. **Your library folder:** the folder of PDF manuals that Claude and other AI apps search through
-   ManualForge. It is also set as the `MANUALFORGE_LIBRARY` variable, unless that is already set. The
-   desktop app and the command line are given a folder each time instead.
+   ManualForge. It is also set as the `MANUALFORGE_LIBRARY` variable, unless that is already set, and
+   the desktop app opens on it. The command line is given a folder each time.
 2. **What to set up:**
    - **NVIDIA's libraries for the GPU:** CUDA and cuDNN (about 1.7 GB), and optionally TensorRT
      (another 1.9 GB, which reads about twice as fast). These are offered only on a PC with an NVIDIA
@@ -341,17 +341,20 @@ could not search, for example because there is no index.
 
 ### The desktop app
 
-Start **ManualForge** from the Start menu, or give it a library folder from a terminal:
+Start **ManualForge** from the Start menu. It opens on the folder it was last closed on, or the
+first time, on the library the installer recorded. To open it on another folder from a terminal:
 
 ```powershell
-& "$env:LOCALAPPDATA\Programs\ManualForge\ManualForge.App.exe" [D:\Manuals]
+& "$env:LOCALAPPDATA\Programs\ManualForge\ManualForge.App.exe" D:\Manuals
 ```
 
-A build from source puts the app in `app\ManualForge.App.exe` instead.
+A build from source puts the app in `app\ManualForge.App.exe` instead. The bottom of the window says
+which version is running.
 
 The app does the same work with live progress:
 - survey a library, adjust what will be done per class, and run it, with throughput, GPU use and
-  problems shown as they happen, and a report to export
+  problems shown as they happen, and a report to export. The survey's table says, for each class,
+  how many files are already done; a run leaves those alone
 - in the Doctor tab, review what the audit found, see the picture the detector worked from for any
   page, and repair the documents you tick
 - in the Search tab, build or update the index and search it

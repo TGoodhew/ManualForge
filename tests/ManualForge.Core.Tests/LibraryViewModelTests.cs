@@ -114,6 +114,25 @@ public class LibraryViewModelTests
         Assert.Equal($"ManualForge {ManualForge.Core.Diagnostics.BuildStamp.Version}", model.Version);
     }
 
+    [Fact]
+    public void AClassWhoseFilesAreFinishedSaysSo()
+    {
+        // A finished library still lists its ImageOnly files with Ocr beside them, because the class is
+        // what a file was when first classified. Without the Done column that read as work not done.
+        var rows = ClassSummaryRow.From(
+        [
+            Record(@"C:\Manuals\a.pdf", TextClass.ImageOnly, 10, FileStatus.Completed),
+            Record(@"C:\Manuals\b.pdf", TextClass.ImageOnly, 20, FileStatus.Completed),
+            Record(@"C:\Manuals\c.pdf", TextClass.ImageOnly, 30),
+            Record(@"C:\Manuals\d.pdf", TextClass.GoodText, 100, FileStatus.Skipped, ClassAction.Skip),
+        ], new ClassificationPolicy());
+
+        var imageOnly = Assert.Single(rows, r => r.TextClass == TextClass.ImageOnly);
+        Assert.Equal(2, imageOnly.Completed);
+        Assert.Equal("2 of 3", imageOnly.Done);
+        Assert.Equal(string.Empty, Assert.Single(rows, r => r.TextClass == TextClass.GoodText).Done);
+    }
+
     // ---------------------------------------------------------------- survey before committing
 
     [Fact]
@@ -153,6 +172,48 @@ public class LibraryViewModelTests
 
         Assert.Equal(130, model.PagesTotal);
         Assert.Equal(3, model.FilesTotal);
+    }
+
+    [Fact]
+    public void TheTablesDropDownSettingNothingLeavesTheActionAlone()
+    {
+        // WinUI sets a drop-down's selection to nothing while it fills a row. Bound straight to the
+        // enum, that crashed the app after a survey (12 October 2026).
+        var row = new ClassSummaryRow(TextClass.ImageOnly, 166, 22_907, ClassAction.Ocr);
+        var changed = new List<string?>();
+        row.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+
+        row.SelectedAction = null;
+        Assert.Equal(ClassAction.Ocr, row.Action);
+        Assert.Empty(changed);
+
+        row.SelectedAction = ClassAction.Skip;
+        Assert.Equal(ClassAction.Skip, row.Action);
+        Assert.Equal(ClassAction.Skip, row.SelectedAction);
+        Assert.Contains(nameof(ClassSummaryRow.SelectedAction), changed);
+    }
+
+    [Fact]
+    public async Task AFileThatCannotBeOpenedIsNamedRatherThanLeftAsOneShort()
+    {
+        // LeCroy-5674 service.pdf: a download that never finished, skipped because it cannot be
+        // opened. It showed only as "165 of 166" in the Done column, with no reason anywhere.
+        var (model, service) = New();
+        service.SurveyResult.AddRange(
+        [
+            Record(@"C:\Manuals\a.pdf", TextClass.ImageOnly, 10, FileStatus.Completed),
+            Record(@"C:\Manuals\LeCroy-5674 service.pdf", TextClass.ImageOnly, 1, FileStatus.Skipped, ClassAction.Skip)
+                with { Blocker = ModificationBlocker.Corrupt },
+            Record(@"C:\Manuals\note.pdf", TextClass.GoodText, 4, FileStatus.Skipped, ClassAction.Skip)
+                with { Blocker = ModificationBlocker.Unknown },
+        ]);
+
+        await model.SurveyCommand.ExecuteAsync(null);
+
+        Assert.Contains("LeCroy-5674 service.pdf cannot be opened", model.Status, StringComparison.Ordinal);
+        var problem = Assert.Single(model.Errors);
+        Assert.Contains("damaged", problem, StringComparison.Ordinal);
+        Assert.Equal("1 of 2", model.Summary.Single(r => r.TextClass == TextClass.ImageOnly).Done);
     }
 
     [Fact]

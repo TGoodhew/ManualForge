@@ -87,8 +87,13 @@ public partial class App : Application
         Doctor = new DoctorViewModel(new DoctorService(_log.Factory), dispatcher);
 
         // A folder given on the command line, so the application can be started on one and so this
-        // window can be driven by something other than a person with a mouse.
-        var folder = Environment.GetCommandLineArgs().Skip(1).FirstOrDefault(Directory.Exists);
+        // window can be driven by something other than a person with a mouse; else the folder it was
+        // last closed on; else the library the installer recorded.
+        var settings = AppSettings.Load(AppSettings.DefaultPath);
+        var folder = StartFolder.Choose(
+            Environment.GetCommandLineArgs().Skip(1),
+            settings.LastFolder,
+            Environment.GetEnvironmentVariable("MANUALFORGE_LIBRARY"));
         if (folder is not null)
             Library.Folder = folder;
 
@@ -101,6 +106,11 @@ public partial class App : Application
 
         Window.Closed += async (_, _) =>
         {
+            // Remembered on closing rather than as it changes: the folder box changes with every
+            // keystroke, and only the folder the window ends on is the one to open next time.
+            if (Library.Folder is { Length: > 0 } last && Directory.Exists(last))
+                new AppSettings(last).Save(AppSettings.DefaultPath);
+
             if (_service is not null)
                 await _service.DisposeAsync();
             _log?.Dispose();

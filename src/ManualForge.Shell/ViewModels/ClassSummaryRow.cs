@@ -10,7 +10,7 @@ namespace ManualForge.Shell.ViewModels;
 /// The action is editable, because the specification asks to choose per class whether to OCR, skip
 /// or strip-and-redo, and because the numbers beside it are what should inform that choice.
 /// </summary>
-public sealed partial class ClassSummaryRow(TextClass textClass, int files, long pages, ClassAction action)
+public sealed partial class ClassSummaryRow(TextClass textClass, int files, long pages, ClassAction action, int completed = 0)
     : CommunityToolkit.Mvvm.ComponentModel.ObservableObject
 {
     public TextClass TextClass { get; } = textClass;
@@ -19,12 +19,42 @@ public sealed partial class ClassSummaryRow(TextClass textClass, int files, long
 
     public long Pages { get; } = pages;
 
+    /// <summary>Files of this class already finished, which a run leaves alone.</summary>
+    public int Completed { get; } = completed;
+
+    /// <summary>
+    /// The Done column. The class is what a file was when first classified, so a finished library still
+    /// lists 166 ImageOnly files with Ocr beside them, which read as 166 files not yet OCR'd.
+    /// </summary>
+    public string Done => Completed == 0 ? string.Empty : $"{Completed:N0} of {Files:N0}";
+
     private ClassAction _action = action;
 
     public ClassAction Action
     {
         get => _action;
-        set => SetProperty(ref _action, value);
+        set
+        {
+            if (SetProperty(ref _action, value))
+                OnPropertyChanged(nameof(SelectedAction));
+        }
+    }
+
+    /// <summary>
+    /// What the table's drop-down is bound to. While WinUI fills a row it sets the drop-down's
+    /// selection to nothing before its items arrive, and a two-way binding straight to
+    /// <see cref="Action"/> pushed that nothing into an enum: the app died with a
+    /// NullReferenceException on 12 October 2026, filling the class table after a survey. Anything
+    /// that is not an action is ignored here.
+    /// </summary>
+    public object? SelectedAction
+    {
+        get => _action;
+        set
+        {
+            if (value is ClassAction action)
+                Action = action;
+        }
     }
 
     public IReadOnlyList<ClassAction> AvailableActions { get; } =
@@ -57,7 +87,8 @@ public sealed partial class ClassSummaryRow(TextClass textClass, int files, long
             .Select(c => (Class: c, Rows: present.Where(r => r.TextClass == c).ToArray()))
             .Where(g => g.Rows.Length > 0)
             .Select(g => new ClassSummaryRow(
-                g.Class, g.Rows.Length, g.Rows.Sum(r => (long)r.PageCount), policy.ActionFor(g.Class)))
+                g.Class, g.Rows.Length, g.Rows.Sum(r => (long)r.PageCount), policy.ActionFor(g.Class),
+                g.Rows.Count(r => r.Status == FileStatus.Completed)))
             .ToArray();
     }
 }

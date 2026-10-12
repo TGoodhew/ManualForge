@@ -6,6 +6,7 @@ using System.Text.Json;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using ManualForge.Core.Classification;
+using ManualForge.Core.Pdf;
 using ManualForge.Core.Pipeline;
 using ManualForge.Core.State;
 
@@ -198,9 +199,30 @@ public sealed partial class LibraryViewModel(
             r.Action != ClassAction.Skip
             && r.Status is not (FileStatus.Completed or FileStatus.Skipped));
 
-        Status = outstanding == 0
+        // Files the policy would work on but that cannot be opened at all: damaged, or locked with a
+        // password to open. They are skipped and left as they are, and without saying so here they
+        // showed only as one file short in the Done column, with no reason anywhere in the window.
+        var unopenable = present
+            .Where(r => r.Status == FileStatus.Skipped
+                        && r.Blocker is ModificationBlocker.Corrupt or ModificationBlocker.UserPassword or ModificationBlocker.Unknown
+                        && policy.ActionFor(r.TextClass) != ClassAction.Skip)
+            .ToArray();
+
+        Status = (outstanding == 0
             ? $"{present.Length:N0} files, {PagesTotal:N0} pages. Nothing outstanding."
-            : $"{present.Length:N0} files, {PagesTotal:N0} pages. {outstanding:N0} would be processed.";
+            : $"{present.Length:N0} files, {PagesTotal:N0} pages. {outstanding:N0} would be processed.")
+            + (unopenable.Length == 0 ? ""
+                : unopenable.Length == 1
+                    ? $" {Path.GetFileName(unopenable[0].Path)} cannot be opened, so it was left alone; see Problems."
+                    : $" {unopenable.Length:N0} files cannot be opened, so they were left alone; see Problems.");
+
+        foreach (var record in unopenable)
+        {
+            Errors.Add(record.Blocker == ModificationBlocker.UserPassword
+                ? $"{record.Path}: needs a password to open, so it was left alone."
+                : $"{record.Path}: cannot be opened; the file is damaged, often by a download that did not finish. "
+                  + "It was left alone. Replace it with a good copy and run again.");
+        }
 
         if (MissingCount > 0)
             Errors.Add($"{MissingCount:N0} recorded file(s) are no longer on disk. Trim to forget them.");
