@@ -210,7 +210,7 @@
                         <Button Content="Export JSON…" Click="ExportJsonAsync" local:Help.Text="Save this run's results as JSON, with the same fields as the CSV." />
                     </StackPanel>
 
-                    <ListView Grid.Row="1" AutomationProperties.Name="Results" ItemsSource="{x:Bind ViewModel.Results, Mode=OneWay}" SelectionMode="None">
+                    <ListView x:Name="ResultsList" Grid.Row="1" AutomationProperties.Name="Results" ItemsSource="{x:Bind ViewModel.Results, Mode=OneWay}" SelectionMode="None">
                         <ListView.ItemTemplate>
                             <DataTemplate x:DataType="pipeline:FileOutcome">
                                 <Grid ColumnSpacing="12" MinHeight="32">
@@ -220,7 +220,7 @@
                                         <ColumnDefinition Width="80" />
                                         <ColumnDefinition Width="100" />
                                     </Grid.ColumnDefinitions>
-                                    <TextBlock Grid.Column="0" Text="{x:Bind Path}" local:Help.Text="{x:Bind Path}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                                    <TextBlock Grid.Column="0" Text="{x:Bind Path}" local:Help.Text="{x:Bind local:FileActions.Hint(Path)}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
                                     <TextBlock Grid.Column="1" Text="{x:Bind Status}" VerticalAlignment="Center" />
                                     <TextBlock Grid.Column="2" Text="{x:Bind PageCount}" VerticalAlignment="Center" />
                                     <TextBlock Grid.Column="3" Text="{x:Bind WordsWritten}" VerticalAlignment="Center" />
@@ -373,6 +373,7 @@
 
                             <ListView
                                 Grid.Row="1"
+                                x:Name="DoctorList"
                                 AutomationProperties.Name="Documents to check"
                                 ItemsSource="{x:Bind Doctor.Documents, Mode=OneWay}"
                                 SelectedItem="{x:Bind Doctor.SelectedDocument, Mode=TwoWay}"
@@ -397,7 +398,7 @@
                                                 IsChecked="{x:Bind Selected, Mode=TwoWay}" />
 
                                             <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                                                <TextBlock Text="{x:Bind Title}" local:Help.Text="{x:Bind Path}" TextTrimming="CharacterEllipsis" />
+                                                <TextBlock Text="{x:Bind Title}" local:Help.Text="{x:Bind local:FileActions.Hint(Path)}" TextTrimming="CharacterEllipsis" />
                                                 <TextBlock
                                                     Text="{x:Bind PageRanges}"
                                                     Style="{StaticResource CaptionTextBlockStyle}"
@@ -499,9 +500,9 @@
 
                         <TextBox
                             Grid.Column="0"
-                            PlaceholderText="which pins carry the HP-IB handshake"
+                            PlaceholderText="Words on the page, e.g.  chopper amplifier,  or a command, e.g.  :TRIGger:MODE"
                             AutomationProperties.Name="Search the library"
-                            local:Help.Text="Words to find on any page of any manual. Command syntax pasted from a manual is understood as notation: a colon means all of these, {a|b} either, and &lt;N&gt; a placeholder. Press Enter to search."
+                            local:Help.Text="Words to find. A page matches when it has every word; put OR, in capitals, between words to find pages with either. Command syntax pasted from a manual is understood as notation: a colon means all of these, {a|b} either, and &lt;N&gt; a placeholder. Press Enter to search."
                             Text="{x:Bind Search.Query, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                             IsEnabled="{x:Bind Search.IsIdle, Mode=OneWay}"
                             KeyDown="SearchKeyDown" />
@@ -527,7 +528,7 @@
                         Opacity="0.8"
                         Style="{StaticResource CaptionTextBlockStyle}" />
 
-                    <ListView Grid.Row="2" AutomationProperties.Name="Search results" ItemsSource="{x:Bind Search.Results, Mode=OneWay}" SelectionMode="Single">
+                    <ListView x:Name="SearchResultsList" Grid.Row="2" AutomationProperties.Name="Search results" ItemsSource="{x:Bind Search.Results, Mode=OneWay}" SelectionMode="Single">
                         <ListView.ItemTemplate>
                             <DataTemplate x:DataType="indexing:SearchHit">
                                 <StackPanel Spacing="2" Padding="0,8,0,8">
@@ -544,7 +545,7 @@
                                     <TextBlock Text="{x:Bind Snippet}" TextWrapping="Wrap" />
                                     <TextBlock
                                         Text="{x:Bind Path}"
-                                        local:Help.Text="{x:Bind Path}"
+                                        local:Help.Text="{x:Bind local:FileActions.Hint(Path)}"
                                         Style="{StaticResource CaptionTextBlockStyle}"
                                         Opacity="0.6"
                                         TextTrimming="CharacterEllipsis" />

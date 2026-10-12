@@ -1303,7 +1303,7 @@ src/ManualForge.Core/
 src/ManualForge.Cli/              the command line
 src/ManualForge.Shell/            view models and the services behind them - no XAML, so testable
   ViewModels/                     library, doctor and search, each with no window attached
-src/ManualForge.App/              WinUI 3: XAML, a file picker, a GPU timer, nothing else
+src/ManualForge.App/              WinUI 3: XAML, file pickers, a GPU timer, opening a manual, nothing else
 src/ManualForge.Mcp/              MCP server: library_search, read_manual_page, library_status
 tests/ManualForge.Core.Tests/     705 tests, no GPU or network needed
 installer/ManualForge.iss         the Inno Setup installer; test-in-sandbox.ps1 tests it in Windows Sandbox

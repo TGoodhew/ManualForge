@@ -8,9 +8,9 @@ namespace ManualForge.App;
 /// <summary>
 /// The window's content.
 ///
-/// There is no logic here on purpose. What remains is the two things that genuinely belong to a
-/// window rather than to a view model: a file picker, which needs the native window handle, and a
-/// timer that asks the card how it is doing. Everything else is in
+/// There is no logic here on purpose. What remains is what genuinely belongs to a window rather than
+/// to a view model: file pickers, which need the native window handle; a timer that asks the card how
+/// it is doing; and opening a manual from a list (<see cref="FileActions"/>). Everything else is in
 /// <see cref="LibraryViewModel"/>, where it can be tested.
 /// </summary>
 public sealed partial class MainPage : Page
@@ -21,6 +21,9 @@ public sealed partial class MainPage : Page
     {
         InitializeComponent();
         WireDragToPan();
+        FileActions.Attach(SearchResultsList);
+        FileActions.Attach(ResultsList);
+        FileActions.Attach(DoctorList);
 
         _gpuTimer.Tick += (_, _) => ViewModel.RefreshGpu();
         Loaded += async (_, _) =>
