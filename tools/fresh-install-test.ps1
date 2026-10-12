@@ -6,7 +6,7 @@
 .DESCRIPTION
     Run it as yourself, NOT as administrator, from a normal PowerShell window:
 
-        powershell -NoProfile -ExecutionPolicy Bypass -Command "iwr https://raw.githubusercontent.com/TGoodhew/ManualForge/FreshInstallTest/tools/fresh-install-test.ps1 -OutFile $env:TEMP\fresh-install-test.ps1 -UseBasicParsing; & $env:TEMP\fresh-install-test.ps1"
+        powershell -NoProfile -ExecutionPolicy Bypass -Command "iwr https://raw.githubusercontent.com/TGoodhew/ManualForge/main/tools/fresh-install-test.ps1 -OutFile $env:TEMP\fresh-install-test.ps1 -UseBasicParsing; & $env:TEMP\fresh-install-test.ps1"
 
     What it does, in order. You are asked for something only where it says so:
       1. Fetches a portable GitHub CLI into its own folder (nothing is installed), and signs you in to
