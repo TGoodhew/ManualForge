@@ -202,7 +202,7 @@ public sealed partial class DoctorViewModel(IDoctorService service, IUiDispatche
 
     /// <summary>What the empty picture panel says, so it is clear what Show needs and what it draws.</summary>
     public string ExplainHint => SelectedDocument is null
-        ? "Click a document in the list to look at the pages the audit flagged in it. Show draws the page: "
+        ? "Click or tick a document in the list to look at the pages the audit flagged in it. Show draws the page: "
           + "grey is ink its text layer accounts for, black is ink nothing accounts for, and boxes are what "
           + "was counted as lettering."
         : $"Show draws page {ExplainPage:N0} of {SelectedDocument.Title}. Its flagged pages are listed under "
@@ -493,15 +493,26 @@ public sealed partial class DoctorViewModel(IDoctorService service, IUiDispatche
     /// <summary>Ticks or unticks every row currently shown.</summary>
     public void SelectAll(bool selected)
     {
-        foreach (var row in Documents)
+        _ticking = true;
+        try
         {
-            // A document with nothing outstanding has nothing to do, so leaving it ticked would
-            // only make the count lie.
-            row.Selected = selected && row.OutstandingPages > 0;
+            foreach (var row in Documents)
+            {
+                // A document with nothing outstanding has nothing to do, so leaving it ticked would
+                // only make the count lie.
+                row.Selected = selected && row.OutstandingPages > 0;
+            }
+        }
+        finally
+        {
+            _ticking = false;
         }
 
         RecountSelected();
     }
+
+    /// <summary>Set while All or None ticks rows in bulk, which should not move what Show draws.</summary>
+    private bool _ticking;
 
     /// <summary>Re-reads the store without narrating it, after something has changed underneath.</summary>
     private async Task ReloadQuietlyAsync()
@@ -537,8 +548,15 @@ public sealed partial class DoctorViewModel(IDoctorService service, IUiDispatche
             var added = new DoctorRow(finding);
             added.PropertyChanged += (_, e) =>
             {
-                if (e.PropertyName == nameof(DoctorRow.Selected))
-                    RecountSelected();
+                if (e.PropertyName != nameof(DoctorRow.Selected))
+                    return;
+
+                RecountSelected();
+
+                // Ticking a document is how anyone picks one, so it is the one Show draws too. It was
+                // only the highlighted row, which a tick does not move, so Show stayed disabled (#74).
+                if (!_ticking && added.Selected)
+                    SelectedDocument = added;
             };
             Documents.Add(added);
         }

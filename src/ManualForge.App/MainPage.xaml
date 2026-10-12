@@ -298,7 +298,7 @@
                             TextWrapping="Wrap"
                             Opacity="0.8"
                             Style="{StaticResource CaptionTextBlockStyle}"
-                            Text="The audit finds pages whose text layer misses what is printed on them, such as labels on schematics and tables drawn as graphics, which a search therefore cannot find. Recover text reads those pages and keeps what it finds for search; no PDF is changed. Then build the index on the Search tab, so search can find it. To check a finding first, click a document and Show one of its pages." />
+                            Text="The audit finds pages whose text layer misses what is printed on them, such as labels on schematics and tables drawn as graphics, which a search therefore cannot find. Recover text reads those pages and keeps what it finds for search; no PDF is changed. Then build the index on the Search tab, so search can find it. To check a finding first, click or tick a document and Show one of its pages." />
                         <TextBlock
                             Text="{x:Bind Doctor.Headline, Mode=OneWay}"
                             TextWrapping="Wrap"
@@ -425,7 +425,7 @@
                                 CornerRadius="4"
                                 Background="{ThemeResource LayerFillColorDefaultBrush}">
                                 <Grid>
-                                    <ScrollViewer ZoomMode="Enabled" HorizontalScrollMode="Auto" HorizontalScrollBarVisibility="Auto">
+                                    <ScrollViewer x:Name="DiagnosticScroller" ZoomMode="Enabled" HorizontalScrollMode="Auto" HorizontalScrollBarVisibility="Auto">
                                         <Image x:Name="DiagnosticImage" Stretch="Uniform" />
                                     </ScrollViewer>
                                     <TextBlock

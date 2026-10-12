@@ -116,7 +116,7 @@ public sealed class DoctorViewModelTests
         });
         await doctor.RefreshAsync();
         Assert.False(doctor.ExplainCommand.CanExecute(null));
-        Assert.Contains("Click a document", doctor.ExplainHint, StringComparison.Ordinal);
+        Assert.Contains("Click or tick a document", doctor.ExplainHint, StringComparison.Ordinal);
 
         doctor.SelectedDocument = doctor.Documents.Single();
 
@@ -124,6 +124,29 @@ public sealed class DoctorViewModelTests
         Assert.Equal(19, doctor.ExplainPage);
         Assert.Contains("page 19 of 54845A Programmer", doctor.ExplainHint, StringComparison.Ordinal);
         Assert.True(doctor.HasNoPicture);
+    }
+
+    [Fact]
+    public async Task TickingADocumentIsChoosingItForShowButAllIsNot()
+    {
+        // 12 October 2026: a ticked document still left Show disabled, because only the highlighted
+        // row counted and a tick does not move the highlight (#74).
+        var doctor = New(new FakeDoctor
+        {
+            Standing = Standing(
+                Finding("3585B-SM-V1", DocumentVerdict.UnderExtracted),
+                Finding("83522A-OSM", DocumentVerdict.UnderExtracted)),
+        });
+        await doctor.RefreshAsync();
+
+        doctor.SelectEverything();
+        doctor.SelectNothing();
+        Assert.Null(doctor.SelectedDocument);
+
+        doctor.Documents[1].Selected = true;
+
+        Assert.Same(doctor.Documents[1], doctor.SelectedDocument);
+        Assert.True(doctor.ExplainCommand.CanExecute(null));
     }
 
     [Fact]

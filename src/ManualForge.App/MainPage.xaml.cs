@@ -20,6 +20,7 @@ public sealed partial class MainPage : Page
     public MainPage()
     {
         InitializeComponent();
+        WireDragToPan();
 
         _gpuTimer.Tick += (_, _) => ViewModel.RefreshGpu();
         Loaded += async (_, _) =>
@@ -96,6 +97,56 @@ public sealed partial class MainPage : Page
         }
 
         DiagnosticImage.Source = image;
+    }
+
+    private Windows.Foundation.Point? _dragFrom;
+    private double _dragFromX;
+    private double _dragFromY;
+
+    /// <summary>
+    /// Drag the diagnostic picture with the mouse to move around it, rather than finding the scroll
+    /// bars at its edges. The scroll bars stay, and touch pans by itself. Positions are taken against
+    /// the scroller rather than the picture, which moves under the pointer as it scrolls.
+    /// </summary>
+    private void WireDragToPan()
+    {
+        DiagnosticScroller.AddHandler(PointerPressedEvent, new Microsoft.UI.Xaml.Input.PointerEventHandler((_, e) =>
+        {
+            if (e.Pointer.PointerDeviceType == Microsoft.UI.Input.PointerDeviceType.Touch)
+                return;
+
+            var point = e.GetCurrentPoint(DiagnosticScroller);
+            if (!point.Properties.IsLeftButtonPressed)
+                return;
+
+            _dragFrom = point.Position;
+            _dragFromX = DiagnosticScroller.HorizontalOffset;
+            _dragFromY = DiagnosticScroller.VerticalOffset;
+            DiagnosticScroller.CapturePointer(e.Pointer);
+            e.Handled = true;
+        }), handledEventsToo: true);
+
+        DiagnosticScroller.AddHandler(PointerMovedEvent, new Microsoft.UI.Xaml.Input.PointerEventHandler((_, e) =>
+        {
+            if (_dragFrom is not { } from)
+                return;
+
+            var at = e.GetCurrentPoint(DiagnosticScroller).Position;
+            DiagnosticScroller.ChangeView(_dragFromX - (at.X - from.X), _dragFromY - (at.Y - from.Y), null, disableAnimation: true);
+            e.Handled = true;
+        }), handledEventsToo: true);
+
+        void Stop(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
+        {
+            if (_dragFrom is null)
+                return;
+
+            _dragFrom = null;
+            DiagnosticScroller.ReleasePointerCapture(e.Pointer);
+        }
+
+        DiagnosticScroller.AddHandler(PointerReleasedEvent, new Microsoft.UI.Xaml.Input.PointerEventHandler(Stop), handledEventsToo: true);
+        DiagnosticScroller.PointerCaptureLost += (_, _) => _dragFrom = null;
     }
 
     /// <summary>Enter searches. A keystroke is a view concern; what it does is not.</summary>
