@@ -173,10 +173,10 @@ function Get-LibraryPdfs {
                        -not $_.FullName.StartsWith("$baseline\", [StringComparison]::OrdinalIgnoreCase) }
 }
 
-# The originals kept in _Originals, minus the superseded copies and the broken file.
+# The originals kept in _Originals, minus the superseded copies, the replaced originals and the broken file.
 function Get-KeptOriginals {
     Get-ChildItem -LiteralPath $originals -Recurse -File -Filter *.pdf |
-        Where-Object { $_.FullName -notmatch '\\_Originals\\(_superseded|broken)\\' }
+        Where-Object { $_.FullName -notmatch '\\_Originals\\(_superseded|_replaced|broken)\\' }
 }
 
 # A file whose printed text was silenced was renamed name_repaired.pdf beside where name.pdf was
@@ -296,7 +296,7 @@ try {
         Write-Line ""
         Write-Line ("=== {0:HH:mm:ss}  restore originals" -f $started)
         Invoke-Robocopy @($originals, $Library, '*.pdf', '/S', '/COPY:DAT', '/R:1', '/W:1', '/NP', '/NDL',
-            '/XD', (Join-Path $originals '_superseded'), (Join-Path $originals 'broken'))
+            '/XD', (Join-Path $originals '_superseded'), (Join-Path $originals '_replaced'), (Join-Path $originals 'broken'))
 
         # A renamed copy is not overwritten by its original, which comes back under the old name,
         # so it would stay beside it and be read a second time. Moved, not deleted: the library
