@@ -412,6 +412,9 @@ try {
     Write-Host "Sample   : $Sample"
     $signature = Get-AuthenticodeSignature $Installer
     Note 'installer signature' "$($signature.Status)"
+    # The test library is this script's own folder, and the uninstaller rightly leaves it behind.
+    # Start it empty, so that each run is a first run rather than a second pass over the last one.
+    if (Test-Path -LiteralPath $library) { Remove-Item -LiteralPath $library -Recurse -Force }
     New-Item -ItemType Directory -Force $library | Out-Null
     Copy-Item -LiteralPath $Sample -Destination (Join-Path $library 'sample.pdf') -Force
 
