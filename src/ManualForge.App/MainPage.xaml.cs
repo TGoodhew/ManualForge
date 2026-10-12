@@ -27,13 +27,7 @@ public sealed partial class MainPage : Page
             ViewModel.RefreshGpu();
             _gpuTimer.Start();
 
-            // The search tab needs to know whether an index exists for whatever folder is set.
-            Search.Folder = ViewModel.Folder;
-            await Search.RefreshAsync();
-
-            Doctor.Folder = ViewModel.Folder;
-            if (Doctor.RefreshCommand.CanExecute(null))
-                await Doctor.RefreshAsync();
+            await ShareFolderAsync();
         };
 
         // The diagnostic picture arrives as PNG bytes, because the view model has no business
@@ -51,14 +45,24 @@ public sealed partial class MainPage : Page
             if (e.PropertyName != nameof(LibraryViewModel.Folder))
                 return;
 
-            Search.Folder = ViewModel.Folder;
-            await Search.RefreshAsync();
-
-            Doctor.Folder = ViewModel.Folder;
-            if (Doctor.RefreshCommand.CanExecute(null))
-                await Doctor.RefreshAsync();
+            await ShareFolderAsync();
         };
         Unloaded += (_, _) => _gpuTimer.Stop();
+    }
+
+    /// <summary>
+    /// Gives the search and doctor tabs the library's folder, then has each read what it has for it,
+    /// side by side. The doctor tab used to be given the folder only after the search tab had read the
+    /// index's statistics, which took 53 seconds on a 630-manual library: until then it said "Pick a
+    /// folder" with its buttons disabled and nothing to say anything was happening (#74).
+    /// </summary>
+    private async Task ShareFolderAsync()
+    {
+        Search.Folder = ViewModel.Folder;
+        Doctor.Folder = ViewModel.Folder;
+
+        var doctor = Doctor.RefreshCommand.CanExecute(null) ? Doctor.RefreshAsync() : Task.CompletedTask;
+        await Task.WhenAll(Search.RefreshAsync(), doctor);
     }
 
     public LibraryViewModel ViewModel => App.Library;

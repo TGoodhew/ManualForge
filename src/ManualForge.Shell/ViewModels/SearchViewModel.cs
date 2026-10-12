@@ -78,6 +78,7 @@ public sealed partial class SearchViewModel(ISearchService service, IUiDispatche
             return;
         }
 
+        Status = "Reading the index...";
         var statistics = await _service.StatisticsAsync(Folder, cancellationToken).ConfigureAwait(true);
         Status = statistics is null
             ? "Index found."
