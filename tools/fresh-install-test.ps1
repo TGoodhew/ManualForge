@@ -18,8 +18,11 @@
       5. Checks what was installed, then reads the sample with the command line on the CPU and, when
          there is an NVIDIA GPU, on the GPU; runs survey/run/index/search on a small test library;
          asks the MCP server for its tools and a search; starts the app from the Start menu.
-      6. Asks whether to uninstall, and if so - YOU click through the uninstaller - checks what is left.
-      7. Zips the results to the Desktop and attaches them to the draft release.
+      6. Upgrades over the running install - YOU start Claude Desktop first, so its MCP server is
+         running - and checks that Setup named and stopped it.
+      7. Asks whether to uninstall, and if so - YOU click through the uninstaller - checks what is left,
+         and that every AI app's settings, your user environment and the test library are as they were.
+      8. Zips the results to the Desktop and attaches them to the draft release.
 
     Only ManualForge's own state and the PC's description are collected. The screenshot is of the
     ManualForge window only. Nothing ManualForge itself needs (.NET, the Visual C++ runtime, the
@@ -39,6 +42,9 @@
     Install and uninstall without the wizard (/VERYSILENT, MCP task only; the NVIDIA licences cannot
     be accepted silently, so no GPU libraries). For rehearsing the script in Windows Sandbox.
 
+.PARAMETER WithoutTensorRt
+    Install the GPU libraries without TensorRT, and check that ManualForge then runs on CUDA.
+
 .PARAMETER Unattended
     Ask nothing: uninstall at the end without asking.
 
@@ -54,6 +60,7 @@ param(
     [string] $Installer,
     [string] $Sample,
     [switch] $Silent,
+    [switch] $WithoutTensorRt,
     [switch] $Unattended,
     [switch] $NoUpload,
     [string] $ResultsRoot = [Environment]::GetFolderPath('Desktop')
@@ -160,11 +167,102 @@ function Find-McpReferences {
         if (Test-Path $place -PathType Leaf) { Get-Item $place }
         elseif (Test-Path $place) {
             Get-ChildItem $place -Recurse -Depth 3 -File -Include *.json, *.toml, *.yaml, *.yml -ErrorAction SilentlyContinue |
-                Where-Object { $_.Length -lt 5MB -and $_.Name -notlike '*.before-manualforge.bak' }
+                Where-Object { $_.Length -lt 5MB -and $_.Name -notlike '*.before-manualforge.bak' -and $_.FullName -notlike '*\sentry\*' }   # crash reports, not settings
         }
     }
     @($files | Where-Object { Select-String -LiteralPath $_.FullName -Pattern 'ManualForge\.Mcp' -Quiet -ErrorAction SilentlyContinue } |
         ForEach-Object { $_.FullName })
+}
+
+# Every settings file `manualforge setup mcp` can write, as McpClients knows them.
+function Get-McpConfigFiles {
+    $store = Get-ChildItem "$env:LOCALAPPDATA\Packages" -Directory -Filter 'Claude_*' -ErrorAction SilentlyContinue | Select-Object -First 1
+    $files = [ordered]@{
+        'claude-desktop'  = "$env:APPDATA\Claude\claude_desktop_config.json"
+        'claude-code'     = "$env:USERPROFILE\.claude.json"
+        'vscode'          = "$env:APPDATA\Code\User\mcp.json"
+        'vscode-insiders' = "$env:APPDATA\Code - Insiders\User\mcp.json"
+        'visual-studio'   = "$env:USERPROFILE\.mcp.json"
+        'cursor'          = "$env:USERPROFILE\.cursor\mcp.json"
+        'windsurf'        = "$env:USERPROFILE\.codeium\windsurf\mcp_config.json"
+        'gemini'          = "$env:USERPROFILE\.gemini\settings.json"
+        'codex'           = "$env:USERPROFILE\.codex\config.toml"
+        'lmstudio'        = "$env:USERPROFILE\.lmstudio\mcp.json"
+        'continue'        = "$env:USERPROFILE\.continue\mcpServers\manualforge.yaml"
+    }
+    if ($store) { $files['claude-desktop-store'] = Join-Path $store.FullName 'LocalCache\Roaming\Claude\claude_desktop_config.json' }
+    return $files
+}
+
+# What each settings file holds: its bytes' hash and, for JSON, its servers. An app rewrites its own
+# settings while it runs (Claude Code counts its starts), so a changed hash with the same servers is
+# the app's doing, not ManualForge's.
+function Get-McpConfigState {
+    $state = [ordered]@{}
+    foreach ($entry in (Get-McpConfigFiles).GetEnumerator()) {
+        $path = $entry.Value
+        if (-not (Test-Path -LiteralPath $path)) { $state[$entry.Key] = $null; continue }
+        $servers = $null
+        if ($path -like '*.json') {
+            try {
+                $json = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+                $servers = (@($json.mcpServers, $json.servers) | Where-Object { $_ } | ConvertTo-Json -Depth 10 -Compress)
+            } catch { $servers = '(unreadable)' }
+        }
+        $state[$entry.Key] = [pscustomobject]@{ Path = $path; Hash = (Get-FileHash -LiteralPath $path).Hash; Servers = $servers }
+    }
+    return $state
+}
+
+function Compare-McpConfigState($before, $after) {
+    foreach ($key in $before.Keys) {
+        $b = $before[$key]; $a = $after[$key]
+        if (-not $b -and -not $a) { continue }
+        if (-not $b) { Check "$key settings as before" $false "created and left behind: $($a.Path)"; continue }
+        if (-not $a) { Check "$key settings as before" $false "deleted: $($b.Path)"; continue }
+        if ($a.Hash -eq $b.Hash) { Check "$key settings as before" $true 'byte for byte'; continue }
+        if ($b.Servers -and $a.Servers -eq $b.Servers) { Check "$key settings as before" $true 'same servers; the app changed its own settings meanwhile'; continue }
+        Check "$key settings as before" $false "differs: $($a.Path)"
+    }
+}
+
+function Get-UserEnvironment {
+    $values = Get-ItemProperty 'HKCU:\Environment'
+    $values.PSObject.Properties | Where-Object { $_.Name -notlike 'PS*' } | ForEach-Object { "$($_.Name)=$($_.Value)" } | Sort-Object
+}
+
+function Get-FileHashes([string] $folder) {
+    Get-ChildItem -LiteralPath $folder -Recurse -File -Force -ErrorAction SilentlyContinue |
+        ForEach-Object { '{0}  {1}' -f (Get-FileHash -LiteralPath $_.FullName).Hash, $_.FullName.Substring($folder.Length + 1) } | Sort-Object
+}
+
+# How each app would start ManualForge's MCP server: the command and environment its settings name.
+function Get-McpLaunches {
+    foreach ($entry in (Get-McpConfigFiles).GetEnumerator()) {
+        $path = $entry.Value
+        if (-not (Test-Path -LiteralPath $path)) { continue }
+        $command = $null; $arguments = @(); $variables = @{}
+        if ($path -like '*.json') {
+            try { $json = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json } catch { continue }
+            $server = @($json.mcpServers.manualforge, $json.servers.manualforge) | Where-Object { $_ } | Select-Object -First 1
+            if (-not $server) { continue }
+            $command = $server.command
+            $arguments = @($server.args)
+            if ($server.env) { $server.env.PSObject.Properties | ForEach-Object { $variables[$_.Name] = $_.Value } }
+        }
+        elseif ($path -like '*.toml') {
+            $text = Get-Content -LiteralPath $path -Raw
+            if ($text -notmatch "(?ms)^\[mcp_servers\.manualforge\]\s*\r?\ncommand = '([^']+)'") { continue }
+            $command = $Matches[1]
+            if ($text -match "MANUALFORGE_LIBRARY = '([^']+)'") { $variables['MANUALFORGE_LIBRARY'] = $Matches[1] }
+        }
+        elseif ($path -like '*.yaml') {
+            $text = Get-Content -LiteralPath $path -Raw
+            if ($text -match 'command: "([^"]+)"') { $command = $Matches[1] -replace '\\\\', '\' }
+            if ($text -match 'MANUALFORGE_LIBRARY: "([^"]+)"') { $variables['MANUALFORGE_LIBRARY'] = $Matches[1] -replace '\\\\', '\' }
+        }
+        if ($command) { [pscustomobject]@{ Client = $entry.Key; Command = $command; Arguments = $arguments; Environment = $variables } }
+    }
 }
 
 function Get-Leftovers {
@@ -224,13 +322,15 @@ function Wait-ForSetupCopies {
     while ((Get-Date) -lt $deadline -and (Get-Process | Where-Object { $_.Name -like '_unins*' -or $_.Name -like '_iu*' -or $_.Name -like 'ManualForge-Setup-*' })) { Start-Sleep -Seconds 1 }
 }
 
-# A minimal MCP client over stdio: initialize, list the tools, call two of them.
-function Test-McpServer([string] $server, [string] $libraryPath) {
+# A minimal MCP client over stdio: initialize, list the tools, call two of them. Started the way an
+# app's settings say: this command, these arguments, these variables, and nothing else of ours.
+function Test-McpServer([string] $server, [string[]] $arguments, [hashtable] $variables, [string] $name = 'mcp-exchange') {
     $info = New-Object System.Diagnostics.ProcessStartInfo $server
-    $info.Arguments = "`"$libraryPath`""
+    $info.Arguments = (@($arguments) | Where-Object { $_ } | ForEach-Object { "`"$_`"" }) -join ' '
     $info.UseShellExecute = $false
     $info.RedirectStandardInput = $true; $info.RedirectStandardOutput = $true; $info.RedirectStandardError = $true
-    $info.EnvironmentVariables['MANUALFORGE_LIBRARY'] = $libraryPath
+    $info.EnvironmentVariables.Remove('MANUALFORGE_LIBRARY')
+    foreach ($key in $variables.Keys) { $info.EnvironmentVariables[$key] = $variables[$key] }
     $process = [System.Diagnostics.Process]::Start($info)
     $stderr = $process.StandardError.ReadToEndAsync()
     $exchange = New-Object System.Collections.Generic.List[string]
@@ -267,7 +367,7 @@ function Test-McpServer([string] $server, [string] $libraryPath) {
         try { $process.StandardInput.Close() } catch { }
         if (-not $process.WaitForExit(10000)) { $process.Kill() }
         $exchange.Add('-- stderr --'); $exchange.Add($stderr.Result)
-        Save-Text 'mcp-exchange.txt' $exchange
+        Save-Text "$name.txt" $exchange
     }
     [pscustomobject]@{
         Initialized = [bool] $init.result
@@ -364,6 +464,9 @@ try {
     Save-Text 'runtimes-before.txt' ($runtimesBefore | Format-List)
     $runtimesBefore | Format-List | Out-String | Write-Host
     $mcpBefore = Find-McpReferences
+    $mcpConfigBefore = Get-McpConfigState
+    $environmentBefore = @(Get-UserEnvironment)
+    Save-Text 'environment-before.txt' $environmentBefore
     $appsPresent = @()
     foreach ($candidate in @("$env:LOCALAPPDATA\AnthropicClaude", "$env:LOCALAPPDATA\Programs\Microsoft VS Code", "$env:ProgramFiles\Microsoft VS Code")) {
         if (Test-Path $candidate) { $appsPresent += $candidate }
@@ -424,11 +527,14 @@ try {
     }
     else {
         $arguments = "/LIBRARY=`"$library`" /LOG=`"$results\install.log`""
+        # Ticked for the user to see; only the GPU libraries, without TensorRT, and the AI apps.
+        if ($WithoutTensorRt) { $arguments += ' /TASKS="gpu,mcp"' }
         Say ''
         Say 'The installer is starting. Please:'
         Say '  * If SmartScreen says "Windows protected your PC": More info, then Run anyway.'
         Say "  * Library folder: keep the one it suggests ($library) - it holds the test sample."
-        Say '  * If it offers the NVIDIA libraries: tick both (CUDA/cuDNN and TensorRT) and accept the licences.'
+        if ($WithoutTensorRt) { Say '  * NVIDIA libraries: tick CUDA/cuDNN but leave TensorRT UNTICKED, and accept the licences.' }
+        else { Say '  * If it offers the NVIDIA libraries: tick both (CUDA/cuDNN and TensorRT) and accept the licences.' }
         Say '  * Leave "Connect ManualForge to the AI apps" ticked. "Let a terminal run manualforge" is up to you.'
         Say '  * Say yes to the Windows permission prompts.'
         Say '  * At the end, untick "Start ManualForge" (this script starts it later), then Finish.'
@@ -480,7 +586,17 @@ try {
     Check 'manualforge gpu' ($gpu.Code -eq 0)
     $provider = if ($gpu.Output -match 'Active provider\s*:\s*(\S+)') { $Matches[1] } else { 'unknown' }
     Note 'active provider' $provider
-    if ($hasNvidiaAdapter -and (Test-Path $gpuRecord)) { Check 'GPU in use after installing the NVIDIA libraries' ($provider -ne 'Cpu') $provider }
+    if ($hasNvidiaAdapter -and (Test-Path $gpuRecord)) {
+        Check 'GPU in use after installing the NVIDIA libraries' ($provider -ne 'Cpu') $provider
+        $withTensorRt = [bool] (Get-Content $gpuRecord -Raw | ConvertFrom-Json | Where-Object { $_.Name -eq 'TensorRT' })
+        $expected = if ($withTensorRt) { 'TensorRt' } else { 'Cuda' }
+        Check "runs on $expected, as the libraries chosen allow" ($provider -eq $expected) $provider
+        if ($WithoutTensorRt) { Check 'TensorRT not downloaded, as chosen' (-not $withTensorRt) }
+    }
+    elseif ($hasNvidiaAdapter) { Note 'GPU' "no NVIDIA libraries installed, so the CPU: $provider" }
+    if (-not $hasNvidiaAdapter) {
+        Check 'no NVIDIA card: says it runs on the CPU' ($provider -eq 'Cpu' -and $gpu.Output -match 'No NVIDIA GPU was found') $provider
+    }
     $mcpList = Invoke-Logged 'setup-mcp-list' $cli @('setup', 'mcp', '--list', '--library', $library)
     Check 'manualforge setup mcp --list' ($mcpList.Code -eq 0)
     if (Test-Path $nvidiaSmi) { Invoke-Logged 'nvidia-smi-after' $nvidiaSmi @() | Out-Null }
@@ -512,12 +628,18 @@ try {
     Check 'status' ($status.Code -eq 0)
     Check 'original kept in _Originals' ([bool] (Get-ChildItem (Join-Path $library '_Originals') -Recurse -Filter '*.pdf' -ErrorAction SilentlyContinue))
 
-    Write-Step 'The MCP server'
-    $mcp = Test-McpServer (Join-Path $app 'ManualForge.Mcp.exe') $library
-    Check 'MCP server initializes' $mcp.Initialized
-    Check 'MCP server lists its tools' ($mcp.Tools.Count -ge 3) ($mcp.Tools -join ', ')
-    Check 'MCP library_status answers' ([bool] $mcp.StatusText)
-    Check "MCP library_search finds '$searchWord'" ($mcp.SearchText -match 'sample')
+    Write-Step 'The MCP server, as each AI app would start it'
+    $launches = @(Get-McpLaunches)
+    if (-not $launches) { Note 'MCP' 'no AI app here has ManualForge registered; starting the server directly instead' }
+    $direct = [pscustomobject]@{ Client = 'direct'; Command = (Join-Path $app 'ManualForge.Mcp.exe'); Arguments = @(); Environment = @{ MANUALFORGE_LIBRARY = $library } }
+    foreach ($launch in $(if ($launches) { $launches } else { @($direct) })) {
+        $mcp = Test-McpServer $launch.Command $launch.Arguments $launch.Environment "mcp-exchange-$($launch.Client)"
+        $who = "MCP from $($launch.Client)"
+        Check "$who initializes" $mcp.Initialized $launch.Command
+        Check "$who lists its tools" ($mcp.Tools.Count -ge 3) ($mcp.Tools -join ', ')
+        Check "$who answers library_status" ([bool] $mcp.StatusText)
+        Check "$who finds '$searchWord'" ($mcp.SearchText -match 'sample')
+    }
 
     Write-Step 'The app, from the Start menu'
     Get-Process ManualForge.App -ErrorAction SilentlyContinue | ForEach-Object { $_.CloseMainWindow() | Out-Null; if (-not $_.WaitForExit(5000)) { $_.Kill() } }
@@ -540,6 +662,48 @@ try {
         }
     }
 
+    # ------------------------------------------------------------ 4. upgrading over a running install
+
+    Write-Step 'Upgrading over the running install'
+    if (-not $Silent -and -not $Unattended) {
+        Say 'Now start Claude Desktop - or quit it (from the tray icon) and start it again, if it is open - so that it'
+        Say 'starts ManualForge''s MCP server. Then Setup runs again over this install, on its own; it should stop'
+        Say 'that server and say Claude Desktop started it. Claude Desktop may then show an error for ManualForge;'
+        Say 'that is expected.'
+        Read-Host 'Press Enter once Claude Desktop is open' | Out-Null
+    }
+    $running = @(Get-CimInstance Win32_Process -Filter "Name = 'ManualForge.Mcp.exe'" | Where-Object { $_.ExecutablePath -like "$app\*" })
+    $ours = $null
+    if (-not $running) {
+        Note 'upgrade' 'no app had started the MCP server, so this script starts one, for Setup to find and stop'
+        # As an app starts it: stdin held open, which it reads until the app goes away.
+        $info = New-Object System.Diagnostics.ProcessStartInfo (Join-Path $app 'ManualForge.Mcp.exe')
+        $info.UseShellExecute = $false
+        $info.RedirectStandardInput = $true; $info.RedirectStandardOutput = $true; $info.RedirectStandardError = $true
+        $info.EnvironmentVariables['MANUALFORGE_LIBRARY'] = $library
+        $ours = [System.Diagnostics.Process]::Start($info)
+        Start-Sleep -Seconds 3
+        $running = @(Get-CimInstance Win32_Process -Filter "Name = 'ManualForge.Mcp.exe'" | Where-Object { $_.ExecutablePath -like "$app\*" })
+    }
+    Check 'an MCP server running before the upgrade' ([bool] $running) (($running | ForEach-Object { "process $($_.ProcessId)" }) -join ', ')
+    $upgradeStarted = Get-Date
+    $upgradeCode = Start-AndWait $Installer "/SILENT /SUPPRESSMSGBOXES /NORESTART /LIBRARY=`"$library`" /LOG=`"$results\upgrade.log`""
+    Wait-ForSetupCopies
+    Check 'upgrade finished with exit code 0' ($upgradeCode -eq 0) ("code {0}, {1:N1} min" -f $upgradeCode, ((Get-Date) - $upgradeStarted).TotalMinutes)
+    $upgradeLog = if (Test-Path "$results\upgrade.log") { Get-Content "$results\upgrade.log" -Raw } else { '' }
+    $named = @([regex]::Matches($upgradeLog, 'ManualForge\.Mcp\.exe \(process \d+\), started by ([^\r\n]+)') |
+        ForEach-Object { $_.Groups[1].Value.Trim() } | Sort-Object -Unique)
+    Check 'upgrade named the app that started each MCP server' ($upgradeLog -match 'Stopped:' -and $named) ($named -join ', ')
+    if (-not $ours -and -not $Silent -and -not $Unattended) { Check 'upgrade named Claude Desktop' ($named -contains 'Claude Desktop') ($named -join ', ') }
+    Check 'upgrade stopped them' ($running -and -not @($running | Where-Object { Get-Process -Id $_.ProcessId -ErrorAction SilentlyContinue }))
+    Check 'upgrade installed no runtime again' ($upgradeLog -match 'Runtimes missing: \.NET 10 0, Windows App Runtime 1\.8 0, Visual C\+\+ 0')
+    $versionAfter = Invoke-Logged 'version-after-upgrade' $cli @('version')
+    Check 'same build after the upgrade' (($versionAfter.Output -split "`n")[0].Trim() -eq ($version.Output -split "`n")[0].Trim()) (($versionAfter.Output -split "`n")[0].Trim())
+    $gpuAfter = Invoke-Logged 'gpu-after-upgrade' $cli @('gpu')
+    $providerAfter = if ($gpuAfter.Output -match 'Active provider\s*:\s*(\S+)') { $Matches[1] } else { 'unknown' }
+    Check 'same provider after the upgrade' ($providerAfter -eq $provider) $providerAfter
+    Check 'upgrade kept the models' (Test-Path (Join-Path $data 'models\PP-OCRv5_mobile_det.onnx'))
+
     # What ManualForge wrote for itself, before an uninstall takes it away.
     if (Test-Path (Join-Path $data 'logs')) { Copy-Item (Join-Path $data 'logs') (Join-Path $results 'manualforge-logs') -Recurse -Force }
     Get-ChildItem $data -Filter '*.json' -ErrorAction SilentlyContinue | Copy-Item -Destination $results
@@ -548,18 +712,20 @@ try {
     Save-Text 'mcp-files-after-install.txt' $mcpInstalled
     Note 'AI app files naming ManualForge' $(if ($mcpInstalled) { $mcpInstalled -join '; ' } else { 'none (no AI apps installed?)' })
 
-    # ------------------------------------------------------------ 4. uninstalling
+    # ------------------------------------------------------------ 5. uninstalling
 
     if (Ask 'Uninstall ManualForge now, to test removing it? (No keeps it installed, pointed at the test library)' $true) {
         Write-Step 'Uninstalling'
+        $libraryBefore = @(Get-FileHashes $library)
+        Save-Text 'library-before-uninstall.txt' $libraryBefore
         $uninstaller = Get-ChildItem $app -Filter 'unins*.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
         Check 'uninstaller present' ([bool] $uninstaller)
         if ($uninstaller) {
             if ($Silent) { $arguments = "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /LOG=`"$results\uninstall.log`"" }
             else {
                 $arguments = "/LOG=`"$results\uninstall.log`""
-                Say 'The uninstaller is starting. Say Yes to removing ManualForge, Yes to removing its models, logs and'
-                Say 'GPU data, and OK to its closing message.'
+                Say 'The uninstaller is starting. If it says ManualForge is running, OK to stop it. Then Yes to removing'
+                Say 'ManualForge, Yes to removing its models, logs and GPU data, and OK to its closing message.'
             }
             $uninstallStarted = Get-Date
             $uninstallCode = Start-AndWait $uninstaller.FullName $arguments
@@ -569,12 +735,23 @@ try {
         }
         $left = Get-Leftovers
         Check 'nothing of ManualForge left' (-not $left) ($left -join '; ')
+        if (Test-Path "$results\uninstall.log") {
+            Get-Content "$results\uninstall.log" | Select-String 'started by' | ForEach-Object { Note 'uninstall stopped' $_.Line.Trim() }
+        }
         $mcpLeft = @($mcpInstalled | Where-Object { Test-Path $_ } | Where-Object { Select-String -LiteralPath $_ -Pattern 'ManualForge\.Mcp' -Quiet })
         Check 'AI apps no longer name ManualForge' (-not $mcpLeft) ($mcpLeft -join '; ')
+        Compare-McpConfigState $mcpConfigBefore (Get-McpConfigState)
+        $environmentAfter = @(Get-UserEnvironment)
+        Save-Text 'environment-after-uninstall.txt' $environmentAfter
+        $environmentDiff = @(Compare-Object $environmentBefore $environmentAfter | ForEach-Object { "$($_.SideIndicator) $($_.InputObject)" })
+        Check 'user environment as before installing' (-not $environmentDiff) ($environmentDiff -join '; ')
+        $libraryAfter = @(Get-FileHashes $library)
+        $libraryDiff = @(Compare-Object $libraryBefore $libraryAfter | ForEach-Object { "$($_.SideIndicator) $($_.InputObject)" })
+        Save-Text 'library-diff.txt' $libraryDiff
+        Check 'test library byte for byte as before uninstalling' (-not $libraryDiff) ("{0} files{1}" -f $libraryAfter.Count, $(if ($libraryDiff) { "; differs: $($libraryDiff -join '; ')" }))
         $runtimesEnd = Get-Runtimes
         Save-Text 'runtimes-after-uninstall.txt' ($runtimesEnd | Format-List)
         Note 'runtimes kept after uninstalling (by design; Settings > Apps removes them)' ("VC++ {0}; .NET 10 {1}" -f $runtimesEnd.VisualCpp, [bool] ($runtimesEnd.DotNet -match 'WindowsDesktop\.App 10\.'))
-        Check 'test library untouched' (Test-Path (Join-Path $library 'sample.pdf'))
     }
     else { Note 'uninstall' 'not tested: ManualForge left installed' }
 }

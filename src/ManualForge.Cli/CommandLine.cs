@@ -145,6 +145,7 @@ internal sealed class CommandLine
                                                          ManualForge's own folder; --remove takes them away
               manualforge setup mcp                      Register the MCP server with every app here that can
                                                          use it; --list shows where, --remove takes it out
+              manualforge setup models                   Fetch the OCR models now, rather than on the first run
               manualforge version                        Which build this is, and where it was loaded from
               manualforge pages <folder> --shape drawn   Find test pages by shape, from the audit's geometry
               manualforge assemble --pages <list>        Collect pages from many PDFs into one image-only PDF
@@ -337,7 +338,9 @@ internal sealed class CommandLine
               --server <exe>          The server to register. Default: the one beside this program.
               --list                  Which apps are here, and whether each has ManualForge.
               --plan                  What registering would change, changing nothing.
-              --remove                Take ManualForge's entry out of every app, and nothing else.
+              --remove                Undo what registering recorded: take out the entries it added,
+                                      put back the ones it replaced, and leave the rest.
+              --remove --all          Take out every entry named manualforge, whoever added it.
 
             general options:
               --models <path>         Model cache directory.

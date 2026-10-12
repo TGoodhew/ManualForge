@@ -16,8 +16,32 @@ internal static class SetupCommand
         {
             "gpu" => await GpuAsync(arguments, cancellationToken).ConfigureAwait(false),
             "mcp" => Mcp(arguments),
+            "models" => await ModelsAsync(arguments, cancellationToken).ConfigureAwait(false),
             _ => Usage(),
         };
+    }
+
+    /// <summary>
+    /// Fetches the OCR models now, so that the first run does not stop to download them. The models
+    /// are the same for every provider, so nothing here needs a GPU.
+    /// </summary>
+    private static async Task<int> ModelsAsync(CommandLine arguments, CancellationToken cancellationToken)
+    {
+        var options = new OcrEngineOptions
+        {
+            ModelCachePath = arguments.Get("models") ?? new OcrEngineOptions().ModelCachePath,
+        };
+
+        Console.WriteLine($"Model cache : {options.ModelCachePath}");
+        var report = await PaddleOcrEngine.FetchModelsAsync(options, cancellationToken).ConfigureAwait(false);
+        Console.WriteLine(string.Format(CultureInfo.InvariantCulture,
+            "Models      : {0} downloaded, {1} already there, {2} failed; {3:N0} MB, {4:N0} s",
+            report.DownloadedCount, report.CachedCount, report.FailedCount, report.TotalBytes / 1048576.0, report.Duration.TotalSeconds));
+        if (report.IsComplete)
+            return 0;
+
+        Console.Error.WriteLine("error: some models could not be fetched. They are fetched on the first run instead.");
+        return 1;
     }
 
     private static int Usage()
@@ -25,7 +49,8 @@ internal static class SetupCommand
         Console.Error.WriteLine("usage: manualforge setup gpu [--plan] [--accept-nvidia-licences] [--no-tensorrt]");
         Console.Error.WriteLine("                             [--force] [--downloads <folder>] [--remove]");
         Console.Error.WriteLine("       manualforge setup mcp [--library <folder>] [--client <id,...>] [--server <exe>]");
-        Console.Error.WriteLine("                             [--list] [--plan] [--remove]");
+        Console.Error.WriteLine("                             [--list] [--plan] [--remove [--all]]");
+        Console.Error.WriteLine("       manualforge setup models [--models <folder>]");
         return 2;
     }
 
@@ -33,7 +58,8 @@ internal static class SetupCommand
     /// Tells every application on this machine that can launch a local MCP server about ManualForge's:
     /// one <c>manualforge</c> entry each, pointing at <c>ManualForge.Mcp.exe</c> with the library set.
     /// Each settings file is copied aside before it is changed and merged rather than rewritten, so
-    /// other servers are left as they were. <c>--remove</c> takes the entry out of every one of them.
+    /// other servers are left as they were. What it changes is recorded, and <c>--remove</c> undoes
+    /// exactly that; <c>--remove --all</c> takes out every entry named manualforge.
     /// </summary>
     private static int Mcp(CommandLine arguments)
     {
@@ -43,17 +69,40 @@ internal static class SetupCommand
             .Where(c => only is null || only.Contains(c.Id, StringComparer.OrdinalIgnoreCase))
             .ToList();
 
+        var record = McpRegistrations.Load(environment);
+
         if (arguments.Has("remove"))
         {
-            foreach (var client in clients.Where(c => c.IsInstalled))
+            static string Kept(McpChange change) =>
+                (change.Backup is null ? "" : $"   (the copy from before ManualForge is kept, for its comments: {change.Backup})") +
+                (change.Note is null ? "" : $"   {change.Note}");
+
+            // --all is for cleaning up by hand: every entry named manualforge, whoever put it there.
+            if (arguments.Has("all"))
             {
-                var change = client.Unregister();
-                Console.WriteLine($"  {client.DisplayName,-34} {(change.Changed ? "removed" : "had none")}" +
-                                  (change.Backup is null ? "" : $"   (the copy from before ManualForge is kept, for its comments: {change.Backup})") +
-                                  (change.Note is null ? "" : $"   {change.Note}"));
+                foreach (var client in clients.Where(c => c.IsInstalled))
+                {
+                    var change = client.Unregister();
+                    Console.WriteLine($"  {client.DisplayName,-34} {(change.Changed ? "removed" : "had none")}{Kept(change)}");
+                }
+
+                record.Remove(clients);
+                return 0;
             }
 
-            return 0;
+            var removals = record.Remove(clients);
+            if (removals.Count == 0)
+                Console.WriteLine("  ManualForge has no record of registering with any app here; nothing removed. --all removes every entry named manualforge.");
+
+            foreach (var removal in removals)
+            {
+                var outcome = !removal.Change.Changed && removal.Change.Note is not null ? "not changed"
+                    : removal.Restored ? "put back the entry it had before"
+                    : removal.Change.Changed ? "removed" : "had none";
+                Console.WriteLine($"  {removal.Client.DisplayName,-34} {outcome}{Kept(removal.Change)}");
+            }
+
+            return removals.Any(r => !r.Change.Changed && r.Change.Note is not null) ? 1 : 0;
         }
 
         var server = arguments.Get("server")
@@ -103,7 +152,7 @@ internal static class SetupCommand
             }
             else
             {
-                var change = client.Register(entry);
+                var change = record.Register(client, entry);
                 outcome = !change.Changed ? $"not changed: {change.Note}"
                     : (state == McpClientState.Different ? "updated" : "registered")
                       + (change.Backup is null ? "" : "; previous settings copied aside")

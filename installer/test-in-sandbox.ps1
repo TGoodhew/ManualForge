@@ -103,6 +103,10 @@ try {
     Check 'manualforge version' ($version.Code -eq 0 -and $version.Output -match 'manualforge\s+\S+') (($version.Output -split "`n")[0].Trim())
     $gpu = Invoke-Cli @('gpu')
     Check 'manualforge gpu runs (no GPU here)' ($gpu.Code -eq 0) "exit $($gpu.Code)"
+    Check 'it says plainly there is no NVIDIA GPU, and runs on the CPU' ($gpu.Output -match 'Active provider\s*:\s*Cpu' -and $gpu.Output -match 'No NVIDIA GPU was found') (($gpu.Output -split "`n" | Select-String 'No NVIDIA|Active provider') -join ' / ')
+    $setupGpu = Invoke-Cli @('setup', 'gpu', '--plan')
+    Check 'setup gpu says there is nothing to download' ($setupGpu.Code -eq 0 -and $setupGpu.Output -match 'no NVIDIA GPU found') (($setupGpu.Output -split "`n" | Select-String 'GPU\s+:') -join '')
+    Check 'the models were fetched during setup' (Test-Path (Join-Path $env:LOCALAPPDATA 'ManualForge\models\PP-OCRv5_mobile_det.onnx'))
     $status = Invoke-Cli @('status', $library)
     Check 'manualforge status' ($status.Code -eq 0) "exit $($status.Code)"
     $mcp = Invoke-Cli @('setup', 'mcp', '--list')

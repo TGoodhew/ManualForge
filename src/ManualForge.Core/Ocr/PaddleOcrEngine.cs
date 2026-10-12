@@ -2,6 +2,7 @@ using System.Diagnostics;
 using ManualForge.Core.Geometry;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using PaddleOcrNet.Extraction;
 using PaddleOcrNet.Models;
 using PaddleOcrNet.Services;
 
@@ -135,6 +136,28 @@ public sealed class PaddleOcrEngine : IOcrEngine
     }
 
     public OcrRuntimeSummary Runtime { get; }
+
+    /// <summary>
+    /// Fetches every model a recognition with these options loads, into their model cache, without
+    /// loading any of them. The service fetches them only when it first needs each one, so without this
+    /// a first run stops to download. Failures are reported per file, not thrown.
+    /// </summary>
+    public static Task<ModelDownloadReport> FetchModelsAsync(OcrEngineOptions options, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        Directory.CreateDirectory(options.ModelCachePath);
+
+        var serviceOptions = new PaddleOcrServiceOptions
+        {
+            ModelCachePath = options.ModelCachePath,
+            Download = new ModelDownloadOptions { Offline = options.OfflineModels },
+            DetectionModel = options.UseServerModels ? OcrModelVariant.Server : OcrModelVariant.Mobile,
+            RecognitionModel = options.UseServerModels ? OcrModelVariant.Server : OcrModelVariant.Mobile,
+        };
+
+        var sets = options.UseServerModels ? PaddleModelSet.Ocr | PaddleModelSet.ServerModels : PaddleModelSet.Ocr;
+        return PaddleOcrModels.DownloadAsync(serviceOptions, [OcrLanguage.English], sets, progress: null, cancellationToken);
+    }
 
     /// <summary>The models on TensorRT, as the page cache records them: <c>cls+rec</c>, <c>det+cls+rec</c>.</summary>
     internal static string TensorRtModelNames(TensorRtModels models) => string.Join('+',
