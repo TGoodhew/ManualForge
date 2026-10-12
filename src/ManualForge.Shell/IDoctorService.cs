@@ -81,6 +81,13 @@ public interface IDoctorService
     /// lettering. Null when the page cannot be rendered.
     /// </summary>
     Task<byte[]?> ExplainAsync(string path, int pageNumber, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// The text a repair recovered from one page of the file as it is now, or null when none has been.
+    /// So the tab can say whether the black lettering in the picture is already searchable (#74).
+    /// </summary>
+    Task<PageRepair?> RecoveredAsync(string root, string path, int pageNumber, CancellationToken cancellationToken)
+        => Task.FromResult<PageRepair?>(null);
 }
 
 /// <summary>
@@ -166,6 +173,22 @@ public sealed class DoctorService(
                 {
                     return data.ToArray();
                 }
+            },
+            cancellationToken);
+
+    public Task<PageRepair?> RecoveredAsync(string root, string path, int pageNumber, CancellationToken cancellationToken) =>
+        Task.Run<PageRepair?>(
+            () =>
+            {
+                var databasePath = DoctorStore.DefaultPathFor(root);
+                if (!File.Exists(databasePath))
+                    return null;
+
+                using var store = new DoctorStore(databasePath, readOnly: true);
+                return store.Document(path) is { } document
+                       && store.Repairs(path, document.ContentHash).TryGetValue(pageNumber, out var repair)
+                    ? repair
+                    : null;
             },
             cancellationToken);
 

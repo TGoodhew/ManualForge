@@ -211,7 +211,8 @@
                     </Grid.RowDefinitions>
                     <Button
                         Grid.Row="0"
-                        Content="Forget files that are no longer on disk"
+                        Content="Trim"
+                        ToolTipService.ToolTip="Forget the records of files that are no longer on disk. Nothing on disk is touched."
                         Command="{x:Bind ViewModel.TrimMissingCommand}" />
                     <ListView Grid.Row="1" ItemsSource="{x:Bind ViewModel.Errors, Mode=OneWay}" SelectionMode="None">
                         <ListView.ItemTemplate>
@@ -248,19 +249,19 @@
                             Grid.Column="0"
                             Content="Read audit"
                             Command="{x:Bind Doctor.RefreshCommand}"
-                            ToolTipService.ToolTip="Show what an earlier audit found. Changes nothing." />
+                            ToolTipService.ToolTip="Show what the last audit found, from its saved findings. Changes nothing." />
 
                         <Button
                             Grid.Column="1"
                             Content="Audit folder"
                             Command="{x:Bind Doctor.AuditCommand}"
-                            ToolTipService.ToolTip="Find pages whose text layer is incomplete. Changes nothing. Over a whole library this takes hours — run `manualforge doctor` for that." />
+                            ToolTipService.ToolTip="Find pages whose text layer misses what is printed on them, such as labels on schematics and tables drawn as graphics, which search therefore cannot find. Changes nothing. Files unchanged since the last audit are only checked; a first audit of a whole library takes about an hour." />
 
                         <Button
                             Grid.Column="2"
                             Style="{StaticResource AccentButtonStyle}"
                             Command="{x:Bind Doctor.RepairCommand}"
-                            ToolTipService.ToolTip="OCR the flagged pages of the ticked documents. No PDF is written to.">
+                            ToolTipService.ToolTip="Read the flagged pages of the ticked documents and keep the text found, for search. No PDF is changed. Then build the index on the Search tab so search can find it.">
                             <TextBlock>
                                 <Run Text="Recover text" />
                                 <Run Text="(" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
@@ -303,7 +304,8 @@
                             Opacity="0.8"
                             Style="{StaticResource CaptionTextBlockStyle}" />
                         <ProgressBar
-                            Value="{x:Bind Doctor.PageProgress, Mode=OneWay}"
+                            Value="{x:Bind Doctor.WorkProgress, Mode=OneWay}"
+                            IsIndeterminate="{x:Bind Doctor.IsWorkIndeterminate, Mode=OneWay}"
                             Maximum="100"
                             Visibility="{x:Bind Doctor.IsBusy, Mode=OneWay}" />
                     </StackPanel>
@@ -328,16 +330,16 @@
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="32" />
                                     <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="110" />
-                                    <ColumnDefinition Width="70" />
-                                    <ColumnDefinition Width="70" />
-                                    <ColumnDefinition Width="80" />
+                                    <ColumnDefinition Width="100" />
+                                    <ColumnDefinition Width="60" />
+                                    <ColumnDefinition Width="50" />
+                                    <ColumnDefinition Width="100" />
                                 </Grid.ColumnDefinitions>
                                 <TextBlock Grid.Column="1" Text="Document" Style="{StaticResource CaptionTextBlockStyle}" />
                                 <TextBlock Grid.Column="2" Text="Why" Style="{StaticResource CaptionTextBlockStyle}" />
-                                <TextBlock Grid.Column="3" Text="Flagged" Style="{StaticResource CaptionTextBlockStyle}" />
-                                <TextBlock Grid.Column="4" Text="Drawn" Style="{StaticResource CaptionTextBlockStyle}" />
-                                <TextBlock Grid.Column="5" Text="Recovered" Style="{StaticResource CaptionTextBlockStyle}" />
+                                <TextBlock Grid.Column="3" Text="Flagged" HorizontalAlignment="Right" Style="{StaticResource CaptionTextBlockStyle}" />
+                                <TextBlock Grid.Column="4" Text="Drawn" HorizontalAlignment="Right" Style="{StaticResource CaptionTextBlockStyle}" />
+                                <TextBlock Grid.Column="5" Text="Recovered" HorizontalAlignment="Right" Style="{StaticResource CaptionTextBlockStyle}" />
                             </Grid>
 
                             <ListView
@@ -351,10 +353,10 @@
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="32" />
                                                 <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="110" />
-                                                <ColumnDefinition Width="70" />
-                                                <ColumnDefinition Width="70" />
-                                                <ColumnDefinition Width="80" />
+                                                <ColumnDefinition Width="100" />
+                                                <ColumnDefinition Width="60" />
+                                                <ColumnDefinition Width="50" />
+                                                <ColumnDefinition Width="100" />
                                             </Grid.ColumnDefinitions>
 
                                             <CheckBox
@@ -371,10 +373,10 @@
                                                     TextTrimming="CharacterEllipsis" />
                                             </StackPanel>
 
-                                            <TextBlock Grid.Column="2" Text="{x:Bind Kind}" VerticalAlignment="Center" Opacity="0.8" />
-                                            <TextBlock Grid.Column="3" Text="{x:Bind FlaggedPages}" VerticalAlignment="Center" />
-                                            <TextBlock Grid.Column="4" Text="{x:Bind DrawnPages}" VerticalAlignment="Center" />
-                                            <TextBlock Grid.Column="5" Text="{x:Bind Progress, Mode=OneWay}" VerticalAlignment="Center" />
+                                            <TextBlock Grid.Column="2" Text="{x:Bind Kind}" TextWrapping="Wrap" VerticalAlignment="Center" Opacity="0.8" />
+                                            <TextBlock Grid.Column="3" Text="{x:Bind FlaggedPages}" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                                            <TextBlock Grid.Column="4" Text="{x:Bind DrawnPages}" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                                            <TextBlock Grid.Column="5" Text="{x:Bind Progress, Mode=OneWay}" HorizontalAlignment="Right" VerticalAlignment="Center" />
                                         </Grid>
                                     </DataTemplate>
                                 </ListView.ItemTemplate>
@@ -389,6 +391,7 @@
 
                         <Grid Grid.Column="1" RowSpacing="8">
                             <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
                                 <RowDefinition Height="Auto" />
                                 <RowDefinition Height="*" />
                             </Grid.RowDefinitions>
@@ -405,18 +408,38 @@
                                     Minimum="1"
                                     SpinButtonPlacementMode="Compact"
                                     Value="{x:Bind Doctor.ExplainPage, Mode=TwoWay}" />
-                                <Button Grid.Column="2" Content="Show" Command="{x:Bind Doctor.ExplainCommand}" />
+                                <Button Grid.Column="2" Content="Show" Command="{x:Bind Doctor.ExplainCommand}" ToolTipService.ToolTip="Draw the page as the audit saw it. Click or tick a document first; it starts at the document's first flagged page. Drag the picture to move around it." />
                             </Grid>
 
-                            <Border
+                            <!-- What the picture means for search, and whether this page needs anything (#74). -->
+                            <TextBlock
                                 Grid.Row="1"
+                                Text="{x:Bind Doctor.PageExplanation, Mode=OneWay}"
+                                Visibility="{x:Bind Doctor.HasPageExplanation, Mode=OneWay}"
+                                TextWrapping="Wrap"
+                                Style="{StaticResource CaptionTextBlockStyle}" />
+
+                            <Border
+                                Grid.Row="2"
                                 BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                                 BorderThickness="1"
                                 CornerRadius="4"
                                 Background="{ThemeResource LayerFillColorDefaultBrush}">
-                                <ScrollViewer ZoomMode="Enabled" HorizontalScrollMode="Auto" HorizontalScrollBarVisibility="Auto">
-                                    <Image x:Name="DiagnosticImage" Stretch="Uniform" />
-                                </ScrollViewer>
+                                <Grid>
+                                    <ScrollViewer x:Name="DiagnosticScroller" ZoomMode="Enabled" HorizontalScrollMode="Auto" HorizontalScrollBarVisibility="Auto">
+                                        <Image x:Name="DiagnosticImage" Stretch="Uniform" />
+                                    </ScrollViewer>
+                                    <TextBlock
+                                        Text="{x:Bind Doctor.ExplainHint, Mode=OneWay}"
+                                        Visibility="{x:Bind Doctor.HasNoPicture, Mode=OneWay}"
+                                        TextWrapping="Wrap"
+                                        Opacity="0.7"
+                                        Margin="16"
+                                        VerticalAlignment="Center"
+                                        HorizontalAlignment="Center"
+                                        TextAlignment="Center"
+                                        Style="{StaticResource CaptionTextBlockStyle}" />
+                                </Grid>
                             </Border>
                         </Grid>
                     </Grid>

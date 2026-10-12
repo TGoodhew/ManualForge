@@ -78,7 +78,7 @@ internal static class DoctorCommand
             lastReported = p.DocumentsDone;
             Console.Write(
                 $"\r  {p.DocumentsDone:N0}/{p.DocumentsTotal:N0} documents, " +
-                $"{p.FlaggedDocuments:N0} flagged, {p.FlaggedPages:N0} pages...   ");
+                $"{p.DocumentsUnchanged:N0} unchanged, {p.FlaggedDocuments:N0} flagged, {p.FlaggedPages:N0} pages...   ");
         });
 
         var report = await runner.RunAsync(

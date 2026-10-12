@@ -31,7 +31,10 @@ public interface ILibraryService
         IProgress<PipelinePageProgress>? pages,
         CancellationToken cancellationToken);
 
-    /// <summary>Records for files that are no longer on disk, reported whatever else is asked for.</summary>
+    /// <summary>
+    /// Forgets files that are no longer on disk: their records in the queue, their findings in the
+    /// audit and their pages in the search index. Returns each file forgotten from any of them.
+    /// </summary>
     Task<IReadOnlyList<string>> TrimMissingAsync(string root, CancellationToken cancellationToken);
 
     /// <summary>The card, or null when there is nothing to report.</summary>

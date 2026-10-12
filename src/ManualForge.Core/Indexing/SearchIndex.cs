@@ -894,13 +894,14 @@ public sealed class SearchIndex : IDisposable
         command.CommandText = """
             SELECT d.path
             FROM documents d
-            WHERE NOT EXISTS (
-                SELECT 1 FROM pages p
-                WHERE p.doc_id = d.id AND LENGTH(TRIM(p.text)) > 0
-            )
+            WHERE d.id NOT IN (SELECT doc_id FROM pages WHERE LENGTH(TRIM(text)) > 0)
             ORDER BY d.indexed_utc DESC
             LIMIT $limit
             """;
+        // One pass over the pages. It was a NOT EXISTS correlated on doc_id, which the FTS5 table
+        // cannot index, so it read every page once per document: 53 seconds on 630 documents and
+        // 112,464 pages, against 0.3 s for this. It ran on every library_status, every search that
+        // found nothing, and every time the app opened (#74).
         command.Parameters.AddWithValue("$limit", limit);
 
         var paths = new List<string>();

@@ -16,7 +16,7 @@
     <Product>ManualForge</Product>
     <Company>Tony Goodhew</Company>
     <Copyright>Copyright (c) Tony Goodhew</Copyright>
-    <Version>1.0.2</Version>
+    <Version>1.0.3</Version>
     <!-- PDFium / ONNX Runtime native assets are x64-only; AnyCPU would silently pick wrong RIDs. -->
     <ManagedRuntimeMarshalling>false</ManagedRuntimeMarshalling>
   </PropertyGroup>
