@@ -394,8 +394,8 @@ public sealed class DoctorViewModelTests
 
         Assert.Equal(service.Picture, doctor.Diagnostic);
         Assert.Contains("Page 40 of 54845A Programmer", doctor.Status, StringComparison.Ordinal);
-        Assert.Contains("red boxes mark the black shapes the audit judged to be lettering", doctor.PageExplanation, StringComparison.Ordinal);
-        Assert.Contains("did not flag this page", doctor.PageExplanation, StringComparison.Ordinal);
+        Assert.Contains("Red boxes: lettering the document's text is missing", doctor.PageExplanation, StringComparison.Ordinal);
+        Assert.Contains("Not flagged", doctor.PageExplanation, StringComparison.Ordinal);
     }
 
     [Fact]

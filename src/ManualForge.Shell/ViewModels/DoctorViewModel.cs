@@ -190,7 +190,6 @@ public sealed partial class DoctorViewModel(IDoctorService service, IUiDispatche
     {
         Diagnostic = null;
         PageExplanation = null;
-        PageRecoveredText = null;
         if (value is not null)
             ExplainPage = FirstPageOf(value.PageRanges) ?? 1;
     }
@@ -459,7 +458,6 @@ public sealed partial class DoctorViewModel(IDoctorService service, IUiDispatche
             {
                 Status = $"Page {ExplainPage:N0} could not be rendered.";
                 PageExplanation = null;
-                PageRecoveredText = null;
             }
             else
             {
@@ -469,7 +467,6 @@ public sealed partial class DoctorViewModel(IDoctorService service, IUiDispatche
                         .ConfigureAwait(true);
                 Status = $"Page {ExplainPage:N0} of {SelectedDocument.Title}, as the audit saw it.";
                 PageExplanation = ExplainPageState(IsFlagged(SelectedDocument.PageRanges, ExplainPage), repair);
-                PageRecoveredText = repair?.OcrText;
             }
         }
         catch (Exception ex)
@@ -487,12 +484,6 @@ public sealed partial class DoctorViewModel(IDoctorService service, IUiDispatche
 
     public bool HasPageExplanation => !string.IsNullOrEmpty(PageExplanation);
 
-    /// <summary>The text a repair recovered from that page, when there is some, to compare with the picture.</summary>
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(HasPageRecoveredText))]
-    private string? _pageRecoveredText;
-
-    public bool HasPageRecoveredText => !string.IsNullOrEmpty(PageRecoveredText);
 
     /// <summary>
     /// Says, for the page in the picture, what its colours mean for search and where it stands. The
@@ -501,30 +492,20 @@ public sealed partial class DoctorViewModel(IDoctorService service, IUiDispatche
     public static string ExplainPageState(bool flagged, PageRepair? repair)
     {
         const string legend =
-            "Grey is text that is already in the document's own text layer, which search finds. Black is " +
-            "everything else drawn on the page: lines and pictures, and any lettering the text layer is missing. " +
-            "The red boxes mark the black shapes the audit judged to be lettering: text a search of the document " +
-            "alone could not find, and the reason the page was flagged. The picture shows the PDF as it is; " +
-            "recovered text is kept beside it for search rather than written into it, so recovered lettering " +
-            "still shows black here.";
+            "Grey: text already in the document. Black: everything else drawn on the page. " +
+            "Red boxes: lettering the document's text is missing, which search could not find.";
 
-        if (repair is not null)
-        {
-            return legend + " " + string.Format(
+        var state = repair is not null
+            ? string.Format(
                 CultureInfo.CurrentCulture,
-                "ManualForge has already read this page and recovered {0:N0} word(s) from it, on {1:d}. They go " +
-                "into search when the index is built, so there is nothing to do. What it read is below; it is " +
-                "OCR, so expect some misreadings.",
-                repair.WordCount, repair.RepairedUtc.LocalDateTime);
-        }
+                "Recovered on {0:d} ({1:N0} word(s)) and kept for search; the PDF is unchanged, so it still shows black. Nothing to do.",
+                repair.RepairedUtc.LocalDateTime, repair.WordCount)
+            : flagged
+                ? "Not recovered yet: tick the document and press Recover text."
+                : "Not flagged: the document's text covers this page. Nothing to do.";
 
-        return flagged
-            ? legend + " The audit flagged this page and its text has not been recovered yet. To recover it, " +
-              "tick the document and press Recover text, then build the index on the Search tab."
-            : legend + " The audit did not flag this page: its text layer accounts for what is drawn on it, " +
-              "so there is nothing to do.";
+        return legend + "\n" + state;
     }
-
     /// <summary>Whether a page is in a list such as "14,16,21-26".</summary>
     public static bool IsFlagged(string? ranges, int page)
     {

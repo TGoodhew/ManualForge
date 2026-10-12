@@ -249,19 +249,19 @@
                             Grid.Column="0"
                             Content="Read audit"
                             Command="{x:Bind Doctor.RefreshCommand}"
-                            ToolTipService.ToolTip="Show what an earlier audit found. Changes nothing." />
+                            ToolTipService.ToolTip="Show what the last audit found, from its saved findings. Changes nothing." />
 
                         <Button
                             Grid.Column="1"
                             Content="Audit folder"
                             Command="{x:Bind Doctor.AuditCommand}"
-                            ToolTipService.ToolTip="Find pages whose text layer is incomplete. Changes nothing. Over a whole library this takes hours — run `manualforge doctor` for that." />
+                            ToolTipService.ToolTip="Find pages whose text layer misses what is printed on them, such as labels on schematics and tables drawn as graphics, which search therefore cannot find. Changes nothing. Files unchanged since the last audit are only checked; a first audit of a whole library takes about an hour." />
 
                         <Button
                             Grid.Column="2"
                             Style="{StaticResource AccentButtonStyle}"
                             Command="{x:Bind Doctor.RepairCommand}"
-                            ToolTipService.ToolTip="OCR the flagged pages of the ticked documents. No PDF is written to.">
+                            ToolTipService.ToolTip="Read the flagged pages of the ticked documents and keep the text found, for search. No PDF is changed. Then build the index on the Search tab so search can find it.">
                             <TextBlock>
                                 <Run Text="Recover text" />
                                 <Run Text="(" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
@@ -291,19 +291,11 @@
                             ToolTipService.ToolTip="Also redo scanned pages whose earlier OCR missed lettering. A different problem, and on a large library, hours of work." />
                     </Grid>
 
-                    <!-- What this tab is for and the order to use it in: the results meant nothing
-                         without it (#74). -->
-                    <StackPanel Grid.Row="1" Spacing="4">
-                        <TextBlock
-                            TextWrapping="Wrap"
-                            Opacity="0.8"
-                            Style="{StaticResource CaptionTextBlockStyle}"
-                            Text="The audit finds pages whose text layer misses what is printed on them, such as labels on schematics and tables drawn as graphics, which a search therefore cannot find. Recover text reads those pages and keeps what it finds for search; no PDF is changed. Then build the index on the Search tab, so search can find it. To check a finding first, click or tick a document and Show one of its pages." />
-                        <TextBlock
-                            Text="{x:Bind Doctor.Headline, Mode=OneWay}"
-                            TextWrapping="Wrap"
-                            Style="{StaticResource CaptionTextBlockStyle}" />
-                    </StackPanel>
+                    <TextBlock
+                        Grid.Row="1"
+                        Text="{x:Bind Doctor.Headline, Mode=OneWay}"
+                        TextWrapping="Wrap"
+                        Style="{StaticResource CaptionTextBlockStyle}" />
 
                     <StackPanel Grid.Row="2" Spacing="4">
                         <TextBlock
@@ -402,7 +394,6 @@
                                 <RowDefinition Height="Auto" />
                                 <RowDefinition Height="Auto" />
                                 <RowDefinition Height="*" />
-                                <RowDefinition Height="Auto" />
                             </Grid.RowDefinitions>
 
                             <Grid Grid.Row="0" ColumnSpacing="8">
@@ -417,7 +408,7 @@
                                     Minimum="1"
                                     SpinButtonPlacementMode="Compact"
                                     Value="{x:Bind Doctor.ExplainPage, Mode=TwoWay}" />
-                                <Button Grid.Column="2" Content="Show" Command="{x:Bind Doctor.ExplainCommand}" />
+                                <Button Grid.Column="2" Content="Show" Command="{x:Bind Doctor.ExplainCommand}" ToolTipService.ToolTip="Draw the page as the audit saw it. Click or tick a document first; it starts at the document's first flagged page. Drag the picture to move around it." />
                             </Grid>
 
                             <!-- What the picture means for search, and whether this page needs anything (#74). -->
@@ -450,19 +441,6 @@
                                         Style="{StaticResource CaptionTextBlockStyle}" />
                                 </Grid>
                             </Border>
-
-                            <!-- What a repair read off this page, to set against the black lettering. -->
-                            <StackPanel Grid.Row="3" Spacing="4" Visibility="{x:Bind Doctor.HasPageRecoveredText, Mode=OneWay}">
-                                <TextBlock Text="Text recovered from this page" FontWeight="SemiBold" Style="{StaticResource CaptionTextBlockStyle}" />
-                                <ScrollViewer MaxHeight="140">
-                                    <TextBlock
-                                        Text="{x:Bind Doctor.PageRecoveredText, Mode=OneWay}"
-                                        TextWrapping="Wrap"
-                                        IsTextSelectionEnabled="True"
-                                        FontFamily="Consolas"
-                                        Style="{StaticResource CaptionTextBlockStyle}" />
-                                </ScrollViewer>
-                            </StackPanel>
                         </Grid>
                     </Grid>
                 </Grid>

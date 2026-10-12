@@ -34,15 +34,15 @@ public sealed class DoctorGuidanceTests
             new DateTimeOffset(2026, 10, 11, 7, 0, 0, TimeSpan.Zero));
 
         var recovered = DoctorViewModel.ExplainPageState(flagged: true, repair);
-        Assert.Contains("red boxes mark the black shapes the audit judged to be lettering", recovered, StringComparison.Ordinal);
-        Assert.Contains("already read this page and recovered 42 word(s)", recovered, StringComparison.Ordinal);
-        Assert.Contains("nothing to do", recovered, StringComparison.Ordinal);
+        Assert.Contains("Red boxes: lettering the document's text is missing", recovered, StringComparison.Ordinal);
+        Assert.Contains("(42 word(s)) and kept for search", recovered, StringComparison.Ordinal);
+        Assert.Contains("Nothing to do", recovered, StringComparison.Ordinal);
 
         var waiting = DoctorViewModel.ExplainPageState(flagged: true, repair: null);
-        Assert.Contains("has not been recovered yet", waiting, StringComparison.Ordinal);
+        Assert.Contains("Not recovered yet", waiting, StringComparison.Ordinal);
         Assert.Contains("press Recover text", waiting, StringComparison.Ordinal);
 
-        Assert.Contains("did not flag this page", DoctorViewModel.ExplainPageState(flagged: false, repair: null), StringComparison.Ordinal);
+        Assert.Contains("Not flagged", DoctorViewModel.ExplainPageState(flagged: false, repair: null), StringComparison.Ordinal);
     }
 
     [Theory]
