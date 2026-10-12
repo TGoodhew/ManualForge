@@ -224,9 +224,19 @@ public sealed partial class LibraryViewModel(
                   + "It was left alone. Replace it with a good copy and run again.");
         }
 
-        if (MissingCount > 0)
-            Errors.Add($"{MissingCount:N0} recorded file(s) are no longer on disk. Trim to forget them.");
+        _surveyStatus = Status;
+        _missingProblem = MissingCount > 0
+            ? $"{MissingCount:N0} recorded file(s) are no longer on disk. Trim to forget them."
+            : null;
+        if (_missingProblem is not null)
+            Errors.Add(_missingProblem);
     }
+
+    /// <summary>The survey's own summary, so a trim can say what it did and still show it.</summary>
+    private string? _surveyStatus;
+
+    /// <summary>The Problems entry for files that have gone, which a trim answers and takes away.</summary>
+    private string? _missingProblem;
 
     [RelayCommand(CanExecute = nameof(CanStart))]
     private async Task RunAsync()
@@ -367,7 +377,16 @@ public sealed partial class LibraryViewModel(
         {
             var trimmed = await _service.TrimMissingAsync(Folder!, CancellationToken.None).ConfigureAwait(true);
             MissingCount = 0;
-            Status = $"Forgot {trimmed.Count:N0} record(s) for files that are no longer on disk.";
+
+            // The problem it answered goes, so the Problems tab no longer asks for a trim that is done.
+            if (_missingProblem is not null)
+            {
+                Errors.Remove(_missingProblem);
+                _missingProblem = null;
+            }
+
+            Status = $"Forgot {trimmed.Count:N0} file(s) that are no longer on disk, from the queue, the audit and the search index."
+                     + (_surveyStatus is null ? "" : " " + _surveyStatus);
         }
         catch (Exception ex)
         {

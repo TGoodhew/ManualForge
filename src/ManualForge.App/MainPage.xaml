@@ -211,7 +211,8 @@
                     </Grid.RowDefinitions>
                     <Button
                         Grid.Row="0"
-                        Content="Forget files that are no longer on disk"
+                        Content="Trim"
+                        ToolTipService.ToolTip="Forget the records of files that are no longer on disk. Nothing on disk is touched."
                         Command="{x:Bind ViewModel.TrimMissingCommand}" />
                     <ListView Grid.Row="1" ItemsSource="{x:Bind ViewModel.Errors, Mode=OneWay}" SelectionMode="None">
                         <ListView.ItemTemplate>

@@ -256,6 +256,12 @@ public class LibraryViewModelTests
         Assert.Equal(1, service.TrimCalls);
         Assert.Equal(0, model.MissingCount);
         Assert.False(model.TrimMissingCommand.CanExecute(null));
+
+        // The Problems tab no longer asks for the trim it has just had, and the status line says what
+        // was done and still gives the survey's summary (12 October 2026: it kept asking).
+        Assert.DoesNotContain(model.Errors, e => e.Contains("no longer on disk", StringComparison.Ordinal));
+        Assert.StartsWith("Forgot 1 file(s) that are no longer on disk", model.Status, StringComparison.Ordinal);
+        Assert.Contains("1 files, 10 pages.", model.Status, StringComparison.Ordinal);
     }
 
     // ---------------------------------------------------------------- live progress

@@ -358,6 +358,8 @@ The app does the same work with live progress:
 - in the Doctor tab, review what the audit found, see the picture the detector worked from for any
   page, and repair the documents you tick
 - in the Search tab, build or update the index and search it
+- in the Problems tab, Trim forgets manuals you have deleted: from the work queue, the audit and the
+  search index at once, as the three `--trim-missing` options below do
 
 Cancel keeps every page already recognised, so running again carries on.
 

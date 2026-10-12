@@ -70,7 +70,30 @@ public sealed class LibraryService(
             {
                 var processor = new LibraryProcessor(
                     builder: null, new DocumentClassifier(), _loggerFactory.CreateLogger<LibraryProcessor>());
-                return processor.TrimMissing(libraryOptions);
+                var forgotten = new HashSet<string>(processor.TrimMissing(libraryOptions), StringComparer.OrdinalIgnoreCase);
+
+                // The same files out of the audit and the search index too, as `doctor --trim-missing`
+                // and `reconcile --trim-missing` do. Trimming only the queue left deleted manuals in
+                // search, in the app and through MCP.
+                var doctorPath = ManualForge.Core.Auditing.DoctorStore.DefaultPathFor(root);
+                if (File.Exists(doctorPath))
+                {
+                    using var doctor = new ManualForge.Core.Auditing.DoctorStore(doctorPath);
+                    forgotten.UnionWith(doctor.TrimMissing());
+                }
+
+                var indexPath = ManualForge.Core.Indexing.LibraryIndexer.DefaultIndexPath(root);
+                if (File.Exists(indexPath))
+                {
+                    using var index = new ManualForge.Core.Indexing.SearchIndex(indexPath);
+                    var gone = ManualForge.Core.Indexing.LibraryReconciler
+                        .Reconcile(root, index, new ManualForge.Core.Indexing.IndexOptions()).IndexedButGone;
+                    foreach (var path in gone)
+                        index.Remove(path);
+                    forgotten.UnionWith(gone);
+                }
+
+                return (IReadOnlyList<string>)forgotten.Order(StringComparer.OrdinalIgnoreCase).ToArray();
             },
             cancellationToken).ConfigureAwait(false);
     }
