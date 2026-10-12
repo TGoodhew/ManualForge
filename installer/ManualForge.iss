@@ -43,8 +43,9 @@ UninstallDisplayName={#AppName}
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
-; Closes what holds the program's files during an upgrade: the app, and MCP servers that Claude and
-; the other clients started. They start the new one next time they need it.
+; An upgrade first stops ManualForge's own processes, naming the app that started each MCP server
+; (PrepareToInstall, below). This catches anything else holding the program's files. The clients
+; start the new server the next time they need it.
 CloseApplications=yes
 RestartApplications=no
 ChangesEnvironment=yes
@@ -59,6 +60,11 @@ Name: path; Description: "Let a terminal run `manualforge` from any folder"; Fla
 ; An upgrade replaces the program whole, so nothing from an older build lingers beside the new one.
 Type: filesandordirs; Name: "{app}\*"
 
+[UninstallDelete]
+; The folder is recorded as created only by the install that made it, and an upgrade's
+; [InstallDelete] takes the uninstall log of the installs before it with everything else.
+Type: dirifempty; Name: "{app}"
+
 [Files]
 Source: "{#StageDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
@@ -71,7 +77,7 @@ Root: HKCU; Subkey: "Software\ManualForge"; ValueType: string; ValueName: "Libra
 
 [Run]
 Filename: "{app}\{#Cli}"; Parameters: "setup gpu --accept-nvidia-licences {code:TensorRtArgument}"; StatusMsg: "Downloading NVIDIA's libraries. This takes a while; progress is in the window that opens."; Flags: waituntilterminated; Tasks: gpu; Check: NvidiaLicencesAccepted
-Filename: "{app}\{#Cli}"; Parameters: "gpu"; StatusMsg: "Fetching the OCR models and checking the GPU..."; Flags: runhidden waituntilterminated
+Filename: "{app}\{#Cli}"; Parameters: "setup models"; StatusMsg: "Fetching the OCR models..."; Flags: runhidden waituntilterminated
 Filename: "{app}\{#Cli}"; Parameters: "setup mcp --library ""{code:Library}"""; StatusMsg: "Connecting ManualForge to the AI apps on this PC..."; Flags: runhidden waituntilterminated; Tasks: mcp
 Filename: "{app}\{#AppExe}"; Description: "Start ManualForge"; Flags: postinstall nowait skipifsilent
 
@@ -96,6 +102,7 @@ var
   NvidiaPage: TInputOptionWizardPage;
   DownloadPage: TDownloadWizardPage;
   UninstallLibrary, UninstallRuntimes: String;
+  Stopped, InstalledSummary: String;
 
 { ---------------------------------------------------------------- what the machine has }
 
@@ -104,13 +111,28 @@ begin
   Result := FileExists(ExpandConstant('{sys}\nvidia-smi.exe'));
 end;
 
+{ The runtime's own folder is what .NET looks in, so that is checked first. Its installer records the
+  x64 runtime only in the 32-bit view of the registry (WOW6432Node); looking only in the 64-bit view
+  found nothing, and every install ran the .NET installer again, with its permission prompt. }
 function HasDotNet10: Boolean;
 var
   Names: TArrayOfString;
+  Found: TFindRec;
   I: Integer;
 begin
   Result := False;
-  if RegGetValueNames(HKLM64, DotNetKey, Names) then
+  if FindFirst(ExpandConstant('{commonpf64}\dotnet\shared\Microsoft.WindowsDesktop.App\10.*'), Found) then
+  try
+    repeat
+      if (Found.Attributes and FILE_ATTRIBUTE_DIRECTORY) <> 0 then
+        Result := True;
+    until Result or not FindNext(Found);
+  finally
+    FindClose(Found);
+  end;
+  if Result then Exit;
+
+  if RegGetValueNames(HKLM32, DotNetKey, Names) or RegGetValueNames(HKLM64, DotNetKey, Names) then
     for I := 0 to GetArrayLength(Names) - 1 do
       if Copy(Names[I], 1, 3) = '10.' then
         Result := True;
@@ -270,6 +292,171 @@ begin
   end;
 end;
 
+{ ---------------------------------------------------------------- an upgrade: what is running, and whose }
+
+{ The app a process belongs to, from its program. Claude Code inside VS Code is claude.exe under the
+  VS Code extension, so it is named before the walk reaches Code.exe. }
+function KnownClient(const Name, Path: String): String;
+begin
+  Result := '';
+  if Name = 'claude.exe' then
+  begin
+    if (Pos('\windowsapps\claude_', Path) > 0) or (Pos('\anthropicclaude\', Path) > 0) then
+      Result := 'Claude Desktop'
+    else
+      Result := 'Claude Code';
+  end
+  else if Name = 'code.exe' then Result := 'VS Code'
+  else if Name = 'code - insiders.exe' then Result := 'VS Code Insiders'
+  else if Name = 'devenv.exe' then Result := 'Visual Studio'
+  else if Name = 'cursor.exe' then Result := 'Cursor'
+  else if Name = 'windsurf.exe' then Result := 'Windsurf'
+  else if Name = 'lm studio.exe' then Result := 'LM Studio'
+  else if Name = 'codex.exe' then Result := 'Codex'
+  else if Name = 'explorer.exe' then Result := 'Windows (started by you)';
+end;
+
+{ Walks up from a process to the first app it knows, or names the parent when it knows none. }
+function OwnerOf(Service: Variant; Pid: Integer): String;
+var
+  Found, Item: Variant;
+  Level: Integer;
+  Name, Path, Known, Text: String;
+begin
+  Result := 'unknown';
+  for Level := 1 to 5 do
+  begin
+    Found := Service.ExecQuery(Format('SELECT ParentProcessId FROM Win32_Process WHERE ProcessId = %d', [Pid]));
+    if Found.Count = 0 then Exit;
+    Pid := Found.ItemIndex(0).ParentProcessId;
+    Found := Service.ExecQuery(Format('SELECT Name, ExecutablePath FROM Win32_Process WHERE ProcessId = %d', [Pid]));
+    if Found.Count = 0 then Exit;
+    Item := Found.ItemIndex(0);
+    Text := Item.Name;
+    Name := Lowercase(Text);
+    if VarIsNull(Item.ExecutablePath) then Path := '' else
+    begin
+      Path := Item.ExecutablePath;
+      Path := Lowercase(Path);
+    end;
+    Known := KnownClient(Name, Path);
+    if Known <> '' then
+    begin
+      Result := Known;
+      Exit;
+    end;
+    if Level = 1 then Result := Text;
+  end;
+end;
+
+{ ManualForge's own processes, from this install's folder, each with the app that started it. }
+function FindRunning(var Pids: TArrayOfInteger): String;
+var
+  Locator, Service, Found, Item: Variant;
+  I, N: Integer;
+  App, Path, Name: String;
+begin
+  Result := '';
+  SetArrayLength(Pids, 0);
+  App := Lowercase(AddBackslash(ExpandConstant('{app}')));
+  try
+    Locator := CreateOleObject('WbemScripting.SWbemLocator');
+    Service := Locator.ConnectServer('.', 'root\CIMV2');
+    Found := Service.ExecQuery('SELECT ProcessId, Name, ExecutablePath FROM Win32_Process WHERE ' +
+      'Name = ''ManualForge.Mcp.exe'' OR Name = ''manualforge.exe'' OR Name = ''ManualForge.App.exe''');
+    for I := 0 to Found.Count - 1 do
+    begin
+      Item := Found.ItemIndex(I);
+      if VarIsNull(Item.ExecutablePath) then Continue;
+      Path := Item.ExecutablePath;
+      Path := Lowercase(Path);
+      if Copy(Path, 1, Length(App)) <> App then Continue;
+      Name := Item.Name;
+      N := GetArrayLength(Pids);
+      SetArrayLength(Pids, N + 1);
+      Pids[N] := Item.ProcessId;
+      Result := Result + #13#10 + Format('  %s (process %d), started by %s', [Name, Pids[N], OwnerOf(Service, Pids[N])]);
+    end;
+  except
+    Log('Could not list running processes: ' + GetExceptionMessage);
+  end;
+end;
+
+{ Says what is running and whose it is, then stops it. False if the user would rather it kept running. }
+function StopRunning(Silent: Boolean; const Why: String): Boolean;
+var
+  Pids: TArrayOfInteger;
+  Running: String;
+  I, Code: Integer;
+begin
+  Result := True;
+  Running := FindRunning(Pids);
+  if Running = '' then Exit;
+
+  Log('ManualForge is running:' + Running);
+  if not Silent then
+    if MsgBox('ManualForge is running:' + Running + #13#10#13#10 + Why, mbConfirmation, MB_OKCANCEL) <> IDOK then
+    begin
+      Result := False;
+      Exit;
+    end;
+
+  for I := 0 to GetArrayLength(Pids) - 1 do
+    Exec(ExpandConstant('{sys}\taskkill.exe'), Format('/PID %d /F', [Pids[I]]), '', SW_HIDE, ewWaitUntilTerminated, Code);
+  Sleep(1000);
+  Stopped := Running;
+  Log('Stopped:' + Stopped);
+end;
+
+{ Before the files are replaced. }
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  Result := '';
+  if not StopRunning(WizardSilent,
+      'Setup stops these to replace the program. The apps that started an MCP server start the new one the ' +
+      'next time they need it; if one shows an error for ManualForge, restart that app.') then
+    Result := 'ManualForge is still running, so nothing was changed. Close it and run Setup again.';
+end;
+
+{ Which build is installed and what it runs on: in the log always, and on the last page when there is one. }
+function InstalledBuild: String;
+var
+  Output: TExecOutput;
+  Code, I: Integer;
+  Line: String;
+begin
+  if InstalledSummary = '' then
+  begin
+    if ExecAndCaptureOutput(ExpandConstant('{app}\{#Cli}'), 'version', '', SW_HIDE, ewWaitUntilTerminated, Code, Output) then
+      if GetArrayLength(Output.StdOut) > 0 then
+        InstalledSummary := Output.StdOut[0];
+    if ExecAndCaptureOutput(ExpandConstant('{app}\{#Cli}'), 'gpu', '', SW_HIDE, ewWaitUntilTerminated, Code, Output) then
+      for I := 0 to GetArrayLength(Output.StdOut) - 1 do
+      begin
+        Line := Output.StdOut[I];
+        Log('gpu: ' + Line);
+        if Pos('Active provider', Line) = 1 then
+          InstalledSummary := InstalledSummary + #13#10 + 'Runs on: ' + Trim(Copy(Line, Pos(':', Line) + 1, Length(Line)));
+      end;
+    Log('Installed: ' + InstalledSummary);
+  end;
+  Result := InstalledSummary;
+end;
+
+procedure CurPageChanged(CurPageID: Integer);
+var
+  Summary: String;
+begin
+  if CurPageID <> wpFinished then Exit;
+
+  Summary := InstalledBuild;
+  if Stopped <> '' then
+    Summary := Summary + #13#10#13#10 + 'Stopped for the upgrade:' + Stopped;
+  WizardForm.FinishedLabel.Caption := WizardForm.FinishedLabel.Caption + #13#10#13#10 + Summary;
+  WizardForm.FinishedLabel.AdjustHeight;
+  WizardForm.RunList.Top := WizardForm.FinishedLabel.Top + WizardForm.FinishedLabel.Height + ScaleY(12);
+end;
+
 { ---------------------------------------------------------------- the environment, recorded so it can be undone }
 
 procedure AddToPath(const Dir: String);
@@ -314,6 +501,10 @@ begin
     if WizardIsTaskSelected('path') then
       AddToPath(ExpandConstant('{app}'));
   end;
+
+  { A silent install has no last page, so the log is the only place this is said. }
+  if CurStep = ssDone then
+    InstalledBuild;
 end;
 
 { ---------------------------------------------------------------- uninstalling }
@@ -323,6 +514,13 @@ var
   Value: Cardinal;
 begin
   Result := RegQueryDWordValue(HKCU, StateKey, Name, Value) and (Value = 1);
+end;
+
+{ Running, ManualForge holds its own files and the GPU libraries open, and they could not be removed. }
+function InitializeUninstall: Boolean;
+begin
+  Result := StopRunning(UninstallSilent,
+    'Uninstalling stops these first. The apps that started an MCP server no longer have ManualForge once it is removed.');
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
