@@ -212,6 +212,7 @@ So, after a run:
 |---|---|
 | `_Originals\<same relative path>` | the untouched original of every file that was replaced |
 | `_Originals\_superseded\` | the previous searchable copy, kept whenever a file is read again from its original |
+| `_Originals\_replaced\<when>\` | an earlier original, kept when a different file of the same name replaced a finished one in the library |
 | `_Originals\manualforge.db` | progress, and recognition cached so an interrupted run resumes |
 | `_Originals\manualforge-doctor.db` | what the audit found, and the text `repair` recovered |
 | `_Originals\manualforge-index.db` | the search index |
@@ -437,7 +438,7 @@ Remove-Item -LiteralPath "$env:LOCALAPPDATA\ManualForge" -Recurse -Force
   ```powershell
   $lib  = 'D:\Manuals'
   $orig = Join-Path $lib '_Originals'
-  $skip = (Join-Path $orig '_superseded'), (Join-Path $orig 'broken')
+  $skip = (Join-Path $orig '_superseded'), (Join-Path $orig '_replaced'), (Join-Path $orig 'broken')
 
   # List what would be copied back; /L copies nothing.
   robocopy $orig $lib *.pdf /S /COPY:DAT /R:1 /W:1 /L /XD $skip
@@ -447,7 +448,7 @@ Remove-Item -LiteralPath "$env:LOCALAPPDATA\ManualForge" -Recurse -Force
 
   # Check every original now matches the library byte for byte. This must print nothing.
   Get-ChildItem $orig -Recurse -File -Filter *.pdf |
-      Where-Object { $_.FullName -notmatch '\\_Originals\\(_superseded|broken)\\' } |
+      Where-Object { $_.FullName -notmatch '\\_Originals\\(_superseded|_replaced|broken)\\' } |
       ForEach-Object {
           $copy = Join-Path $lib $_.FullName.Substring($orig.Length + 1)
           if ((Get-FileHash -LiteralPath $_.FullName).Hash -ne (Get-FileHash -LiteralPath $copy).Hash) { "DIFFERS: $copy" }

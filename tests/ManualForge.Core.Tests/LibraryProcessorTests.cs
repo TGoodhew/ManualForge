@@ -285,6 +285,81 @@ public class LibraryProcessorTests : IDisposable
         Assert.Contains("HEWLETT", ExtractText(path), StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void AFinishedFileReplacedByItsOriginalAgainIsFinishedWithoutASecondCopyOfIt()
+    {
+        // The fresh-install test copied its sample over the searchable copy an earlier test had
+        // made, and the run then failed: "Cannot create a file when that file already exists".
+        var path = TestPdf.Scanned(InRoot("hp", "8340B.pdf"), pages: 2);
+        var original = InRoot("_Originals", "hp", "8340B.pdf");
+        var before = File.ReadAllBytes(path);
+        var options = NewOptions();
+
+        var (first, _) = NewProcessor();
+        first.Survey(options);
+        Assert.Equal(FileStatus.Completed, Assert.Single(first.Run(options)).Status);
+
+        File.Copy(original, path, overwrite: true);
+
+        var (second, _) = NewProcessor();
+        second.Survey(options);
+        var outcome = Assert.Single(second.Run(options));
+
+        Assert.Equal(FileStatus.Completed, outcome.Status);
+        Assert.Null(outcome.Error);
+        Assert.Contains("HEWLETT", ExtractText(path), StringComparison.Ordinal);
+        Assert.Equal(before, File.ReadAllBytes(original));
+        Assert.False(Directory.Exists(InRoot("_Originals", "_replaced")));
+    }
+
+    [Fact]
+    public void AFinishedFileReplacedByAnotherOfTheSameNameKeepsBothOriginals()
+    {
+        var path = TestPdf.ScannedWithContent(InRoot("hp", "8340B.pdf"), "first revision", pages: 2);
+        var original = InRoot("_Originals", "hp", "8340B.pdf");
+        var firstRevision = File.ReadAllBytes(path);
+        var options = NewOptions();
+
+        var (first, _) = NewProcessor();
+        first.Survey(options);
+        Assert.Equal(FileStatus.Completed, Assert.Single(first.Run(options)).Status);
+
+        TestPdf.ScannedWithContent(path, "second revision", pages: 3);
+        var secondRevision = File.ReadAllBytes(path);
+        Assert.NotEqual(firstRevision, secondRevision);
+
+        var (second, _) = NewProcessor();
+        second.Survey(options);
+        var outcome = Assert.Single(second.Run(options));
+
+        Assert.Equal(FileStatus.Completed, outcome.Status);
+        Assert.Null(outcome.Error);
+        Assert.Contains("HEWLETT", ExtractText(path), StringComparison.Ordinal);
+
+        // The new file is the original its searchable copy was made from; the earlier one is kept
+        // under _replaced, in a folder named for when it was replaced.
+        Assert.Equal(secondRevision, File.ReadAllBytes(original));
+        var replaced = Assert.Single(Directory.GetFiles(InRoot("_Originals", "_replaced"), "8340B.pdf", SearchOption.AllDirectories));
+        Assert.Matches(@"^\d{8}-\d{6}\\hp\\8340B\.pdf$", Path.GetRelativePath(InRoot("_Originals", "_replaced"), replaced));
+        Assert.Equal(firstRevision, File.ReadAllBytes(replaced));
+    }
+
+    [Fact]
+    public void AReplacedOriginalNeverOverwritesOneReplacedInTheSameSecond()
+    {
+        var options = NewOptions();
+        var path = InRoot("hp", "8340B.pdf");
+        var when = new DateTime(2026, 10, 11, 18, 30, 0);
+
+        var first = LibraryProcessor.ReplacedPathFor(options, path, when);
+        Assert.Equal(InRoot("_Originals", "_replaced", "20261011-183000", "hp", "8340B.pdf"), first);
+
+        Directory.CreateDirectory(Path.GetDirectoryName(first)!);
+        File.WriteAllText(first, "kept");
+        Assert.Equal(InRoot("_Originals", "_replaced", "20261011-183000-2", "hp", "8340B.pdf"),
+            LibraryProcessor.ReplacedPathFor(options, path, when));
+    }
+
     // ---------------------------------------------------------------- reading a finished file again
 
     private static FakeOcrEngine EngineReading(string word) =>
