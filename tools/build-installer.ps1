@@ -127,6 +127,18 @@ Write-Host "   $vcVersion, signed by Microsoft"
 if ($SkipCompile) { Write-Host ''; Write-Host "Published to $stage; not compiled (-SkipCompile)."; return }
 if (-not $Iscc) { throw 'Inno Setup 6 was not found. Install it (winget install JRSoftware.InnoSetup), or pass -Iscc.' }
 
+# The NVIDIA archives this build pins, as `setup gpu` resolves them from NVIDIA's manifests. Setup
+# compares them with what an earlier install recorded, so an upgrade over current libraries neither
+# offers the download nor asks for NVIDIA's licences again (#78).
+Write-Step 'Reading the NVIDIA libraries this build pins'
+$pins = & (Join-Path $stage 'manualforge.exe') setup gpu --pins
+if ($LASTEXITCODE -ne 0 -or -not $pins) { throw 'manualforge setup gpu --pins failed; NVIDIA''s manifests could not be read.' }
+$pins | ForEach-Object { Write-Host "   $_" }
+$pinned = $pins | ForEach-Object { $folder, $sha = $_ -split ' ', 3; [pscustomobject]@{ Folder = $folder; Sha256 = $sha } }
+$gpuCorePins = ($pinned | Where-Object Folder -in 'cuda', 'cudnn' | ForEach-Object Sha256) -join ','
+$tensorRtPins = ($pinned | Where-Object Folder -eq 'tensorrt' | ForEach-Object Sha256) -join ','
+if (-not $gpuCorePins -or -not $tensorRtPins) { throw "setup gpu --pins named no CUDA, cuDNN or TensorRT archive:`n$($pins -join "`n")" }
+
 Write-Step 'Compiling the installer'
 $defines = @{
     AppVersion        = $version
@@ -143,6 +155,8 @@ $defines = @{
     VcRedistUrl       = $vcUrl
     VcRedistSha256    = $vcSha256
     VcRedistVersion   = $vcVersion
+    GpuCorePins       = $gpuCorePins
+    TensorRtPins      = $tensorRtPins
 }
 $arguments = @($defines.GetEnumerator() | ForEach-Object { "/D$($_.Key)=$($_.Value)" }) + (Join-Path $repo 'installer\ManualForge.iss')
 & $Iscc /Q @arguments

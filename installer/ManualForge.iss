@@ -7,11 +7,15 @@
 ;   * .NET 10 Desktop Runtime - machine-wide, the one administrator prompt, only when missing;
 ;   * Windows App Runtime 1.8 - only when missing;
 ;   * Visual C++ Redistributable - machine-wide, only when missing or older than ONNX Runtime needs;
-;   * NVIDIA's CUDA, cuDNN and TensorRT - by `manualforge setup gpu`, after NVIDIA's licences are accepted.
+;   * NVIDIA's CUDA, cuDNN and TensorRT - by `manualforge setup gpu`, after NVIDIA's licences are accepted,
+;     and only what is not already installed at the versions this build pins (#78).
 ; Uninstalling takes away everything this put on the machine, and never touches the manual library.
 
 #ifndef AppVersion
   #error Build with tools\build-installer.ps1, which supplies the version and the pinned downloads.
+#endif
+#ifndef GpuCorePins
+  #error Build with tools\build-installer.ps1, which supplies the NVIDIA archives this build pins.
 #endif
 
 #define AppName "ManualForge"
@@ -55,8 +59,11 @@ ChangesEnvironment=yes
 ChangesAssociations=yes
 
 [Tasks]
-Name: gpu; Description: "Download NVIDIA's libraries for the GPU (CUDA and cuDNN, about 1.7 GB)"; Check: HasNvidiaGpu
-Name: gpu\tensorrt; Description: "Also TensorRT, which reads about twice as fast (another 1.9 GB)"; Check: HasNvidiaGpu
+; Only what would download something. An upgrade over libraries already current offers neither, and
+; so never asks for NVIDIA's licences again; the Ready page says they are installed (#78).
+Name: gpu; Description: "Download NVIDIA's libraries for the GPU (CUDA and cuDNN, about 1.7 GB)"; Check: OfferGpu
+Name: gpu\tensorrt; Description: "Also TensorRT, which reads about twice as fast (another 1.9 GB)"; Check: OfferGpu
+Name: tensorrt; Description: "Download NVIDIA's TensorRT, which reads about twice as fast (1.9 GB). CUDA and cuDNN are already installed"; Check: OfferTensorRtAlone
 Name: mcp; Description: "Connect ManualForge to the AI apps on this PC (Claude, VS Code and others)"
 Name: path; Description: "Let a terminal run `manualforge` from any folder"; Flags: unchecked
 
@@ -80,7 +87,7 @@ Root: HKCU; Subkey: "Software\ManualForge"; Flags: uninsdeletekey
 Root: HKCU; Subkey: "Software\ManualForge"; ValueType: string; ValueName: "Library"; ValueData: "{code:Library}"
 
 [Run]
-Filename: "{app}\{#Cli}"; Parameters: "setup gpu --accept-nvidia-licences {code:TensorRtArgument}"; StatusMsg: "Downloading NVIDIA's libraries. This takes a while; progress is in the window that opens."; Flags: waituntilterminated; Tasks: gpu; Check: NvidiaLicencesAccepted
+Filename: "{app}\{#Cli}"; Parameters: "setup gpu --accept-nvidia-licences {code:TensorRtArgument}"; StatusMsg: "Downloading NVIDIA's libraries. This takes a while; progress is in the window that opens."; Flags: waituntilterminated; Tasks: gpu tensorrt; Check: NvidiaLicencesAccepted
 Filename: "{app}\{#Cli}"; Parameters: "setup models"; StatusMsg: "Fetching the OCR models..."; Flags: runhidden waituntilterminated
 Filename: "{app}\{#Cli}"; Parameters: "setup mcp --library ""{code:Library}"""; StatusMsg: "Connecting ManualForge to the AI apps on this PC..."; Flags: runhidden waituntilterminated; Tasks: mcp
 Filename: "{app}\{#AppExe}"; Description: "Start ManualForge"; Flags: postinstall nowait skipifsilent
@@ -106,6 +113,8 @@ var
   NvidiaPage: TInputOptionWizardPage;
   DownloadPage: TDownloadWizardPage;
   UninstallLibrary, UninstallRuntimes: String;
+  GpuRecordText: String;
+  GpuRecordRead: Boolean;
   Stopped, InstalledSummary: String;
 
 { ---------------------------------------------------------------- what the machine has }
@@ -113,6 +122,68 @@ var
 function HasNvidiaGpu: Boolean;
 begin
   Result := FileExists(ExpandConstant('{sys}\nvidia-smi.exe'));
+end;
+
+{ What `setup gpu` recorded it installed: the SHA-256 of each archive, in installed.json beside the
+  libraries. Compared with the archives this build pins, it says whether there is anything to download. }
+function GpuRecord: String;
+var
+  Text: AnsiString;
+begin
+  if not GpuRecordRead then
+  begin
+    GpuRecordText := '';
+    if LoadStringFromFile(ExpandConstant('{localappdata}\ManualForge\gpu\installed.json'), Text) then
+      GpuRecordText := Lowercase(String(Text));
+    GpuRecordRead := True;
+  end;
+  Result := GpuRecordText;
+end;
+
+function Recorded(Pins: String): Boolean;
+var
+  Sha: String;
+  I: Integer;
+begin
+  Result := True;
+  Pins := Pins + ',';
+  while Pins <> '' do
+  begin
+    I := Pos(',', Pins);
+    Sha := Lowercase(Trim(Copy(Pins, 1, I - 1)));
+    Delete(Pins, 1, I);
+    if (Sha <> '') and (Pos(Sha, GpuRecord) = 0) then
+      Result := False;
+  end;
+end;
+
+function HasDlls(const Folder: String): Boolean;
+var
+  Found: TFindRec;
+begin
+  Result := FindFirst(ExpandConstant('{localappdata}\ManualForge\gpu\') + Folder + '\*.dll', Found);
+  if Result then
+    FindClose(Found);
+end;
+
+function GpuCoreCurrent: Boolean;
+begin
+  Result := Recorded('{#GpuCorePins}') and HasDlls('cuda') and HasDlls('cudnn');
+end;
+
+function TensorRtCurrent: Boolean;
+begin
+  Result := Recorded('{#TensorRtPins}') and HasDlls('tensorrt');
+end;
+
+function OfferGpu: Boolean;
+begin
+  Result := HasNvidiaGpu and not GpuCoreCurrent;
+end;
+
+function OfferTensorRtAlone: Boolean;
+begin
+  Result := HasNvidiaGpu and GpuCoreCurrent and not TensorRtCurrent;
 end;
 
 { The runtime's own folder is what .NET looks in, so that is checked first. Its installer records the
@@ -169,7 +240,7 @@ end;
 
 function TensorRtArgument(Param: String): String;
 begin
-  if WizardIsTaskSelected('gpu\tensorrt') then Result := '' else Result := '--no-tensorrt';
+  if WizardIsTaskSelected('gpu\tensorrt') or WizardIsTaskSelected('tensorrt') then Result := '' else Result := '--no-tensorrt';
 end;
 
 function NvidiaLicencesAccepted: Boolean;
@@ -217,7 +288,7 @@ end;
 
 function ShouldSkipPage(PageID: Integer): Boolean;
 begin
-  Result := (PageID = NvidiaPage.ID) and not WizardIsTaskSelected('gpu');
+  Result := (PageID = NvidiaPage.ID) and not WizardIsTaskSelected('gpu') and not WizardIsTaskSelected('tensorrt');
 end;
 
 { ---------------------------------------------------------------- the runtimes, before the files }
@@ -287,12 +358,45 @@ end;
 function NextButtonClick(CurPageID: Integer): Boolean;
 begin
   Result := True;
+  { Passing the licence page unticked used to carry on and skip the download without a word (#78).
+    Declining is a choice made on the page before, by unticking the download. }
+  if (CurPageID = NvidiaPage.ID) and not NvidiaPage.Values[0] then
+  begin
+    SuppressibleMsgBox('To download NVIDIA''s libraries, tick "I accept NVIDIA''s licences".' + #13#10#13#10 +
+      'To go on without them, go Back and untick the download. ManualForge then runs on the CPU, ' +
+      'about ten times slower, and `manualforge setup gpu` can fetch them later.', mbInformation, MB_OK, IDOK);
+    Result := False;
+    Exit;
+  end;
   if CurPageID = wpReady then
   try
     InstallRuntimes;
   except
     SuppressibleMsgBox(GetExceptionMessage, mbCriticalError, MB_OK, IDOK);
     Result := False;
+  end;
+end;
+
+{ The Ready page, as Inno writes it, and then what is already installed, which no task mentions. }
+function UpdateReadyMemo(Space, NewLine, MemoUserInfoInfo, MemoDirInfo, MemoTypeInfo, MemoComponentsInfo,
+  MemoGroupInfo, MemoTasksInfo: String): String;
+begin
+  Result := '';
+  if MemoUserInfoInfo <> '' then Result := Result + MemoUserInfoInfo + NewLine + NewLine;
+  if MemoDirInfo <> '' then Result := Result + MemoDirInfo + NewLine + NewLine;
+  if MemoTypeInfo <> '' then Result := Result + MemoTypeInfo + NewLine + NewLine;
+  if MemoComponentsInfo <> '' then Result := Result + MemoComponentsInfo + NewLine + NewLine;
+  if MemoGroupInfo <> '' then Result := Result + MemoGroupInfo + NewLine + NewLine;
+  if MemoTasksInfo <> '' then Result := Result + MemoTasksInfo + NewLine + NewLine;
+
+  if HasNvidiaGpu and GpuCoreCurrent then
+  begin
+    Result := Result + 'NVIDIA''s libraries for the GPU:' + NewLine;
+    if TensorRtCurrent then
+      Result := Result + Space + 'CUDA, cuDNN and TensorRT are already installed at the versions this release uses.' + NewLine +
+        Space + 'Nothing to download.'
+    else
+      Result := Result + Space + 'CUDA and cuDNN are already installed at the versions this release uses.';
   end;
 end;
 

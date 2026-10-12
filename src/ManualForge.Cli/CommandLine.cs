@@ -408,6 +408,8 @@ internal sealed class CommandLine
               --downloads <folder>    Keep the archives there and reuse them; otherwise they are
                                       deleted once their DLLs are in place.
               --remove                Delete the libraries `setup gpu` downloaded, and nothing else.
+              --pins                  List the archives this version pins, with their SHA-256, and
+                                      stop. For building the installer.
 
             setup mcp options:
               --library <folder>      The library the server searches. Default: MANUALFORGE_LIBRARY.

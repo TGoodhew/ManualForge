@@ -114,8 +114,11 @@ The installer asks for:
 2. **What to set up:**
    - **NVIDIA's libraries for the GPU:** CUDA and cuDNN (about 1.7 GB), and optionally TensorRT
      (another 1.9 GB, which reads about twice as fast). These are offered only on a PC with an NVIDIA
-     card. They come from NVIDIA, under NVIDIA's licences, which the installer shows and asks you to
-     accept. Without them ManualForge runs on the CPU, about ten times slower.
+     card. They come from NVIDIA, under NVIDIA's licences, which the installer shows; it goes on only
+     once you accept them, or once you untick the download. Without them ManualForge runs on the CPU,
+     about ten times slower. An upgrade offers only what is not already installed at the versions the
+     release uses, so over current libraries it offers nothing and does not ask again; its Ready page
+     says they are installed.
    - **Connect ManualForge to the AI apps on this PC,** such as Claude Desktop, Claude Code and VS Code.
      See [Connect Claude and other apps](#connect-claude-and-other-apps).
    - **Let a terminal run `manualforge` from any folder.** This adds the program folder to your

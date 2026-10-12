@@ -193,6 +193,17 @@ public sealed class GpuLibrarySetup(HttpClient http, string root)
     }
 
     /// <summary>
+    /// The packages whose folder is not already in place as these exact archives. A folder is installed
+    /// whole, so it is all or nothing: adding TensorRT to current CUDA and cuDNN downloads TensorRT
+    /// alone, rather than 1.7 GB again (#78).
+    /// </summary>
+    public IReadOnlyList<GpuLibraryPackage> NotCurrent(IEnumerable<GpuLibraryPackage> packages)
+    {
+        ArgumentNullException.ThrowIfNull(packages);
+        return packages.GroupBy(p => p.Folder).Where(folder => !IsCurrent(folder)).SelectMany(folder => folder).ToArray();
+    }
+
+    /// <summary>
     /// Downloads each package into <paramref name="downloads"/>, or reuses one already there with the
     /// right hash, checks it, and puts its DLLs in place. A folder is replaced whole, and only once
     /// every archive for it has been checked and extracted, so a failure leaves the last good set.
