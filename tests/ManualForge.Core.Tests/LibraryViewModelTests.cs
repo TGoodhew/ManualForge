@@ -175,6 +175,25 @@ public class LibraryViewModelTests
     }
 
     [Fact]
+    public void TheTablesDropDownSettingNothingLeavesTheActionAlone()
+    {
+        // WinUI sets a drop-down's selection to nothing while it fills a row. Bound straight to the
+        // enum, that crashed the app after a survey (12 October 2026).
+        var row = new ClassSummaryRow(TextClass.ImageOnly, 166, 22_907, ClassAction.Ocr);
+        var changed = new List<string?>();
+        row.PropertyChanged += (_, e) => changed.Add(e.PropertyName);
+
+        row.SelectedAction = null;
+        Assert.Equal(ClassAction.Ocr, row.Action);
+        Assert.Empty(changed);
+
+        row.SelectedAction = ClassAction.Skip;
+        Assert.Equal(ClassAction.Skip, row.Action);
+        Assert.Equal(ClassAction.Skip, row.SelectedAction);
+        Assert.Contains(nameof(ClassSummaryRow.SelectedAction), changed);
+    }
+
+    [Fact]
     public async Task AFileThatCannotBeOpenedIsNamedRatherThanLeftAsOneShort()
     {
         // LeCroy-5674 service.pdf: a download that never finished, skipped because it cannot be

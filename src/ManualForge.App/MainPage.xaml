@@ -160,7 +160,7 @@
                                     <ComboBox
                                         Grid.Column="4"
                                         ItemsSource="{x:Bind AvailableActions}"
-                                        SelectedItem="{x:Bind Action, Mode=TwoWay}"
+                                        SelectedItem="{x:Bind SelectedAction, Mode=TwoWay}"
                                         HorizontalAlignment="Stretch" />
                                     <TextBlock Grid.Column="5" Text="{x:Bind Explanation}" TextWrapping="Wrap" Opacity="0.75" VerticalAlignment="Center" Style="{StaticResource CaptionTextBlockStyle}" />
                                 </Grid>

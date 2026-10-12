@@ -33,7 +33,28 @@ public sealed partial class ClassSummaryRow(TextClass textClass, int files, long
     public ClassAction Action
     {
         get => _action;
-        set => SetProperty(ref _action, value);
+        set
+        {
+            if (SetProperty(ref _action, value))
+                OnPropertyChanged(nameof(SelectedAction));
+        }
+    }
+
+    /// <summary>
+    /// What the table's drop-down is bound to. While WinUI fills a row it sets the drop-down's
+    /// selection to nothing before its items arrive, and a two-way binding straight to
+    /// <see cref="Action"/> pushed that nothing into an enum: the app died with a
+    /// NullReferenceException on 12 October 2026, filling the class table after a survey. Anything
+    /// that is not an action is ignored here.
+    /// </summary>
+    public object? SelectedAction
+    {
+        get => _action;
+        set
+        {
+            if (value is ClassAction action)
+                Action = action;
+        }
     }
 
     public IReadOnlyList<ClassAction> AvailableActions { get; } =
