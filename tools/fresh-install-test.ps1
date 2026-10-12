@@ -167,7 +167,7 @@ function Find-McpReferences {
         if (Test-Path $place -PathType Leaf) { Get-Item $place }
         elseif (Test-Path $place) {
             Get-ChildItem $place -Recurse -Depth 3 -File -Include *.json, *.toml, *.yaml, *.yml -ErrorAction SilentlyContinue |
-                Where-Object { $_.Length -lt 5MB -and $_.Name -notlike '*.before-manualforge.bak' }
+                Where-Object { $_.Length -lt 5MB -and $_.Name -notlike '*.before-manualforge.bak' -and $_.FullName -notlike '*\sentry\*' }   # crash reports, not settings
         }
     }
     @($files | Where-Object { Select-String -LiteralPath $_.FullName -Pattern 'ManualForge\.Mcp' -Quiet -ErrorAction SilentlyContinue } |

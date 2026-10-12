@@ -31,92 +31,51 @@ built and measured, are in [docs/DEVELOPMENT-HISTORY.md](docs/DEVELOPMENT-HISTOR
 
 ## Install
 
-There is no installer yet ([#26](https://github.com/TGoodhew/ManualForge/issues/26)), so
-ManualForge is built from source and published into place.
+Download `ManualForge-Setup-<version>.exe` from the
+[latest release](https://github.com/TGoodhew/ManualForge/releases/latest) and run it. It installs for
+you alone, into `%LOCALAPPDATA%\Programs\ManualForge`. Windows asks for permission only if a runtime
+the PC is missing has to be installed for every user.
 
-### Requirements
+**First, if the PC has an NVIDIA card,** install the current NVIDIA driver. The installer offers the GPU
+libraries only when the driver is there.
 
-- Windows 10 or 11, x64
-- [.NET 10 SDK](https://dotnet.microsoft.com/download)
-- For the GPU, which is optional but about seven times faster: an NVIDIA card and a current driver
+The installer is not signed yet, so Windows may say "Windows protected your PC". Choose **More info**,
+then **Run anyway**. The release page gives the installer's SHA-256, if you want to check it.
 
-### 1. Build
+The installer asks for:
 
-```powershell
-git clone https://github.com/TGoodhew/ManualForge.git
-cd ManualForge
-dotnet build
-dotnet test        # optional: about 500 tests, a few seconds, no GPU or network needed
-```
+1. **Your library folder:** the folder of PDF manuals ManualForge reads and searches.
+2. **What to set up:**
+   - **NVIDIA's libraries for the GPU:** CUDA and cuDNN (about 1.7 GB), and optionally TensorRT
+     (another 1.9 GB, which reads about twice as fast). These are offered only on a PC with an NVIDIA
+     card. They come from NVIDIA, under NVIDIA's licences, which the installer shows and asks you to
+     accept. Without them ManualForge runs on the CPU, about seven times slower.
+   - **Connect ManualForge to the AI apps on this PC,** such as Claude Desktop, Claude Code and VS Code.
+     See [Connect Claude and other apps](#connect-claude-and-other-apps).
+   - **Let a terminal run `manualforge` from any folder.** This adds the program folder to your
+     `PATH`. It is off by default.
 
-### 2. Set up the GPU (optional)
+It then:
+- installs the .NET 10 Desktop Runtime, the Windows App Runtime 1.8 and the Visual C++
+  Redistributable, but only those the PC doesn't already have;
+- downloads the GPU libraries you chose, and the OCR models (about 25 MB);
+- adds **ManualForge** to the Start menu.
 
-ManualForge needs **CUDA 13** and **cuDNN 9**. CUDA 12 will not load. **TensorRT 10** is optional, and
-makes recognition about twice as fast. A script installs all three and checks the result:
+Everything it downloads comes from its publisher and is checked against a SHA-256 before it is used.
+The GPU libraries go into `%LOCALAPPDATA%\ManualForge\gpu`. Nothing goes on `PATH`, and the display
+driver is never touched.
 
-```powershell
-./tools/setup-cuda.ps1 -CheckOnly   # what this machine already has; changes nothing
-./tools/setup-cuda.ps1 -WhatIf      # what it would download and install, and how large
-./tools/setup-cuda.ps1              # install what is missing
-```
+The last page says which version was installed and what it runs on: `TensorRt`, `Cuda` or `Cpu`. From a
+terminal, `manualforge version` and `manualforge gpu` say the same.
 
-It installs the CUDA toolkit and extracts cuDNN and TensorRT under `C:\Tools`, then adds them to your
-user `PATH`. TensorRT is a 1.9 GB download from NVIDIA; add `-SkipTensorRt` to leave it out. It never
-replaces a newer display driver. Skip this step to run on the CPU.
+To build ManualForge yourself instead, see [Build from source](#build-from-source).
 
-**Or, without administrator rights:** once ManualForge is published (step 3), it can fetch only the
-libraries it loads, straight from NVIDIA, into a folder of its own:
+### Connect Claude and other apps
 
-```powershell
-manualforge setup gpu --plan                     # what it would download, and NVIDIA's licences
-manualforge setup gpu --accept-nvidia-licences   # download, check each SHA-256, keep only the DLLs
-```
-
-That is about 1.7 GB, or 3.6 GB with TensorRT (`--no-tensorrt` leaves it out), into
-`%LOCALAPPDATA%\ManualForge\gpu`. Nothing goes on `PATH` and the display driver is never touched.
-ManualForge uses these copies ahead of any CUDA install on the machine. On a machine that already has
-CUDA, cuDNN and TensorRT, it downloads nothing.
-
-### 3. Publish
-
-```powershell
-$target = "$env:LOCALAPPDATA\Programs\ManualForge"
-dotnet publish src/ManualForge.Cli/ManualForge.Cli.csproj -c Release -o $target
-dotnet publish src/ManualForge.Mcp/ManualForge.Mcp.csproj -c Release -o $target
-dotnet publish src/ManualForge.App/ManualForge.App.csproj -c Release -o "$target\app"
-```
-
-That gives you:
-- **the command line**, `manualforge.exe`
-- **the MCP server**, `ManualForge.Mcp.exe`
-- **the desktop app**, `app\ManualForge.App.exe`
-
-To run `manualforge` from any folder, add the program folder to your user `PATH` once:
-
-```powershell
-$path = [Environment]::GetEnvironmentVariable('Path', 'User')
-if ($path -notlike "*$target*") { [Environment]::SetEnvironmentVariable('Path', "$path;$target", 'User') }
-```
-
-Open a new terminal, then check the install:
-
-```powershell
-manualforge version
-manualforge gpu        # "Active provider : Cuda" on a GPU; if it says Cpu, the hint names the missing DLL
-```
-
-The OCR models (about 20–40 MB) download on first use into `%LOCALAPPDATA%\ManualForge\models`.
-After that, everything runs offline.
-
-### 4. Connect Claude and other apps (optional)
-
-The MCP server lets Claude and other AI apps search the library and read pages. One command registers
-it with every app on the machine that can launch a local MCP server:
-
-```powershell
-manualforge setup mcp --list                       # which apps are here, and which already have it
-manualforge setup mcp --library "D:\Manuals"       # register it with all of them
-```
+The MCP server lets Claude and other AI apps search the library and read pages. If you ticked
+**Connect ManualForge to the AI apps**, the installer has already registered it with every app on the
+PC that can launch a local MCP server. Restart Claude Desktop to pick it up. In Claude Desktop,
+**Settings › Developer** should then list `manualforge` as running.
 
 It knows the following apps:
 - Claude Desktop (Store and classic) and Claude Code;
@@ -125,8 +84,17 @@ It knows the following apps:
 - Gemini CLI, OpenAI Codex CLI, LM Studio and Continue.
 
 Each app's settings file is copied aside before it is first changed. ManualForge's entry is merged in,
-leaving everything else in the file as it was. Restart Claude Desktop afterwards. `--client` limits it
-to some apps, and `--plan` shows what would change without changing it.
+leaving everything else in the file as it was, and ManualForge records what it changed. Uninstalling
+then undoes exactly that.
+
+To register later, with an app installed since, or for another library:
+
+```powershell
+manualforge setup mcp --list                       # which apps are here, and which already have it
+manualforge setup mcp --library "D:\Manuals"       # register it with all of them
+```
+
+`--client` limits it to some apps, and `--plan` shows what would change without changing it.
 
 To do it by hand instead, point `MANUALFORGE_LIBRARY` at your library folder, as follows.
 
@@ -156,12 +124,15 @@ the Microsoft Store. Then it is at
 
 ### Updating
 
-Pull the new source and run the three publish commands again. Publishing fails while the MCP server
-is running, so first quit Claude Desktop and any Claude Code session using it, or stop it directly:
+Run the new installer over the old one. You don't need to close anything first.
 
-```powershell
-Stop-Process -Name ManualForge.Mcp -ErrorAction SilentlyContinue
-```
+If ManualForge is running, Setup lists what is running and stops it. That includes the app, and any
+MCP server that Claude Desktop, Claude Code or another app started; Setup names which app started
+each. Those apps start the new server the next time they need it. If one shows an error for
+ManualForge, restart that app.
+
+An update keeps your choices, the GPU libraries, the models, and what ManualForge has learned about
+your GPU.
 
 ## Use
 
@@ -204,7 +175,7 @@ So, after a run:
   whose printed text could not be read gets `_repaired` added to its name (see below).
 - **`_Originals` holds the untouched original of every file that was replaced, and nothing else of
   yours.** Together with the files that were left alone, that is your whole library as it was
-  before. Uninstall step 5 shows how to put the originals back.
+  before. [Uninstall](#uninstall) shows how to put the originals back.
 
 `_Originals` is also where ManualForge keeps its working files:
 
@@ -311,9 +282,13 @@ could not search, for example because there is no index.
 
 ### The desktop app
 
+Start **ManualForge** from the Start menu, or give it a library folder from a terminal:
+
 ```powershell
-& "$env:LOCALAPPDATA\Programs\ManualForge\app\ManualForge.App.exe" [D:\Manuals]
+& "$env:LOCALAPPDATA\Programs\ManualForge\ManualForge.App.exe" [D:\Manuals]
 ```
+
+A build from source puts the app in `app\ManualForge.App.exe` instead.
 
 The app does the same work with live progress:
 - survey a library, adjust what will be done per class, and run it, with throughput, GPU use and
@@ -325,7 +300,7 @@ Cancel keeps every page already recognised, so running again carries on.
 
 ### Asking Claude
 
-Once connected (Install, step 4), Claude has three tools:
+Once connected (see [Connect Claude and other apps](#connect-claude-and-other-apps)), Claude has three tools:
 
 | Tool | What it does |
 |---|---|
@@ -385,50 +360,22 @@ a summary on screen.
 
 ## Uninstall
 
-Uninstalling removes the program. **Your library is never touched.** The searchable PDFs stay
-searchable in any reader, and your originals stay in `_Originals` until you decide what to do with
-them (step 5).
+Open **Settings › Apps › Installed apps**, find **ManualForge**, and choose **Uninstall**. **Your
+library is never touched.** The searchable PDFs stay searchable in any reader, and your originals stay
+in `_Originals` until you decide what to do with them (below).
 
-**1. Stop everything.** Quit Claude Desktop, close any Claude Code session that uses ManualForge,
-and close the app. This should print nothing:
+The uninstaller:
+- stops ManualForge if it is running, and says which app started each MCP server;
+- takes ManualForge out of every AI app it was added to, and puts back any entry it replaced. An app's
+  settings that nothing else has changed since go back exactly as they were;
+- removes the GPU libraries ManualForge downloaded, the program, and the Start menu entry. It also
+  removes the `PATH` entry and the `MANUALFORGE_LIBRARY` variable, if it was the one that set them;
+- asks whether to remove the models, logs and what ManualForge learned about your GPU
+  (`%LOCALAPPDATA%\ManualForge`);
+- leaves the runtimes in place, because other apps may use them. Its last message lists the ones it
+  installed, so you can remove them from Settings › Apps if nothing else needs them.
 
-```powershell
-Get-Process ManualForge*, manualforge -ErrorAction SilentlyContinue
-```
-
-**2. Disconnect Claude and the other apps.** This takes ManualForge's entry out of every app's
-settings, leaves the rest of each file as it was, and deletes any file it created:
-
-```powershell
-manualforge setup mcp --remove
-```
-
-By hand instead: `claude mcp remove manualforge --scope user` for Claude Code, and delete the
-`"manualforge"` entry from `claude_desktop_config.json` for Claude Desktop.
-
-**3. Remove the GPU libraries ManualForge downloaded**, if `manualforge setup gpu` fetched them. This
-removes only those; a CUDA toolkit or anything else on the machine is left alone:
-
-```powershell
-manualforge setup gpu --remove
-```
-
-**Then remove the program**, and its `PATH` entry if you added one:
-
-```powershell
-$target = "$env:LOCALAPPDATA\Programs\ManualForge"
-Remove-Item -LiteralPath $target -Recurse -Force
-$path = ([Environment]::GetEnvironmentVariable('Path', 'User') -split ';' | Where-Object { $_ -and $_ -ne $target }) -join ';'
-[Environment]::SetEnvironmentVariable('Path', $path, 'User')
-```
-
-**4. Remove the models, logs and what was learned about your GPU (optional):**
-
-```powershell
-Remove-Item -LiteralPath "$env:LOCALAPPDATA\ManualForge" -Recurse -Force
-```
-
-**5. Decide what to do with your library.** You have two choices:
+**Then decide what to do with your library.** You have two choices:
 
 - **Keep the searchable copies.** Delete `<library>\_Originals` once you are sure you no longer
   want the originals. It holds the only untouched copy of every file ManualForge replaced.
@@ -467,11 +414,120 @@ Remove-Item -LiteralPath "$env:LOCALAPPDATA\ManualForge" -Recurse -Force
   Never use robocopy's `/MIR` or `/PURGE` here: `_Originals` sits inside the library, and either
   option would delete files.
 
-**6. Remove CUDA and cuDNN (optional).** Only do this if nothing else on the machine uses them:
-- uninstall the *NVIDIA CUDA* entries in Settings › Apps
-- delete the `cudnn-*` folder under `C:\Tools`
-- remove the two `...\bin\x64` entries that `setup-cuda.ps1` added to your user `PATH`, and its
-  `CUDA_PATH` user variable
+## Build from source
+
+For working on ManualForge, or installing it without the installer.
+
+### Requirements
+
+- Windows 10 or 11, x64
+- [.NET 10 SDK](https://dotnet.microsoft.com/download)
+- For the GPU, which is optional but about seven times faster: an NVIDIA card and a current driver
+- To build the installer: [Inno Setup 6](https://jrsoftware.org/isinfo.php) (`winget install JRSoftware.InnoSetup`)
+
+### 1. Build
+
+```powershell
+git clone https://github.com/TGoodhew/ManualForge.git
+cd ManualForge
+dotnet build
+dotnet test        # optional: about 700 tests, a few seconds, no GPU or network needed
+```
+
+To build the installer, run `./tools/build-installer.ps1`. It publishes the program into one folder,
+pins the runtimes it chains in, and writes `artifacts\installer\package\ManualForge-Setup-<version>.exe`.
+`tools\fresh-install-test.ps1` tests an installer on a PC, end to end.
+
+### 2. Set up the GPU (optional)
+
+ManualForge needs **CUDA 13** and **cuDNN 9**. CUDA 12 will not load. **TensorRT 10** is optional, and
+makes recognition about twice as fast. Once ManualForge is published (step 3), it can fetch only the
+libraries it loads, straight from NVIDIA, into a folder of its own:
+
+```powershell
+manualforge setup gpu --plan                     # what it would download, and NVIDIA's licences
+manualforge setup gpu --accept-nvidia-licences   # download, check each SHA-256, keep only the DLLs
+```
+
+That is about 1.7 GB, or 3.6 GB with TensorRT (`--no-tensorrt` leaves it out), into
+`%LOCALAPPDATA%\ManualForge\gpu`. Nothing goes on `PATH` and the display driver is never touched.
+ManualForge uses these copies ahead of any CUDA install on the machine. On a machine that already has
+CUDA, cuDNN and TensorRT, it downloads nothing.
+
+**Or, for development,** a script installs the CUDA toolkit and extracts cuDNN and TensorRT under
+`C:\Tools`, then adds them to your user `PATH`. That needs administrator rights:
+
+```powershell
+./tools/setup-cuda.ps1 -CheckOnly   # what this machine already has; changes nothing
+./tools/setup-cuda.ps1 -WhatIf      # what it would download and install, and how large
+./tools/setup-cuda.ps1              # install what is missing
+```
+
+It never replaces a newer display driver. `-SkipTensorRt` leaves TensorRT out.
+
+### 3. Publish
+
+```powershell
+$target = "$env:LOCALAPPDATA\Programs\ManualForge"
+dotnet publish src/ManualForge.Cli/ManualForge.Cli.csproj -c Release -o $target
+dotnet publish src/ManualForge.Mcp/ManualForge.Mcp.csproj -c Release -o $target
+dotnet publish src/ManualForge.App/ManualForge.App.csproj -c Release -o "$target\app"
+```
+
+That gives you:
+- **the command line**, `manualforge.exe`
+- **the MCP server**, `ManualForge.Mcp.exe`
+- **the desktop app**, `app\ManualForge.App.exe`
+
+To run `manualforge` from any folder, add the program folder to your user `PATH` once:
+
+```powershell
+$path = [Environment]::GetEnvironmentVariable('Path', 'User')
+if ($path -notlike "*$target*") { [Environment]::SetEnvironmentVariable('Path', "$path;$target", 'User') }
+```
+
+Open a new terminal, then fetch the OCR models and check the install:
+
+```powershell
+manualforge setup models
+manualforge version
+manualforge gpu        # "Active provider : TensorRt" or "Cuda" on a GPU; if it says Cpu, it says why
+```
+
+Then connect the AI apps with `manualforge setup mcp` (see
+[Connect Claude and other apps](#connect-claude-and-other-apps)).
+
+To update, pull the new source and run the three publish commands again. Publishing fails while the
+MCP server is running, so first quit Claude Desktop and any Claude Code session using it, or stop it
+directly with `Stop-Process -Name ManualForge.Mcp`.
+
+### Removing a build from source
+
+1. **Stop everything.** Quit Claude Desktop, close any Claude Code session that uses ManualForge,
+   and close the app. `Get-Process ManualForge*, manualforge -ErrorAction SilentlyContinue` should
+   print nothing.
+2. **Disconnect the AI apps:** `manualforge setup mcp --remove` undoes what `setup mcp` recorded.
+   `--remove --all` takes out every entry named `manualforge`, whoever added it. By hand instead:
+   `claude mcp remove manualforge --scope user` for Claude Code, and delete the `"manualforge"` entry
+   from `claude_desktop_config.json` for Claude Desktop.
+3. **Remove the GPU libraries** `setup gpu` downloaded: `manualforge setup gpu --remove`. A CUDA
+   toolkit or anything else on the machine is left alone.
+4. **Remove the program**, and its `PATH` entry if you added one:
+
+   ```powershell
+   $target = "$env:LOCALAPPDATA\Programs\ManualForge"
+   Remove-Item -LiteralPath $target -Recurse -Force
+   $path = ([Environment]::GetEnvironmentVariable('Path', 'User') -split ';' | Where-Object { $_ -and $_ -ne $target }) -join ';'
+   [Environment]::SetEnvironmentVariable('Path', $path, 'User')
+   ```
+
+5. **Remove the models, logs and what was learned about your GPU (optional):**
+   `Remove-Item -LiteralPath "$env:LOCALAPPDATA\ManualForge" -Recurse -Force`
+6. **Decide what to do with your library**, as in [Uninstall](#uninstall).
+7. **Remove CUDA and cuDNN (optional)**, if `setup-cuda.ps1` installed them and nothing else uses
+   them: uninstall the *NVIDIA CUDA* entries in Settings › Apps, delete the `cudnn-*` and
+   `tensorrt-*` folders under `C:\Tools`, and remove the `...\bin\x64` entries that `setup-cuda.ps1`
+   added to your user `PATH`, and its `CUDA_PATH` user variable.
 
 ## More
 
