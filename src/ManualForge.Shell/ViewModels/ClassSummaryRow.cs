@@ -57,6 +57,9 @@ public sealed partial class ClassSummaryRow(TextClass textClass, int files, long
         }
     }
 
+    /// <summary>What a screen reader calls this row's drop-down, which has no visible label of its own.</summary>
+    public string ActionLabel => $"Action for {TextClass}";
+
     public IReadOnlyList<ClassAction> AvailableActions { get; } =
         [ClassAction.Skip, ClassAction.Ocr, ClassAction.StripAndRedo];
 

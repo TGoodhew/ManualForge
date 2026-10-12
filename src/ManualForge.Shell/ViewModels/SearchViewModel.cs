@@ -103,7 +103,7 @@ public sealed partial class SearchViewModel(ISearchService service, IUiDispatche
 
             Status = hits.Count == 0
                 ? $"Nothing matched {Query}."
-                : $"{hits.Count:N0} result(s) for {Query}.";
+                : $"{hits.Count:N0} result(s) for {Query}. Double-click one to open it, or right-click for more.";
         }
         catch (Exception ex)
         {

@@ -1303,9 +1303,9 @@ src/ManualForge.Core/
 src/ManualForge.Cli/              the command line
 src/ManualForge.Shell/            view models and the services behind them - no XAML, so testable
   ViewModels/                     library, doctor and search, each with no window attached
-src/ManualForge.App/              WinUI 3: XAML, a file picker, a GPU timer, nothing else
+src/ManualForge.App/              WinUI 3: XAML, file pickers, a GPU timer, opening a manual, nothing else
 src/ManualForge.Mcp/              MCP server: library_search, read_manual_page, library_status
-tests/ManualForge.Core.Tests/     680 tests, no GPU or network needed
+tests/ManualForge.Core.Tests/     705 tests, no GPU or network needed
 installer/ManualForge.iss         the Inno Setup installer; test-in-sandbox.ps1 tests it in Windows Sandbox
 art/icon/                         the icon's drawings, as SVG
 packages/, nuget.config           the TensorRT build of PaddleOcrNet (docs/paddleocrnet-fork.md)
@@ -1314,6 +1314,7 @@ tools/build-icon.ps1              renders the icon's sizes and packs AppIcon.ico
 tools/build-paddleocrnet.ps1      builds the PaddleOcrNet fork into packages/
 tools/fresh-install-test.ps1      tests an installer end to end on a real PC (.cmd fetches and runs it)
 tools/compare-installed-build.ps1 the installed build against a source build, word for word
+tools/check-ui-help.ps1           every control in the app has a tooltip and a name for a screen reader
 tools/reread-library.ps1          reads a finished library again, then audits, repairs and re-indexes
 tools/read-library-from-scratch.ps1  puts every original back and reads the library again
 tools/measure-*.ps1, measure-*.cs  the measurements behind docs/measurements/
@@ -1328,7 +1329,7 @@ docs/measurements/                what those produced: one dated file per run, n
 dotnet test ManualForge.slnx
 ```
 
-680 tests as of 1.0, under a minute, no GPU, models or network required. The ones that say most
+705 tests as of 1.1, under a minute, no GPU, models or network required. The ones that say most
 about how ManualForge behaves:
 
 - **`PageGeometryTests`** — the corner mapping for all four rotations, non-zero crop origins,

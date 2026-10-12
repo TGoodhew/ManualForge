@@ -369,11 +369,15 @@ The app does the same work with live progress:
   how many files are already done; a run leaves those alone
 - in the Doctor tab, review what the audit found, see the picture the detector worked from for any
   page, and repair the documents you tick
-- in the Search tab, build or update the index and search it
+- in the Search tab, build or update the index and search it. Every word must be on the page;
+  it is not a question box
+- double-click a manual in Search, Results or Doctor to open it in your PDF viewer, or right-click
+  it to show it in its folder or copy its path
 - in the Problems tab, Trim forgets manuals you have deleted: from the work queue, the audit and the
   search index at once, as the three `--trim-missing` options below do
 
-Cancel keeps every page already recognised, so running again carries on.
+Cancel keeps every page already recognised, so running again carries on. Hover over any control to
+see what it does.
 
 ### Asking Claude
 
@@ -513,7 +517,7 @@ For working on ManualForge, or installing it without the installer.
 git clone https://github.com/TGoodhew/ManualForge.git
 cd ManualForge
 dotnet build
-dotnet test        # optional: about 680 tests, under a minute, no GPU or network needed
+dotnet test        # optional: about 700 tests, under a minute, no GPU or network needed
 ```
 
 To build the installer, run `./tools/build-installer.ps1`. It publishes the program into one folder,
