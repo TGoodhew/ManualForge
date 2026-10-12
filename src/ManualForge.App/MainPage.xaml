@@ -330,16 +330,16 @@
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="32" />
                                     <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="110" />
-                                    <ColumnDefinition Width="70" />
-                                    <ColumnDefinition Width="70" />
-                                    <ColumnDefinition Width="80" />
+                                    <ColumnDefinition Width="100" />
+                                    <ColumnDefinition Width="60" />
+                                    <ColumnDefinition Width="50" />
+                                    <ColumnDefinition Width="100" />
                                 </Grid.ColumnDefinitions>
                                 <TextBlock Grid.Column="1" Text="Document" Style="{StaticResource CaptionTextBlockStyle}" />
                                 <TextBlock Grid.Column="2" Text="Why" Style="{StaticResource CaptionTextBlockStyle}" />
-                                <TextBlock Grid.Column="3" Text="Flagged" Style="{StaticResource CaptionTextBlockStyle}" />
-                                <TextBlock Grid.Column="4" Text="Drawn" Style="{StaticResource CaptionTextBlockStyle}" />
-                                <TextBlock Grid.Column="5" Text="Recovered" Style="{StaticResource CaptionTextBlockStyle}" />
+                                <TextBlock Grid.Column="3" Text="Flagged" HorizontalAlignment="Right" Style="{StaticResource CaptionTextBlockStyle}" />
+                                <TextBlock Grid.Column="4" Text="Drawn" HorizontalAlignment="Right" Style="{StaticResource CaptionTextBlockStyle}" />
+                                <TextBlock Grid.Column="5" Text="Recovered" HorizontalAlignment="Right" Style="{StaticResource CaptionTextBlockStyle}" />
                             </Grid>
 
                             <ListView
@@ -353,10 +353,10 @@
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="32" />
                                                 <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="110" />
-                                                <ColumnDefinition Width="70" />
-                                                <ColumnDefinition Width="70" />
-                                                <ColumnDefinition Width="80" />
+                                                <ColumnDefinition Width="100" />
+                                                <ColumnDefinition Width="60" />
+                                                <ColumnDefinition Width="50" />
+                                                <ColumnDefinition Width="100" />
                                             </Grid.ColumnDefinitions>
 
                                             <CheckBox
@@ -373,10 +373,10 @@
                                                     TextTrimming="CharacterEllipsis" />
                                             </StackPanel>
 
-                                            <TextBlock Grid.Column="2" Text="{x:Bind Kind}" VerticalAlignment="Center" Opacity="0.8" />
-                                            <TextBlock Grid.Column="3" Text="{x:Bind FlaggedPages}" VerticalAlignment="Center" />
-                                            <TextBlock Grid.Column="4" Text="{x:Bind DrawnPages}" VerticalAlignment="Center" />
-                                            <TextBlock Grid.Column="5" Text="{x:Bind Progress, Mode=OneWay}" VerticalAlignment="Center" />
+                                            <TextBlock Grid.Column="2" Text="{x:Bind Kind}" TextWrapping="Wrap" VerticalAlignment="Center" Opacity="0.8" />
+                                            <TextBlock Grid.Column="3" Text="{x:Bind FlaggedPages}" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                                            <TextBlock Grid.Column="4" Text="{x:Bind DrawnPages}" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                                            <TextBlock Grid.Column="5" Text="{x:Bind Progress, Mode=OneWay}" HorizontalAlignment="Right" VerticalAlignment="Center" />
                                         </Grid>
                                     </DataTemplate>
                                 </ListView.ItemTemplate>
