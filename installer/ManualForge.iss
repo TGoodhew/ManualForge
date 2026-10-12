@@ -282,6 +282,7 @@ begin
     'Without them ManualForge runs on the CPU, about ten times slower. `manualforge setup gpu` fetches them later.',
     False, False);
   NvidiaPage.Add('I accept NVIDIA''s licences for these libraries');
+  Log(Format('NVIDIA libraries already current: CUDA and cuDNN %d, TensorRT %d', [Ord(GpuCoreCurrent), Ord(TensorRtCurrent)]));
 
   DownloadPage := CreateDownloadPage(SetupMessage(msgWizardPreparing), 'Downloading what ManualForge runs on...', @OnDownloadProgress);
 end;

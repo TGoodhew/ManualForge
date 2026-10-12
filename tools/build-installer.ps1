@@ -134,10 +134,10 @@ Write-Step 'Reading the NVIDIA libraries this build pins'
 $pins = & (Join-Path $stage 'manualforge.exe') setup gpu --pins
 if ($LASTEXITCODE -ne 0 -or -not $pins) { throw 'manualforge setup gpu --pins failed; NVIDIA''s manifests could not be read.' }
 $pins | ForEach-Object { Write-Host "   $_" }
-$pinned = $pins | ForEach-Object { $folder, $sha = $_ -split ' ', 3; [pscustomobject]@{ Folder = $folder; Sha256 = $sha } }
+$pinned = $pins | ForEach-Object { $folder, $sha, $null = $_ -split ' ', 3; [pscustomobject]@{ Folder = $folder; Sha256 = $sha } }
 $gpuCorePins = ($pinned | Where-Object Folder -in 'cuda', 'cudnn' | ForEach-Object Sha256) -join ','
 $tensorRtPins = ($pinned | Where-Object Folder -eq 'tensorrt' | ForEach-Object Sha256) -join ','
-if (-not $gpuCorePins -or -not $tensorRtPins) { throw "setup gpu --pins named no CUDA, cuDNN or TensorRT archive:`n$($pins -join "`n")" }
+if (-not $gpuCorePins -or -not $tensorRtPins -or (($gpuCorePins + ',' + $tensorRtPins) -notmatch '^[0-9a-f]{64}(,[0-9a-f]{64})*$')) { throw "setup gpu --pins did not give a SHA-256 for each of CUDA, cuDNN and TensorRT:`n$($pins -join "`n")" }
 
 Write-Step 'Compiling the installer'
 $defines = @{
