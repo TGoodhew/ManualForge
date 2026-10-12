@@ -904,12 +904,15 @@ instruments, and it has a `manual_search` tool over the same folder of manuals t
   filename-and-model search is not being replaced or demoted — it is the better tool whenever the
   instrument model is known, and that is most of the time for a server whose job is driving
   instruments.
-* When both are installed, each is better for it. That happens by **detection, not dependency**:
-  GPIB-MCP notices the index and uses it to choose which manuals to open, and carries on exactly as
-  before if it is not there.
+* When both are installed, each is meant to be better for it, by **detection, not dependency**:
+  GPIB-MCP is to notice the index and use it to choose which manuals to open, and carry on exactly
+  as before if it is not there.
 
-Tracked as [ManualForge#1](https://github.com/TGoodhew/ManualForge/issues/1) on this side and
-[GPIB-MCP#134](https://github.com/TGoodhew/GPIB-MCP/issues/134) on that one.
+Tracked as [ManualForge#1](https://github.com/TGoodhew/ManualForge/issues/1) on this side, done:
+the index is a stable, versioned contract (below). On that side it is
+[GPIB-MCP#134](https://github.com/TGoodhew/GPIB-MCP/issues/134), still open at ManualForge 1.0, so
+for now the two cooperate only through what ManualForge's MCP server tells Claude about when to
+prefer each.
 
 ### Why both exist
 

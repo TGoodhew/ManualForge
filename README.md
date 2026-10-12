@@ -21,6 +21,18 @@ verified, and the original is then moved, unchanged, into an `_Originals` folder
 library. Files that need no work are never touched. See
 [What happens to your library folder](#what-happens-to-your-library-folder).
 
+ManualForge works alongside [GPIB-MCP](https://github.com/TGoodhew/GPIB-MCP), an MCP server that
+lets Claude control GPIB and VISA test instruments, and which can also search the same folder of
+manuals with its `manual_search`. The two answer different questions, so they are complementary and
+neither replaces the other. GPIB-MCP picks manuals by filename and model, so it is the better tool
+when you know the instrument, and it returns long passages from that instrument's manuals.
+ManualForge searches every page of every manual, so it finds the answer when you don't know which
+manual holds it, or when a filename gives no clue. When both are connected, ManualForge's MCP
+server tells Claude which to prefer: GPIB-MCP when the instrument model is known, and ManualForge
+when it isn't, or when GPIB-MCP found nothing. Each works without the other. ManualForge's
+search index is a documented, versioned file that GPIB-MCP is planned to read, to choose which
+manuals to open ([GPIB-MCP#134](https://github.com/TGoodhew/GPIB-MCP/issues/134)).
+
 It works on any NVIDIA GPU whose driver supports CUDA 13 (in practice a GTX 16 or RTX 20 series
 card, or newer). With CUDA on an RTX 5070 Ti it read a whole library at about 150 pages a minute,
 and dense pages such as tables at about 85–90. TensorRT is faster still: nearly twice as fast on
