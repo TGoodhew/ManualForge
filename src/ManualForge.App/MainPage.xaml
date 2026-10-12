@@ -291,11 +291,19 @@
                             ToolTipService.ToolTip="Also redo scanned pages whose earlier OCR missed lettering. A different problem, and on a large library, hours of work." />
                     </Grid>
 
-                    <TextBlock
-                        Grid.Row="1"
-                        Text="{x:Bind Doctor.Headline, Mode=OneWay}"
-                        TextWrapping="Wrap"
-                        Style="{StaticResource CaptionTextBlockStyle}" />
+                    <!-- What this tab is for and the order to use it in: the results meant nothing
+                         without it (#74). -->
+                    <StackPanel Grid.Row="1" Spacing="4">
+                        <TextBlock
+                            TextWrapping="Wrap"
+                            Opacity="0.8"
+                            Style="{StaticResource CaptionTextBlockStyle}"
+                            Text="The audit finds pages whose text layer misses what is printed on them, such as labels on schematics and tables drawn as graphics, which a search therefore cannot find. Recover text reads those pages and keeps what it finds for search; no PDF is changed. Then build the index on the Search tab, so search can find it. To check a finding first, click a document and Show one of its pages." />
+                        <TextBlock
+                            Text="{x:Bind Doctor.Headline, Mode=OneWay}"
+                            TextWrapping="Wrap"
+                            Style="{StaticResource CaptionTextBlockStyle}" />
+                    </StackPanel>
 
                     <StackPanel Grid.Row="2" Spacing="4">
                         <TextBlock
@@ -304,7 +312,8 @@
                             Opacity="0.8"
                             Style="{StaticResource CaptionTextBlockStyle}" />
                         <ProgressBar
-                            Value="{x:Bind Doctor.PageProgress, Mode=OneWay}"
+                            Value="{x:Bind Doctor.WorkProgress, Mode=OneWay}"
+                            IsIndeterminate="{x:Bind Doctor.IsWorkIndeterminate, Mode=OneWay}"
                             Maximum="100"
                             Visibility="{x:Bind Doctor.IsBusy, Mode=OneWay}" />
                     </StackPanel>
@@ -415,9 +424,21 @@
                                 BorderThickness="1"
                                 CornerRadius="4"
                                 Background="{ThemeResource LayerFillColorDefaultBrush}">
-                                <ScrollViewer ZoomMode="Enabled" HorizontalScrollMode="Auto" HorizontalScrollBarVisibility="Auto">
-                                    <Image x:Name="DiagnosticImage" Stretch="Uniform" />
-                                </ScrollViewer>
+                                <Grid>
+                                    <ScrollViewer ZoomMode="Enabled" HorizontalScrollMode="Auto" HorizontalScrollBarVisibility="Auto">
+                                        <Image x:Name="DiagnosticImage" Stretch="Uniform" />
+                                    </ScrollViewer>
+                                    <TextBlock
+                                        Text="{x:Bind Doctor.ExplainHint, Mode=OneWay}"
+                                        Visibility="{x:Bind Doctor.HasNoPicture, Mode=OneWay}"
+                                        TextWrapping="Wrap"
+                                        Opacity="0.7"
+                                        Margin="16"
+                                        VerticalAlignment="Center"
+                                        HorizontalAlignment="Center"
+                                        TextAlignment="Center"
+                                        Style="{StaticResource CaptionTextBlockStyle}" />
+                                </Grid>
                             </Border>
                         </Grid>
                     </Grid>

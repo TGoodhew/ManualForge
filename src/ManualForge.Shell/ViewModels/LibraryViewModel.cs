@@ -232,6 +232,20 @@ public sealed partial class LibraryViewModel(
             Errors.Add(_missingProblem);
     }
 
+    /// <summary>
+    /// Before any survey, the status line says what to do next. The app opens on a folder since 1.0.2,
+    /// and went on saying "Pick a folder of PDFs." with one already there (#74).
+    /// </summary>
+    partial void OnFolderChanged(string? value)
+    {
+        if (State is ShellState.Idle && !HasSurvey)
+        {
+            Status = string.IsNullOrWhiteSpace(value)
+                ? "Pick a folder of PDFs."
+                : "Survey to see what each file needs and what is outstanding.";
+        }
+    }
+
     /// <summary>The survey's own summary, so a trim can say what it did and still show it.</summary>
     private string? _surveyStatus;
 

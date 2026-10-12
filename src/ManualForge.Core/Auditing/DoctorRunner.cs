@@ -6,8 +6,14 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 namespace ManualForge.Core.Auditing;
 
+/// <summary>
+/// How far an audit has got. Reported for every file, including one unchanged since the last audit,
+/// which is hashed and passed over: on a library where nothing changed that is every file, and
+/// reporting only audited ones left the app showing no progress for the whole run (#74).
+/// </summary>
 public sealed record DoctorProgress(
-    string Path, int DocumentsDone, int DocumentsTotal, int FlaggedDocuments, long FlaggedPages);
+    string Path, int DocumentsDone, int DocumentsTotal, int FlaggedDocuments, long FlaggedPages,
+    int DocumentsUnchanged = 0);
 
 public sealed record DoctorReport(
     int DocumentsAudited,
@@ -122,8 +128,11 @@ public sealed class DoctorRunner(ILogger<DoctorRunner>? logger = null)
 
                         if (previous == hash)
                         {
-                            Interlocked.Increment(ref unchanged);
-                            Interlocked.Increment(ref done);
+                            var passedOver = Interlocked.Increment(ref unchanged);
+                            var checkedSoFar = Interlocked.Increment(ref done);
+                            progress?.Report(new DoctorProgress(
+                                path, checkedSoFar, files.Length, flaggedDocuments, Interlocked.Read(ref flaggedPages),
+                                passedOver));
                             return;
                         }
                     }
@@ -158,7 +167,8 @@ public sealed class DoctorRunner(ILogger<DoctorRunner>? logger = null)
 
                 var completed = Interlocked.Increment(ref done);
                 progress?.Report(new DoctorProgress(
-                    path, completed, files.Length, flaggedDocuments, Interlocked.Read(ref flaggedPages)));
+                    path, completed, files.Length, flaggedDocuments, Interlocked.Read(ref flaggedPages),
+                    Volatile.Read(ref unchanged)));
             }).ConfigureAwait(false);
 
         stopwatch.Stop();

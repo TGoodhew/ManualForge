@@ -119,6 +119,9 @@ public sealed partial class DoctorViewModel(IDoctorService service, IUiDispatche
     [NotifyCanExecuteChangedFor(nameof(CancelCommand))]
     [NotifyPropertyChangedFor(nameof(IsBusy))]
     [NotifyPropertyChangedFor(nameof(IsIdle))]
+    [NotifyPropertyChangedFor(nameof(PageProgress))]
+    [NotifyPropertyChangedFor(nameof(WorkProgress))]
+    [NotifyPropertyChangedFor(nameof(IsWorkIndeterminate))]
     private DoctorState _state = DoctorState.Idle;
 
     [ObservableProperty]
@@ -144,15 +147,27 @@ public sealed partial class DoctorViewModel(IDoctorService service, IUiDispatche
     private int _selectedCount;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(PageProgress))]
+    [NotifyPropertyChangedFor(nameof(WorkProgress))]
+    [NotifyPropertyChangedFor(nameof(IsWorkIndeterminate))]
     private int _documentsDone;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(PageProgress))]
+    [NotifyPropertyChangedFor(nameof(WorkProgress))]
+    [NotifyPropertyChangedFor(nameof(IsWorkIndeterminate))]
     private int _documentsTotal;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(PageProgress))]
+    [NotifyPropertyChangedFor(nameof(WorkProgress))]
+    [NotifyPropertyChangedFor(nameof(IsWorkIndeterminate))]
     private int _pagesDone;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(PageProgress))]
+    [NotifyPropertyChangedFor(nameof(WorkProgress))]
+    [NotifyPropertyChangedFor(nameof(IsWorkIndeterminate))]
     private int _pagesTotal;
 
     [ObservableProperty]
@@ -161,8 +176,37 @@ public sealed partial class DoctorViewModel(IDoctorService service, IUiDispatche
     [ObservableProperty]
     private string? _currentPage;
 
+    /// <summary>
+    /// The document whose pages Show draws. Choosing one did not re-check whether Show could run, so it
+    /// stayed disabled until the page number was changed as well (#74).
+    /// </summary>
     [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(ExplainCommand))]
+    [NotifyPropertyChangedFor(nameof(ExplainHint))]
     private DoctorRow? _selectedDocument;
+
+    /// <summary>A newly chosen document starts at the first page the audit flagged in it.</summary>
+    partial void OnSelectedDocumentChanged(DoctorRow? value)
+    {
+        Diagnostic = null;
+        if (value is not null)
+            ExplainPage = FirstPageOf(value.PageRanges) ?? 1;
+    }
+
+    /// <summary>The first page of a list such as "14,16,21-26", or null if it has none.</summary>
+    public static int? FirstPageOf(string? ranges)
+    {
+        var digits = new string((ranges ?? "").TrimStart().TakeWhile(char.IsDigit).ToArray());
+        return int.TryParse(digits, NumberStyles.None, CultureInfo.InvariantCulture, out var page) && page > 0 ? page : null;
+    }
+
+    /// <summary>What the empty picture panel says, so it is clear what Show needs and what it draws.</summary>
+    public string ExplainHint => SelectedDocument is null
+        ? "Click a document in the list to look at the pages the audit flagged in it. Show draws the page: "
+          + "grey is ink its text layer accounts for, black is ink nothing accounts for, and boxes are what "
+          + "was counted as lettering."
+        : $"Show draws page {ExplainPage:N0} of {SelectedDocument.Title}. Its flagged pages are listed under "
+          + "its name.";
 
     /// <summary>
     /// The page whose diagnostic picture to show. A number rather than a picker, because what
@@ -170,6 +214,7 @@ public sealed partial class DoctorViewModel(IDoctorService service, IUiDispatche
     /// </summary>
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(ExplainCommand))]
+    [NotifyPropertyChangedFor(nameof(ExplainHint))]
     private int _explainPage;
 
     /// <summary>
@@ -177,7 +222,11 @@ public sealed partial class DoctorViewModel(IDoctorService service, IUiDispatche
     /// dependency on a UI framework and can be asserted in a test.
     /// </summary>
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasNoPicture))]
     private byte[]? _diagnostic;
+
+    /// <summary>Whether the picture panel is empty, and shows <see cref="ExplainHint"/> instead.</summary>
+    public bool HasNoPicture => Diagnostic is null;
 
     public ObservableCollection<DoctorRow> Documents { get; } = [];
 
@@ -189,9 +238,45 @@ public sealed partial class DoctorViewModel(IDoctorService service, IUiDispatche
 
     public double PageProgress => PagesTotal <= 0 ? 0 : 100.0 * PagesDone / PagesTotal;
 
+    /// <summary>
+    /// The tab's progress bar, 0 to 100: documents checked during an audit, pages recovered during a
+    /// repair. It used to show <see cref="PageProgress"/> alone, which an audit never moves, and with
+    /// no change notification it did not move during a repair either (#74).
+    /// </summary>
+    public double WorkProgress => State switch
+    {
+        DoctorState.Auditing => DocumentsTotal <= 0 ? 0 : 100.0 * DocumentsDone / DocumentsTotal,
+        DoctorState.Repairing => PageProgress,
+        _ => 0,
+    };
+
+    /// <summary>
+    /// Whether the bar should show motion rather than an amount: while the findings are read, and
+    /// before an audit or a repair has reported anything (a repair first loads the OCR models).
+    /// </summary>
+    public bool IsWorkIndeterminate => State switch
+    {
+        DoctorState.Reading => true,
+        DoctorState.Auditing => DocumentsTotal <= 0,
+        DoctorState.Repairing => PagesDone <= 0,
+        _ => false,
+    };
+
     private bool CanAct => IsIdle && !string.IsNullOrWhiteSpace(Folder);
 
     private bool CanRepair => CanAct && SelectedCount > 0;
+
+    /// <summary>
+    /// What an audit in progress says. A file unchanged since the last audit is only hashed, which on a
+    /// library on OneDrive still reads every byte, so it is counted out loud rather than in silence.
+    /// </summary>
+    public static string AuditStatus(DoctorProgress p)
+    {
+        var audited = p.DocumentsDone - p.DocumentsUnchanged;
+        return $"Checking {p.DocumentsDone:N0} of {p.DocumentsTotal:N0} documents: "
+               + $"{p.DocumentsUnchanged:N0} unchanged since the last audit, {audited:N0} audited, "
+               + $"{p.FlaggedPages:N0} page(s) flagged so far. Nothing is being changed.";
+    }
 
     /// <summary>Reads what an earlier audit found, without auditing anything.</summary>
     [RelayCommand(CanExecute = nameof(CanAct))]
@@ -227,7 +312,7 @@ public sealed partial class DoctorViewModel(IDoctorService service, IUiDispatche
 
         _cancellation = new CancellationTokenSource();
         State = DoctorState.Auditing;
-        Status = "Auditing. Nothing is being changed.";
+        Status = "Auditing: finding the documents and checking which have changed since the last audit. Nothing is being changed.";
         DocumentsDone = DocumentsTotal = 0;
 
         var progress = new DispatchedProgress<DoctorProgress>(_dispatcher, p =>
@@ -235,9 +320,7 @@ public sealed partial class DoctorViewModel(IDoctorService service, IUiDispatche
             DocumentsDone = p.DocumentsDone;
             DocumentsTotal = p.DocumentsTotal;
             CurrentFile = Path.GetFileName(p.Path);
-            Status =
-                $"Auditing: {p.DocumentsDone:N0} of {p.DocumentsTotal:N0} documents, " +
-                $"{p.FlaggedPages:N0} page(s) flagged so far.";
+            Status = AuditStatus(p);
         });
 
         try
@@ -478,7 +561,7 @@ public sealed partial class DoctorViewModel(IDoctorService service, IUiDispatche
         Status = summary.DocumentsAudited == 0
             ? "No audit yet. Run one, or run `manualforge doctor` over the whole library first."
             : summary.OutstandingPages == 0
-                ? "Every flagged page has had its text recovered. Build the index to make it searchable."
+                ? "Nothing to do here: every flagged page has had its text recovered. If any was recovered since the search index was last built, build it again on the Search tab so search can find it."
                 : "Tick the documents to recover text from, then press Recover text.";
     }
 
