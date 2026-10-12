@@ -114,6 +114,25 @@ public class LibraryViewModelTests
         Assert.Equal($"ManualForge {ManualForge.Core.Diagnostics.BuildStamp.Version}", model.Version);
     }
 
+    [Fact]
+    public void AClassWhoseFilesAreFinishedSaysSo()
+    {
+        // A finished library still lists its ImageOnly files with Ocr beside them, because the class is
+        // what a file was when first classified. Without the Done column that read as work not done.
+        var rows = ClassSummaryRow.From(
+        [
+            Record(@"C:\Manuals\a.pdf", TextClass.ImageOnly, 10, FileStatus.Completed),
+            Record(@"C:\Manuals\b.pdf", TextClass.ImageOnly, 20, FileStatus.Completed),
+            Record(@"C:\Manuals\c.pdf", TextClass.ImageOnly, 30),
+            Record(@"C:\Manuals\d.pdf", TextClass.GoodText, 100, FileStatus.Skipped, ClassAction.Skip),
+        ], new ClassificationPolicy());
+
+        var imageOnly = Assert.Single(rows, r => r.TextClass == TextClass.ImageOnly);
+        Assert.Equal(2, imageOnly.Completed);
+        Assert.Equal("2 of 3", imageOnly.Done);
+        Assert.Equal(string.Empty, Assert.Single(rows, r => r.TextClass == TextClass.GoodText).Done);
+    }
+
     // ---------------------------------------------------------------- survey before committing
 
     [Fact]

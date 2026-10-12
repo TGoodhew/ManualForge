@@ -10,7 +10,7 @@ namespace ManualForge.Shell.ViewModels;
 /// The action is editable, because the specification asks to choose per class whether to OCR, skip
 /// or strip-and-redo, and because the numbers beside it are what should inform that choice.
 /// </summary>
-public sealed partial class ClassSummaryRow(TextClass textClass, int files, long pages, ClassAction action)
+public sealed partial class ClassSummaryRow(TextClass textClass, int files, long pages, ClassAction action, int completed = 0)
     : CommunityToolkit.Mvvm.ComponentModel.ObservableObject
 {
     public TextClass TextClass { get; } = textClass;
@@ -18,6 +18,15 @@ public sealed partial class ClassSummaryRow(TextClass textClass, int files, long
     public int Files { get; } = files;
 
     public long Pages { get; } = pages;
+
+    /// <summary>Files of this class already finished, which a run leaves alone.</summary>
+    public int Completed { get; } = completed;
+
+    /// <summary>
+    /// The Done column. The class is what a file was when first classified, so a finished library still
+    /// lists 166 ImageOnly files with Ocr beside them, which read as 166 files not yet OCR'd.
+    /// </summary>
+    public string Done => Completed == 0 ? string.Empty : $"{Completed:N0} of {Files:N0}";
 
     private ClassAction _action = action;
 
@@ -57,7 +66,8 @@ public sealed partial class ClassSummaryRow(TextClass textClass, int files, long
             .Select(c => (Class: c, Rows: present.Where(r => r.TextClass == c).ToArray()))
             .Where(g => g.Rows.Length > 0)
             .Select(g => new ClassSummaryRow(
-                g.Class, g.Rows.Length, g.Rows.Sum(r => (long)r.PageCount), policy.ActionFor(g.Class)))
+                g.Class, g.Rows.Length, g.Rows.Sum(r => (long)r.PageCount), policy.ActionFor(g.Class),
+                g.Rows.Count(r => r.Status == FileStatus.Completed)))
             .ToArray();
     }
 }
