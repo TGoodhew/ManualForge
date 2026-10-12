@@ -63,9 +63,9 @@ the block diagram now comes first:
     (recovered by OCR at 82% mean confidence; the file's own text layer does not hold this)
 ```
 
-Ask Claude "How does the chopper work in the 432A?" and it does the same: `library_search` finds
-page 23, and `read_manual_page` returns the page's own text plus what ManualForge recovered from
-the drawing, marked as such:
+Claude gets the same through ManualForge's tools: `library_search` finds page 23, and
+`read_manual_page` returns the page's own text plus what ManualForge recovered from the drawing,
+marked as such:
 
 ```
 --- recovered by OCR from the rendered page, 82% mean confidence at 300 dpi; the PDF's own text layer does not hold this ---
@@ -84,14 +84,62 @@ LOW-PASS
 FILTER
 ```
 
-With that and the Principles of Operation two pages earlier (page 21, paragraph 4-4), the answer is
-in the manual's own words. The two thermistor bridges produce dc voltages, VRF and VCOMP. Their
-difference, VCOMP − VRF, "is chopped, amplified and fed to an electronic switch actuated by the
-controlled width pulses": a 5 kHz multivibrator and voltage-to-time converter set the width of each
-pulse from VCOMP + VRF, and the chopper amplifier sets its height from VCOMP − VRF. The meter
-averages those pulses, so it reads the product of the two, which paragraphs 4-10 and 4-11 show is
-proportional to the RF power. Without the recovered text, nothing would point a search, or Claude,
-at the diagram that ties it together.
+Asked in Claude Desktop "What can you tell me about the chopper in the 432A?", Claude answered:
+
+> The 432A's "chopper" is the pair of FET switches in the A2 Meter Logic assembly that turns the DC
+> difference between the two bridge voltages into a 5 kHz square wave. That way the small difference
+> signal can be amplified by AC-coupled stages instead of a drifty DC amplifier.
+>
+> **What it does in the measurement**
+>
+> The 432A computes RF power as (V_COMP² − V_RF²)/4R, which it factors as (V_COMP + V_RF)(V_COMP −
+> V_RF)/4R. The meter logic multiplies those two terms with pulses:
+>
+> - The **chopper** takes the two DC bridge voltages and produces a square wave whose amplitude is
+>   proportional to **V_COMP − V_RF**. That signal goes through the range amplifier, then the
+>   calibration factor amplifier.
+> - The **voltage-to-time converter** produces pulses whose width is proportional to **V_COMP + V_RF**.
+> - An electronic current switch, gated by the width pulses, passes the amplified chopper signal into
+>   the meter. The capacitor across the 0–1 mA movement averages the pulses, so the reading is
+>   proportional to amplitude × width.
+>
+> Both the chopper and the voltage-to-time converter are clocked by the **same 5 kHz multivibrator**.
+> That shared clock keeps the amplitude and width signals in step, which is what makes the
+> multiplication work.
+>
+> Because the signal chain after the chopper is AC-coupled, the DC level is lost. The "bias circuit
+> switch and filter" restores it by controlling the DC bias on the first stage of the cal-factor
+> amplifier. This gives the meter its zero-current reference.
+>
+> **The hardware**
+>
+> - The chopper is **Q30 and Q32** on A2. They are HP 1855-0062 parts; the 1855- prefix is HP's FET
+>   range, and the troubleshooting chart refers to their gates.
+> - Next in line is the range amplifier, **Q34–Q37**.
+> - The 5 kHz drive comes from the multivibrator, which you can check at **A2TP6**.
+>
+> **Troubleshooting (Table 7-6, chopper)**
+>
+> 1. Confirm the 5 kHz is present at A2TP6. If it isn't, go to the multivibrator table (7-7).
+> 2. Check the signal at the gates of Q30/Q32.
+> 3. Work forward into Q34–Q37 using the DC voltages in the chart.
+>
+> There is also a service hint for noise: lift one end of **C29 and C31** and see whether the noise is
+> still there. That tells you whether the noise is coming in on the bridge signals or being generated
+> in the chopper and amplifier chain.
+>
+> Why chop at all? This part is my reasoning, not the manual's: on the lowest ranges, V_COMP − V_RF is
+> a fraction of a millivolt sitting on bridge voltages of several volts. Chopping it to AC avoids the
+> offset and drift a DC amplifier would add at that level.
+>
+> Sources, from your library's 432A-OSM.pdf: the theory of operation is on pp. 21–22 (§4-4,
+> 4-13–4-17), the block diagrams are on p. 23 (Fig. 4-2) and p. 66 (Fig. 7-1), Table 7-6 is on p. 71,
+> and the A2 schematic is on p. 80 (Fig. 7-12). Parts of the schematic text came from OCR, so check
+> the reference designators against the page before you go probing.
+
+The block diagram on page 23 is what ties the chopper, the 5 kHz multivibrator and the
+voltage-to-time converter together, and without the recovered text nothing would point a search, or
+Claude, at it.
 
 ## Install
 
@@ -114,8 +162,11 @@ The installer asks for:
 2. **What to set up:**
    - **NVIDIA's libraries for the GPU:** CUDA and cuDNN (about 1.7 GB), and optionally TensorRT
      (another 1.9 GB, which reads about twice as fast). These are offered only on a PC with an NVIDIA
-     card. They come from NVIDIA, under NVIDIA's licences, which the installer shows and asks you to
-     accept. Without them ManualForge runs on the CPU, about ten times slower.
+     card. They come from NVIDIA, under NVIDIA's licences, which the installer shows; it goes on only
+     once you accept them, or once you untick the download. Without them ManualForge runs on the CPU,
+     about ten times slower. An upgrade offers only what is not already installed at the versions the
+     release uses, so over current libraries it offers nothing and does not ask again; its Ready page
+     says they are installed.
    - **Connect ManualForge to the AI apps on this PC,** such as Claude Desktop, Claude Code and VS Code.
      See [Connect Claude and other apps](#connect-claude-and-other-apps).
    - **Let a terminal run `manualforge` from any folder.** This adds the program folder to your

@@ -188,6 +188,16 @@ internal static class SetupCommand
         http.DefaultRequestHeaders.UserAgent.ParseAdd("ManualForge-setup");
         var setup = new GpuLibrarySetup(http, root);
 
+        // For the installer's build: the archives this version pins, one per line as
+        // "<folder> <sha256> <name> <version>", so setup can tell an upgrade over current libraries,
+        // which needs no licence page, from one that will download something (#78).
+        if (arguments.Has("pins"))
+        {
+            foreach (var package in await setup.ResolveAsync(includeTensorRt: true, cancellationToken).ConfigureAwait(false))
+                Console.WriteLine($"{package.Folder} {package.Sha256} {package.Name} {package.Version}");
+            return 0;
+        }
+
         Console.WriteLine($"GPU libraries : {root}");
 
         if (arguments.Has("remove"))
@@ -250,6 +260,10 @@ internal static class SetupCommand
                 Console.WriteLine($"                {installed.Name} {installed.Version}");
             return 0;
         }
+
+        // Only what is missing or out of date: a folder already current is left as it is.
+        if (!force)
+            packages = setup.NotCurrent(packages);
 
         Console.WriteLine();
         Console.WriteLine("  Package                                           Version        Download");

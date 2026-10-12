@@ -220,6 +220,26 @@ public sealed class GpuLibrarySetupTests : IDisposable
     }
 
     [Fact]
+    public async Task OnlyAFolderThatIsNotCurrentIsFetchedAgain()
+    {
+        var (setup, _, packages) = Fixture();
+        await setup.InstallAsync(packages, Path.Combine(_directory, "downloads"), false, null, CancellationToken.None);
+        Assert.Empty(setup.NotCurrent(packages));
+
+        // A newer cuDNN: CUDA's two archives are current and stay; cuDNN alone is fetched.
+        var newer = Archive(("cudnn-archive/bin/x64/cudnn64_9.dll", "cudnn, newer"));
+        var updated = packages.Take(2).Append(Package("cudnn", "cudnn", "cudnn-newer.zip", newer)).ToList();
+        Assert.Equal(["cudnn"], setup.NotCurrent(updated).Select(p => p.Name));
+
+        // The record keeps CUDA's entries when only cuDNN is installed again.
+        var nvidia = new FakeNvidia(new() { [updated[2].Url] = newer });
+        await new GpuLibrarySetup(new HttpClient(nvidia), setup.Root)
+            .InstallAsync(setup.NotCurrent(updated), Path.Combine(_directory, "downloads"), false, null, CancellationToken.None);
+        Assert.Single(nvidia.Requested);
+        Assert.True(setup.IsCurrent(updated));
+    }
+
+    [Fact]
     public async Task ADownloadThatFailsItsHashInstallsNothing()
     {
         var (setup, _, packages) = Fixture(badSha: new string('0', 64));
