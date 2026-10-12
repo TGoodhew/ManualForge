@@ -24,6 +24,13 @@ if (library is null)
 
 builder.Services.AddSingleton(library);
 
+// Links to ManualForge's view of a page, so a citation opens the page it cites (#79). Registered
+// before the MCP server, so it is answering, or knows it cannot, before the first tool call.
+var port = PageLinks.ConfiguredPort();
+builder.Services.AddSingleton(new PageLinks(port ?? PageLinks.DefaultPort));
+if (port is not null)
+    builder.Services.AddHostedService<PageServer>();
+
 builder.Services
     .AddMcpServer(options =>
     {
@@ -43,7 +50,11 @@ builder.Services
             "is exactly the case a filename cannot help with.\n\n" +
             "Always read the page with read_manual_page before answering, and cite the manual and " +
             "page. Many of these manuals are OCR'd scans, so the text carries recognition errors: " +
-            "report what it appears to say rather than asserting it.";
+            "report what it appears to say rather than asserting it.\n\n" +
+            "When a result gives a link for a page, make each citation of that page a markdown link " +
+            "to it, e.g. [432A-OSM.pdf, p. 23](link). The link opens ManualForge's view of the page " +
+            "on the user's own PC, so they can check what you cite against the page itself. Use the " +
+            "link exactly as given; never make one up.";
     })
     .WithStdioServerTransport()
     .WithTools<ManualTools>();

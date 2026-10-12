@@ -443,6 +443,24 @@ Once connected (see [Connect Claude and other apps](#connect-claude-and-other-ap
 ManualForge also works alongside [GPIB-MCP](https://github.com/TGoodhew/GPIB-MCP), whose
 `manual_search` is better when the instrument model is known. Each works without the other.
 
+#### Citations you can click
+
+Claude cites each page as a link, such as
+[432A-OSM.pdf, p. 23](http://127.0.0.1:47332/manuals/432A-OSM.pdf/page/23). Clicking one opens
+ManualForge's view of that page in your browser:
+- the page itself, at the right page whatever your PDF viewer is;
+- Previous and Next, which the arrow keys also do, and a link to the whole PDF;
+- any text ManualForge recovered from the page by OCR, marked as such, and the PDF's own text.
+
+Claude Desktop asks before opening a link. The links work only on your own PC, and only while an app
+with ManualForge connected is running, since ManualForge's MCP server serves the pages. It answers
+only on `127.0.0.1`, serves only the PDFs in your library, and a link carries only the manual's path
+within the library, never your user name. Port 47332 is the default; set `MANUALFORGE_PAGE_PORT` to
+use another, or to `off` to turn it off.
+
+Links to the PDF file itself would be simpler, but Claude Desktop does not show them as links, and a
+PDF viewer may not go to the page: Acrobat's extension for Edge opens a linked PDF at page 1.
+
 ### Reading files again after an update
 
 When a new version reads better, finished files can be read again from their kept originals:
