@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Globalization;
+using System.Security.Cryptography;
 using System.Threading.Channels;
 using ManualForge.Core.Classification;
 using ManualForge.Core.Ocr;
@@ -852,9 +854,7 @@ public sealed class LibraryProcessor(
             // Step 5: move the original aside, then put the new file in its place. Both are moves
             // on the same volume, so each is atomic, and the original exists in exactly one place
             // at every instant.
-            var originalDestination = OriginalsPathFor(options, path);
-            Directory.CreateDirectory(Path.GetDirectoryName(originalDestination)!);
-            File.Move(path, originalDestination, overwrite: false);
+            var originalDestination = KeepOriginal(options, path);
 
             try
             {
@@ -994,6 +994,68 @@ public sealed class LibraryProcessor(
     }
 
     /// <summary>
+    /// Moves a file's original into the originals tree, and returns where it is kept.
+    ///
+    /// <para>
+    /// The originals tree may already hold a file of that name: an earlier run finished this file,
+    /// and it has since been replaced in the library by another copy - downloaded again, or a newer
+    /// revision. If that copy is the same bytes as the original already kept, it is already kept,
+    /// and the library's copy is let go. If not, the earlier original moves under <c>_replaced</c>
+    /// first, so that neither is lost and the new one is the original its searchable copy is made from.
+    /// </para>
+    /// </summary>
+    private string KeepOriginal(LibraryOptions options, string path)
+    {
+        var destination = OriginalsPathFor(options, path);
+        Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+
+        if (File.Exists(destination))
+        {
+            if (SameBytes(path, destination))
+            {
+                File.Delete(path);
+                _logger.LogInformation("{Path} is the same bytes as the original already kept at {Original}", path, destination);
+                return destination;
+            }
+
+            var replaced = ReplacedPathFor(options, path, DateTime.Now);
+            Directory.CreateDirectory(Path.GetDirectoryName(replaced)!);
+            File.Move(destination, replaced, overwrite: false);
+            _logger.LogInformation(
+                "{Path} replaced a file finished earlier; the earlier original is kept at {Replaced}", path, replaced);
+        }
+
+        File.Move(path, destination, overwrite: false);
+        return destination;
+    }
+
+    /// <summary>
+    /// Where an original goes when a different file of the same name takes its place in the
+    /// originals tree: under <c>_replaced</c>, in a folder named for when.
+    /// </summary>
+    public static string ReplacedPathFor(LibraryOptions options, string path, DateTime when)
+    {
+        var root = Path.GetFullPath(options.Root);
+        var relative = Path.GetRelativePath(root, Path.GetFullPath(path));
+        var folder = Path.Combine(root, options.OriginalsFolderName, "_replaced", when.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture));
+        var candidate = Path.Combine(folder, relative);
+        for (var n = 2; File.Exists(candidate); n++)
+            candidate = Path.Combine($"{folder}-{n}", relative);
+        return candidate;
+    }
+
+    /// <summary>Whether two files hold the same bytes, every one of them.</summary>
+    private static bool SameBytes(string first, string second)
+    {
+        if (new FileInfo(first).Length != new FileInfo(second).Length)
+            return false;
+
+        using var a = File.OpenRead(first);
+        using var b = File.OpenRead(second);
+        return SHA256.HashData(a).AsSpan().SequenceEqual(SHA256.HashData(b));
+    }
+
+    /// <summary>
     /// Gives a duplicate the searchable file already produced for its primary.
     /// </summary>
     private FileOutcome CopyFromPrimary(
@@ -1038,9 +1100,7 @@ public sealed class LibraryProcessor(
 
         // Same ordering as the OCR path: preserve this file's original first, then put the
         // searchable version in its place.
-        var originalDestination = OriginalsPathFor(options, path);
-        Directory.CreateDirectory(Path.GetDirectoryName(originalDestination)!);
-        File.Move(path, originalDestination, overwrite: false);
+        var originalDestination = KeepOriginal(options, path);
 
         try
         {

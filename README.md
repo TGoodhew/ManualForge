@@ -64,6 +64,19 @@ It installs the CUDA toolkit and extracts cuDNN and TensorRT under `C:\Tools`, t
 user `PATH`. TensorRT is a 1.9 GB download from NVIDIA; add `-SkipTensorRt` to leave it out. It never
 replaces a newer display driver. Skip this step to run on the CPU.
 
+**Or, without administrator rights:** once ManualForge is published (step 3), it can fetch only the
+libraries it loads, straight from NVIDIA, into a folder of its own:
+
+```powershell
+manualforge setup gpu --plan                     # what it would download, and NVIDIA's licences
+manualforge setup gpu --accept-nvidia-licences   # download, check each SHA-256, keep only the DLLs
+```
+
+That is about 1.7 GB, or 3.6 GB with TensorRT (`--no-tensorrt` leaves it out), into
+`%LOCALAPPDATA%\ManualForge\gpu`. Nothing goes on `PATH` and the display driver is never touched.
+ManualForge uses these copies ahead of any CUDA install on the machine. On a machine that already has
+CUDA, cuDNN and TensorRT, it downloads nothing.
+
 ### 3. Publish
 
 ```powershell
@@ -95,10 +108,27 @@ manualforge gpu        # "Active provider : Cuda" on a GPU; if it says Cpu, the 
 The OCR models (about 20–40 MB) download on first use into `%LOCALAPPDATA%\ManualForge\models`.
 After that, everything runs offline.
 
-### 4. Connect Claude (optional)
+### 4. Connect Claude and other apps (optional)
 
-The MCP server lets Claude Desktop and Claude Code search the library and read pages. Point
-`MANUALFORGE_LIBRARY` at your library folder.
+The MCP server lets Claude and other AI apps search the library and read pages. One command registers
+it with every app on the machine that can launch a local MCP server:
+
+```powershell
+manualforge setup mcp --list                       # which apps are here, and which already have it
+manualforge setup mcp --library "D:\Manuals"       # register it with all of them
+```
+
+It knows the following apps:
+- Claude Desktop (Store and classic) and Claude Code;
+- VS Code (and Insiders) and Visual Studio;
+- Cursor and Windsurf;
+- Gemini CLI, OpenAI Codex CLI, LM Studio and Continue.
+
+Each app's settings file is copied aside before it is first changed. ManualForge's entry is merged in,
+leaving everything else in the file as it was. Restart Claude Desktop afterwards. `--client` limits it
+to some apps, and `--plan` shows what would change without changing it.
+
+To do it by hand instead, point `MANUALFORGE_LIBRARY` at your library folder, as follows.
 
 **Claude Code:**
 
@@ -182,6 +212,7 @@ So, after a run:
 |---|---|
 | `_Originals\<same relative path>` | the untouched original of every file that was replaced |
 | `_Originals\_superseded\` | the previous searchable copy, kept whenever a file is read again from its original |
+| `_Originals\_replaced\<when>\` | an earlier original, kept when a different file of the same name replaced a finished one in the library |
 | `_Originals\manualforge.db` | progress, and recognition cached so an interrupted run resumes |
 | `_Originals\manualforge-doctor.db` | what the audit found, and the text `repair` recovered |
 | `_Originals\manualforge-index.db` | the search index |
@@ -341,6 +372,8 @@ manualforge index D:\Manuals
 | `manualforge doctor <library> --trim-missing` | The same for the audit: forget findings and repairs of files that are gone. Files `run` renames are forgotten under their old names automatically, in the audit and the index. |
 | `manualforge gpu` / `manualforge version` | Which execution provider is active, and how many pages it reads at once on your card; which build is installed. |
 | `manualforge gpu --retune` | Forget how many pages your card reads at once, so the next run learns it again. Measured speeds are kept. |
+| `manualforge setup gpu` / `--remove` | Download CUDA, cuDNN and TensorRT from NVIDIA into ManualForge's own folder, without administrator rights; or take them away again. |
+| `manualforge setup mcp` / `--list` / `--remove` | Register the MCP server with every app on the machine that can use it; see where it is registered; or take it out again. |
 
 `manualforge` with no arguments lists every command and option.
 
@@ -363,15 +396,24 @@ and close the app. This should print nothing:
 Get-Process ManualForge*, manualforge -ErrorAction SilentlyContinue
 ```
 
-**2. Disconnect Claude.**
+**2. Disconnect Claude and the other apps.** This takes ManualForge's entry out of every app's
+settings, leaves the rest of each file as it was, and deletes any file it created:
 
 ```powershell
-claude mcp remove manualforge --scope user
+manualforge setup mcp --remove
 ```
 
-For Claude Desktop, delete the `"manualforge"` entry from `claude_desktop_config.json`.
+By hand instead: `claude mcp remove manualforge --scope user` for Claude Code, and delete the
+`"manualforge"` entry from `claude_desktop_config.json` for Claude Desktop.
 
-**3. Remove the program**, and its `PATH` entry if you added one:
+**3. Remove the GPU libraries ManualForge downloaded**, if `manualforge setup gpu` fetched them. This
+removes only those; a CUDA toolkit or anything else on the machine is left alone:
+
+```powershell
+manualforge setup gpu --remove
+```
+
+**Then remove the program**, and its `PATH` entry if you added one:
 
 ```powershell
 $target = "$env:LOCALAPPDATA\Programs\ManualForge"
@@ -396,7 +438,7 @@ Remove-Item -LiteralPath "$env:LOCALAPPDATA\ManualForge" -Recurse -Force
   ```powershell
   $lib  = 'D:\Manuals'
   $orig = Join-Path $lib '_Originals'
-  $skip = (Join-Path $orig '_superseded'), (Join-Path $orig 'broken')
+  $skip = (Join-Path $orig '_superseded'), (Join-Path $orig '_replaced'), (Join-Path $orig 'broken')
 
   # List what would be copied back; /L copies nothing.
   robocopy $orig $lib *.pdf /S /COPY:DAT /R:1 /W:1 /L /XD $skip
@@ -406,7 +448,7 @@ Remove-Item -LiteralPath "$env:LOCALAPPDATA\ManualForge" -Recurse -Force
 
   # Check every original now matches the library byte for byte. This must print nothing.
   Get-ChildItem $orig -Recurse -File -Filter *.pdf |
-      Where-Object { $_.FullName -notmatch '\\_Originals\\(_superseded|broken)\\' } |
+      Where-Object { $_.FullName -notmatch '\\_Originals\\(_superseded|_replaced|broken)\\' } |
       ForEach-Object {
           $copy = Join-Path $lib $_.FullName.Substring($orig.Length + 1)
           if ((Get-FileHash -LiteralPath $_.FullName).Hash -ne (Get-FileHash -LiteralPath $copy).Hash) { "DIFFERS: $copy" }

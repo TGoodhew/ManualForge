@@ -175,7 +175,23 @@ public static class GpuMemoryProbe
         }
     }
 
-    private static string? RunNvidiaSmi(string arguments)
+    /// <summary>
+    /// The newest CUDA the display driver supports, from <c>nvidia-smi</c>'s header: "CUDA Version: 12.4"
+    /// on older drivers, "CUDA UMD Version: 13.4" on newer ones. Null without nvidia-smi.
+    /// </summary>
+    public static Version? TryReadDriverCudaVersion() => ParseDriverCudaVersion(RunNvidiaSmi(string.Empty, firstLineOnly: false));
+
+    internal static Version? ParseDriverCudaVersion(string? header)
+    {
+        var match = header is null
+            ? null
+            : System.Text.RegularExpressions.Regex.Match(header, @"CUDA (?:UMD )?Version:\s*(\d+)\.(\d+)");
+        return match is { Success: true }
+            ? new Version(int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture), int.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture))
+            : null;
+    }
+
+    private static string? RunNvidiaSmi(string arguments, bool firstLineOnly = true)
     {
         try
         {
@@ -201,6 +217,9 @@ public static class GpuMemoryProbe
 
             if (process.ExitCode != 0)
                 return null;
+
+            if (!firstLineOnly)
+                return string.IsNullOrWhiteSpace(output) ? null : output;
 
             var first = output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                 .FirstOrDefault();

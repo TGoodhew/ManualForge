@@ -37,6 +37,19 @@
     <Content Include="Assets\Wide310x150Logo.scale-200.png" />
   </ItemGroup>
 
+  <!--
+    Unpackaged, nothing copies these beside the program unless told to, and the window loads its icon
+    from Assets\AppIcon.ico at run time: every published build so far had none. The same icon is built
+    into the program file, which is what the Start menu entry and the taskbar show (#26).
+  -->
+  <ItemGroup>
+    <Content Update="Assets\**" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <ApplicationIcon>Assets\AppIcon.ico</ApplicationIcon>
+  </PropertyGroup>
+
   <ItemGroup>
     <Manifest Include="$(ApplicationManifest)" />
   </ItemGroup>
@@ -65,6 +78,18 @@
     <PackageReference Include="CommunityToolkit.Mvvm" />
     <PackageReference Include="Microsoft.Windows.SDK.BuildTools.WinApp" />
   </ItemGroup>
+
+  <!--
+    The installer (#26) publishes the window framework-dependent, on the shared .NET runtime and Windows
+    App Runtime it chains in, into one folder with the command line and the MCP server. In that mode the
+    publish leaves out the app's own resource index, ManualForge.App.pri, and without it MainWindow's
+    XAML cannot be found: the window dies at startup with 0xC000027B and "XAML parsing failed". Copied
+    in here. A self-contained publish needs nothing, and is untouched.
+  -->
+  <Target Name="PublishAppResourceIndex" AfterTargets="Publish" Condition="'$(WindowsAppSDKSelfContained)' != 'true'">
+    <Copy SourceFiles="$(OutDir)$(TargetName).pri" DestinationFolder="$(PublishDir)" Condition="Exists('$(OutDir)$(TargetName).pri')" />
+    <Error Text="$(TargetName).pri was not built, so the published window could not find its XAML." Condition="!Exists('$(OutDir)$(TargetName).pri')" />
+  </Target>
 
   <!--
     Defining the "HasPackageAndPublishMenuAddedByProject" property here allows the Solution
