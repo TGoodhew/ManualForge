@@ -59,7 +59,8 @@ on clean type and cost a fifth of the throughput. Repair already ran with both o
 
 - **Every page already in the library that deskew straightened carries a shifted text layer.** A
   quarter of the table pages here; the share across the library is not known. Re-reading them is
-  the only fix.
+  the only fix. Later: done. The whole library was read again from its originals on 9-10 Oct 2026
+  with deskew off (#25, `fresh-run-from-originals.md`).
 - **Nine table pages are still more than 1 pt from Acrobat**, at most 2.3 pt. Whose layer that is
   has not been looked at.
 - **Denoise is still on.** Not measured here.

@@ -97,8 +97,8 @@ shaped like text.
 
 ### Every threshold, and where it came from
 
-All of these are fields on `DoctorOptions`, all are overridable from the command line, and all
-carry the same reasoning in their XML docs.
+All of these are fields on `DoctorOptions`, and all carry the same reasoning in their XML docs.
+Those with a flag in the table can be overridden from the command line; the rest are fixed.
 
 | Threshold | Default | Flag | Why this number |
 |---|---|---|---|
@@ -182,7 +182,8 @@ Almost every illustrated manual has a handful of pages whose figure labels are d
 set. Saying so about all of them would drown the finding that matters, so the report separates:
 
 - **`UnderExtracted`** — at least 10% of its pages are flagged **and drawn**. This is the list to
-  act on, and the one `repair` works through by default.
+  act on, and the one `repair` works through first. By default it also does `Figures` documents;
+  `repair --worst-only` does only these.
 - **`ScannedGaps`** — at least 10% of its pages are flagged and raster. A scanned document whose
   existing OCR missed a substantial part of its lettering. A real gap, a different one, and on this
   corpus a much larger one; `repair --include-scans` does these.
@@ -229,10 +230,12 @@ manualforge repair <folder>            OCR the flagged pages, worst documents fi
 manualforge index <folder>             merge the result into the search index
 ```
 
-Only flagged pages, and by default only the drawn ones. The corpus is ~100,830 pages and most of
-them are fine; re-recognising a page whose text layer is correct would replace correctly-spelled,
-correctly-spaced typesetting with a machine's reading of a picture of it. `--include-scans` also
-redoes the raster pages, which on this corpus is hours of GPU time for a different problem — worth
+Only flagged pages. By default that is the drawn pages of `UnderExtracted` documents and every
+flagged page of `Figures` documents, which are a handful each; `--worst-only` leaves the `Figures`
+documents out. The corpus is about 105,000 pages and most of them are fine; re-recognising a page
+whose text layer is correct would replace correctly-spelled, correctly-spaced typesetting with a
+machine's reading of a picture of it. `--include-scans` also redoes the raster pages of scanned
+documents, which on this corpus is hours of GPU time for a different problem — worth
 doing, and worth choosing to do.
 
 ### What it cost, on the whole corpus
@@ -256,8 +259,10 @@ with **no page recovering nothing**. Merging it took 2.0 minutes. The audit now 
 and nothing outstanding.
 
 The rate is lower than the second pass's 55 pages/min because these are scanned pages rendered at
-400–600 dpi rather than smaller drawn ones — worth knowing, because `repair` estimates from a single
-library-wide average and will quote about three hours for work that takes closer to four.
+400–600 dpi rather than smaller drawn ones — worth knowing, because `repair` then estimated from a
+single library-wide average and quoted about three hours for work that took closer to four. It no
+longer does: the estimate now costs each page at the rate measured for its kind and resolution, on
+this card once a repair has run on it.
 
 ### Asking what happened to one document
 
@@ -274,7 +279,8 @@ consecutive, as had been assumed: singles and runs of four from page 394 to 860.
 on two of them shows ruled performance-test record forms whose every word extracts correctly, where
 the only ink nothing accounts for is the table borders, chopped into glyph-sized pieces by their own
 intersections. **The repair recovering nothing there is the right answer**, and the flag is the
-false positive — issue #11.
+false positive — issue #11. The rule-segment filter added on 24 September 2026 (`--rule-run`, in
+the threshold table above) was written for exactly this case.
 
 ### Merge, never replace
 
@@ -427,8 +433,9 @@ a recognised diagram label.
 
 It used to report "579 PDFs present, 575 indexed" and advise running the indexer. For a file that
 cannot be opened at all that advice produces the same two numbers for ever while the file stays
-invisible to search. It now names every unindexed file, says why, and says whether re-running the
-indexer would fix it or whether it needs a person.
+invisible to search. It now names the unindexed files (the first twelve, then a count of the rest;
+`manualforge reconcile` lists them all), says why, and says whether re-running the indexer would fix
+them or whether they need a person.
 
 ---
 
@@ -524,19 +531,26 @@ one false positive. `docs/measurements/new-flags-precision.md`.
 
 ### Error rate
 
-**Precision 80%** (16 of 20 flagged pages checked by eye). **Recall about 50%, and soft** — 2 misses
-in 20 unflagged pages puts it somewhere between 20% and 90% at that sample size.
+Measured on the two-limb gate of 17 September 2026: **precision 80%** (16 of 20 flagged pages
+checked by eye), and **recall about 50%, and soft** — 2 misses in 20 unflagged pages puts it
+somewhere between 20% and 90% at that sample size.
+
+Re-measured on 25 September 2026, after the third limb: the same seeded draw of 20 unflagged pages
+found 1 miss rather than 2, which puts recall near **79%**, with an interval no narrower because the
+sample is no larger. Twelve of the flags the new limb added were checked by eye, and eleven were
+genuine. `docs/measurements/recall-after-the-third-limb.md` and
+`docs/measurements/new-flags-precision.md` have the working.
 
 Every false positive has one cause: drawn hardware — resistor bodies, screws, front-panel buttons,
 halftone dots — is the size, aspect and density of lettering, and shape alone cannot separate it
 from a character. A false positive costs GPU time, not correctness: OCR of a page with nothing to
 recover returns nothing and the merge adds nothing.
 
-The recall gap has a named, diagnosed cause and an undone fix: the render gate fires on
+The recall gap in the first measurement had a named, diagnosed cause: the render gate fired on
 *few characters* or *many paths*, and a page with plenty of prose plus a raster figure whose labels
-are unextracted satisfies neither. Adding a third limb for image coverage would probably move recall
-a long way; it is not done because it invalidates the corpus run and needs its own precision
-measurement afterwards. Tracked as issue #5, which records what doing it properly would cost.
+are unextracted satisfies neither. The fix was held back at first because it invalidated the corpus
+run and needed its own precision measurement afterwards (issue #5). It was made on 24 September
+2026: the third limb, a large image, described under "Two stages" above.
 
 The full table — every page, what it turned out to be, the arithmetic, and two blind spots found
 while looking — is in `docs/UNDER-EXTRACTION-SAMPLE.md`. The sample is seeded, so anybody can

@@ -49,6 +49,10 @@ After the change, `run` with no flags chose three pages in flight by itself (15,
 startup) and read the same 100 pages at **87.3 pages a minute**, 36,001 words, peak 11.7 GB. That
 is the figure `MeasuredThroughput.PagesPerMinuteOnGpu` now carries.
 
+> **Later:** since 10 Oct 2026 that constant is 151.7, the rate over the whole library in #25's run
+> (a1a6721, `fresh-run-from-originals.md`), and estimates use it only until a card has been timed
+> itself (`gpu-autotuning.md`).
+
 Serial `manualforge ocr` on the same pages: 36.2 pages a minute, GPU 18%, CPU 16%. The same three
 pages-in-flight setting run twice came out 86.8 and 82.9, so differences under about 5% are noise.
 

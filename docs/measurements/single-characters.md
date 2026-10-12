@@ -243,4 +243,6 @@ Both against the engine above, over both books:
   0.82-0.89). Keeping them was tried and gains 5 tokens; not worth it.
 - **Schematic pin numbers** standing alone are mostly not rescued: the column test drops them with
   the drawing strokes they look like. Pin numbers that happen to line up are kept.
-- **Nothing already in the library is re-read** by this change.
+- **Nothing already in the library is re-read** by this change. Later: the whole library was read
+  again from its originals on 9-10 Oct 2026 with lone characters rescued and stacks split (#25,
+  `fresh-run-from-originals.md`).

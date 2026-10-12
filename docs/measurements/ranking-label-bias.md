@@ -52,6 +52,10 @@ the first ten (26) and worse in the first 25 (30 against 31).
 It stays available as `--rank-recovered`, off, and recorded here so the next person does not spend
 the afternoon rediscovering that it is a wash.
 
+> **Later:** since 25 Sep 2026 the recovered-text bias is on by default at 1.4, but only for a query
+> of one bare word, where it gains and costs nothing (6385001, `ranking-recovered-text.md`).
+> `--rank-recovered 1.0` turns it off.
+
 **A proximity re-rank** was tried and removed in September, before any of this: 31 correct pages in
 the first ten became 26, because on a syntax diagram the levels of a command are *not* adjacent.
 `docs/GROUND-TRUTH-54845A.md` has the reasoning.

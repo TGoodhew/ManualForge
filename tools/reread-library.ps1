@@ -67,7 +67,7 @@ $steps = @(
 
 # ---------------------------------------------------------------- where things are
 
-if (-not (Test-Path -LiteralPath $Exe)) { throw "manualforge.exe is not at $Exe. Publish it first (README, 'Install')." }
+if (-not (Test-Path -LiteralPath $Exe)) { throw "manualforge.exe is not at $Exe. Install ManualForge, or publish a build there (README, 'Build from source'), or pass -Exe." }
 if (-not (Test-Path -LiteralPath $Library -PathType Container)) { throw "No library folder at $Library." }
 
 $originals = Join-Path $Library '_Originals'

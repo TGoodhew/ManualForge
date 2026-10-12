@@ -5,7 +5,7 @@ namespace ManualForge.Cli;
 
 /// <summary>
 /// A small argument parser. Hand-rolled to keep the dependency list to the agreed set; it handles
-/// <c>--name value</c>, <c>--name=value</c> and bare <c>--flag</c>, which is all the prototype needs.
+/// <c>--name value</c>, <c>--name=value</c> and bare <c>--flag</c>, which is all this tool needs.
 /// </summary>
 internal sealed class CommandLine
 {
@@ -124,41 +124,39 @@ internal sealed class CommandLine
     public static void PrintUsage()
     {
         Console.WriteLine("""
-            ManualForge — searchable PDFs from scanned technical manuals (phase 1 prototype)
+            ManualForge — searchable PDFs from scanned technical manuals
 
             usage:
-              manualforge ocr <input.pdf> [options]      OCR a PDF and overlay an invisible text layer
-              manualforge inspect <input.pdf>            Report page count, sizes and existing text
-              manualforge status <folder>                Show the work queue on disk; changes nothing
-              manualforge survey <folder>                Classify a library; changes nothing
-              manualforge run <folder>                   Classify, flatten, OCR and replace, resumably
-              manualforge doctor <folder>                Find pages whose text layer is incomplete
-              manualforge repair <folder>                OCR just those pages and keep what they missed
-              manualforge index <folder>                 Build the full-text index over a library
-              manualforge search <query> --library <f>    Query it: manual, page and snippet
-              manualforge reconcile <folder>             Which PDFs are not in the index, and why
-              manualforge truth <input.pdf> --pages …     Seed hand-correctable ground-truth pages
-              manualforge benchmark --truth <folder>      Measure character and word error rates
-              manualforge gpu                            Report which execution provider is active, and the
-                                                         pages in flight learned for it; --retune forgets them
-              manualforge setup gpu                      Download CUDA, cuDNN and TensorRT from NVIDIA into
-                                                         ManualForge's own folder; --remove takes them away
-              manualforge setup mcp                      Register the MCP server with every app here that can
-                                                         use it; --list shows where, --remove takes it out
-              manualforge setup models                   Fetch the OCR models now, rather than on the first run
-              manualforge version                        Which build this is, and where it was loaded from
-              manualforge pages <folder> --shape drawn   Find test pages by shape, from the audit's geometry
-              manualforge assemble --pages <list>        Collect pages from many PDFs into one image-only PDF
+              manualforge ocr <input.pdf> [options]     OCR a PDF and overlay an invisible text layer
+              manualforge inspect <input.pdf>           Report page count, sizes and existing text
+              manualforge status <folder>               Show the work queue on disk; changes nothing
+              manualforge survey <folder>               Classify a library; changes no PDF
+              manualforge run <folder>                  Classify, flatten, OCR and replace, resumably
+              manualforge doctor <folder|file.pdf>      Find pages whose text layer is incomplete (also: audit)
+              manualforge repair <folder|file.pdf>      OCR just those pages and keep what they missed
+              manualforge index <folder>                Build the full-text index over a library
+              manualforge search <query> --library <f>  Query it: manual, page and snippet
+              manualforge reconcile <folder>            Which PDFs are not in the index, and why
+              manualforge gpu                           Report which execution provider is active, and the
+                                                        pages in flight learned for it; --retune forgets them
+              manualforge setup gpu                     Download CUDA, cuDNN and TensorRT from NVIDIA into
+                                                        ManualForge's own folder; --remove takes them away
+              manualforge setup mcp                     Register the MCP server with every app here that can
+                                                        use it; --list shows where, --remove takes it out
+              manualforge setup models                  Fetch the OCR models now, rather than on the first run
+              manualforge version                       Which build this is, and where it was loaded from
+              manualforge truth <input.pdf> --pages …   Seed hand-correctable ground-truth pages
+              manualforge benchmark --truth <folder>    Measure character and word error rates
+              manualforge baselines --library <folder>  Measure where words' baselines sit against their ink
+              manualforge pages <folder> --shape drawn  Find test pages by shape, from the audit's geometry
+              manualforge assemble --pages <list>       Collect pages from many PDFs into one image-only PDF
 
             ocr options:
               --out <path>            Output file. Default: <input>.searchable.pdf next to the source.
               --dpi <n>               Rasterisation resolution. Default 300.
               --pages <spec>          Pages to process, e.g. 1,4,7-9. Default: all.
-              --engine <name>         auto | tensorrt | cuda | directml | cpu. Default auto, which
-                                      uses TensorRT when it is installed and CUDA otherwise.
-              --tensorrt-models <list> Which models TensorRT runs: any of det, cls, rec. Default
-                                      cls,rec; the rest run on CUDA. Adding det is about 9%
-                                      faster and reads about twice as many words differently.
+              --engine <name>         auto | tensorrt | cuda | cpu. Default auto, which uses TensorRT
+                                      when it is installed, CUDA otherwise, and the CPU when neither loads.
               --batch <n>             Recognition batch size. Default 8.
               --min-confidence <x>    Drop words below this score when WRITING the text layer.
                                       Default 0.30. It does not change what the recogniser
@@ -184,18 +182,33 @@ internal sealed class CommandLine
               --no-stack-split        Leave a column of table rows boxed as one tall word, such
                                       as NNNNN or mmmmm, as it was read, instead of cutting it
                                       into its rows and reading each.
-              --verify-ink           Re-render both files and prove the page image is unchanged.
+              --verify-ink            Re-render both files and prove the page image is unchanged.
               --dry-run               Do everything except write the output.
               --overwrite             Replace an existing output file.
 
-            survey / run options:
+            survey and run options:
               --policy <spec>         Per-class actions, e.g. ImageOnly=ocr,SuspectText=redo.
                                       Default: ImageOnly=ocr and everything else skipped.
-              --originals <name>      Name of the originals folder. Default _Originals.
               --state <path>          State database. Default <root>/_Originals/manualforge.db.
-              --csv <path>            Write the survey table to CSV (survey only).
-              --limit <n>             Stop after n files (run only).
-              --survey-only           Classify and report, then stop (run only).
+              --no-dedup              Recognise every copy separately instead of once per document.
+              --trim-missing          Forget the records of files that are no longer on disk. They
+                                      are reported either way, and left out of every total.
+
+            survey options:
+              --csv <path>            Write the survey table to CSV.
+
+            run options:
+              --originals <name>      Name of the originals folder. Default _Originals.
+              --engine <name>         As for ocr.
+              --tensorrt-models <list>
+                                      Which models TensorRT runs: any of det, cls, rec. Default
+                                      cls,rec; the rest run on CUDA. Adding det is about 9%
+                                      faster and reads about twice as many words differently.
+              --dpi <n>               Rasterisation resolution. Default 300.
+              --batch <n>             Recognition batch size. Default 8.
+              --limit <n>             Stop after n files.
+              --dry-run               Do all the work except replacing files.
+              --survey-only           Classify and report, then stop.
               --retry-skipped         Reconsider files skipped by an earlier run.
               --redo-completed        Recognise every finished file again from its kept original,
                                       replacing the searchable copy an earlier run made. That copy
@@ -203,11 +216,8 @@ internal sealed class CommandLine
                                       --dry-run it times the work and changes nothing.
               --documents <file>      Run only the PDFs listed in <file>, one path per line.
                                       With --redo-completed, reads just those again.
-              --no-dedup              Recognise every copy separately instead of once per document.
               --refuse-signed         Skip digitally signed files. By default they are processed,
                                       which invalidates their signatures; every one is reported.
-              --trim-missing          Forget the records of files that are no longer on disk. They
-                                      are reported either way, and left out of every total.
               --gpu-concurrency <n>   Pages to recognise at once, fixed. By default each run tries
                                       one more than the card last held, until one spills to
                                       system memory, and remembers the result for the card.
@@ -217,8 +227,15 @@ internal sealed class CommandLine
                                       is every core, which is right for a CPU-only run and rude if
                                       you want to use the machine while it works.
 
+            status options:
+              --state <path>          State database. Default <root>/_Originals/manualforge.db.
+              --originals <name>      Name of the originals folder. Default _Originals.
+              --limit <n>             How many outstanding and recently finished files to list.
+                                      Default 10.
+
             doctor options (also: audit):
               --detail                Per-page numbers for every flagged page, not just a count.
+              --limit <n>             How many documents each ranked list shows. Default 25.
               --explain <page>        Audit one page of one PDF and print every signal.
               --dump <path.png>       With --explain, draw what the ink comparison saw: grey for
                                       ink an extracted glyph accounts for, black for ink nothing
@@ -228,7 +245,8 @@ internal sealed class CommandLine
               --recheck               Re-audit files that have not changed since the last run.
               --trim-missing          Forget audited files that are no longer on disk, with their
                                       findings and repairs. The standing counts them until then.
-              --report                Print what an earlier audit found; audit nothing.
+              --report                Print what an earlier audit found; audit nothing. Given a
+                                      PDF rather than a folder, page by page for that file.
               --reading-order <page>  Print one page's own text in the reading order the repair
                                       uses. For checking on a real page that a close-set table is
                                       read along its rows rather than down its columns.
@@ -241,26 +259,38 @@ internal sealed class CommandLine
               --min-blobs <n>         And at least this many glyph-shaped clusters of it. Default
                                       40. Both must hold: ink alone flags every schematic.
               --audit-dpi <n>         Resolution for the audit render. Default 150.
-              --render-below-chars <n>  Render a page with fewer than this many characters. 900.
-              --render-above-paths <n>  Render a page painting at least this many paths. 40.
+              --render-below-chars <n>
+                                      Render a page with fewer than this many characters. 900.
+              --render-above-paths <n>
+                                      Render a page painting at least this many paths. 40.
+              --render-above-image <x>
+                                      Render a page whose images cover at least this share of it.
+                                      Default 0.10; 1.0 turns this test off.
+              --rule-run <n>          Read this many same-width clusters, evenly spaced down one
+                                      column, as a ruled line rather than lettering. Default 3;
+                                      0 turns this test off.
               --sample <n>            Audit n pages per document instead of all of them.
               --workers <n>           Documents at once. Default half the cores.
               --doctor-db <path>      Findings database. Default <root>/_Originals/manualforge-doctor.db.
-              --no-reverse-video      Do not look inside solid blocks of ink for glyph-shaped holes -
+              --no-reverse-video      Do not look inside solid blocks of ink for glyph-shaped holes:
                                       white lettering on black, such as an instrument screenshot's
                                       readouts. On by default: 17 of 20 pages it adds give the
                                       repair real text. docs/measurements/reverse-video.md.
+              --reverse-video-area <x>
+                                      The smallest solid block worth looking inside, in square
+                                      points. Default 180.
+              --reverse-video-fill <x>
+                                      How much of a block must be ink for it to count as solid.
+                                      Default 0.6.
 
             repair options:
               --dpi <n>               Override the per-page resolution the audit suggested.
               --max-dpi <n>           Ceiling on that suggestion. Default 600.
-              --min-confidence <x>    Drop words below this score when WRITING the text layer.
-                                      Default 0.30. It does not change what the recogniser
-                                      returns; --drop-score does that.
-              --drop-score <x>        The recogniser's own floor: a candidate below this never
-                                      comes back at all. Default 0.30. Lowering it keeps weak
-                                      readings, which is worth trying on material that reads
-                                      as noise.
+              --min-confidence <x>    Drop words below this score when keeping what was read.
+                                      Default 0.30.
+              --engine <name>         As for ocr.
+              --batch <n>             Recognition batch size. Default 8.
+              --cpu-threads <n>       Cap the threads ONNX Runtime uses per operator.
               --redo                  Re-recognise pages an earlier run already did.
               --redo-before <time>    Re-recognise only pages repaired before <time>, e.g.
                                       "2026-09-28 20:00". Unlike --redo it can be restarted with
@@ -269,24 +299,55 @@ internal sealed class CommandLine
               --documents <file>      Repair only the PDFs listed in <file>, one path per line.
               --plan                  Say which pages this would read and how long it should
                                       take, then stop. Loads no models and uses no GPU.
-              --worst-only           Skip documents the audit called merely figure-heavy.
+              --worst-only            Skip documents the audit called merely figure-heavy.
               --include-scans         Also redo scanned pages whose existing OCR missed lettering.
                                       A different problem from the one the audit was built to find,
                                       and on a corpus this size, hours of work. Off by default.
+              --doctor-db <path>      Findings database. Default <root>/_Originals/manualforge-doctor.db.
 
-            index / search options:
+            index options:
               --index <path>          Index database. Default <root>/_Originals/manualforge-index.db.
-              --library <folder>      Which library to search, when --index is not given.
               --reindex               Re-read every document, not just the ones that changed.
+              --compact               Rewrite the index without the free space updates leave in it.
               --sidecars <folder>     Also write one plain-text file per document.
+              --sidecars-inline       Also write one <name>.txt beside each PDF, in the library
+                                      folder itself. Off by default.
               --no-repairs            Ignore text the repair recovered. For proving, by diffing,
                                       exactly what the merge changed and what it left alone.
+              --workers <n>           Documents extracted at once. Default a third of the cores,
+                                      at most 8.
+              --doctor-db <path>      Where to find the text the repair recovered. Default
+                                      <root>/_Originals/manualforge-doctor.db.
+
+            search options:
+              --library <folder>      Which library to search, when --index is not given.
+              --index <path>          Index database to search instead.
               --limit <n>             Results to show. Default 10.
+              --model <name>          Rank manuals whose title or file name holds this instrument
+                                      model higher, without hiding the others.
               --show-duplicates       List identical copies separately instead of folding them.
-              --trim-missing          reconcile only: forget indexed documents whose file has gone.
-                                      `--reindex` does not clear these - it rebuilds what it finds
-                                      on disk and never visits what has been deleted - so without
-                                      this a search can return a page of a file that is not there.
+              --json                  One JSON document: every hit, plus caveats. For programs.
+              --files-only            Ranked paths, one per line. For programs.
+              --rank-labels <x>       Ranking multipliers for a term on a line of its own, for
+              --rank-recovered <x>    text the repair recovered when the query is one bare word,
+              --rank-notation <x>     and for command mnemonics in their own case. Default 1.4
+                                      each; 1 turns one off.
+              The exit code is 0 with results, 2 when nothing matched and 1 when it could not
+              search. With --json or --files-only, notes and caveats go to stderr.
+
+            reconcile options:
+              --library <folder>      The library, if it is not given first.
+              --index <path>          Index database. Default <root>/_Originals/manualforge-index.db.
+              --trim-missing          Forget indexed documents whose file has gone.
+                                      `index --reindex` does not clear these - it rebuilds what it
+                                      finds on disk and never visits what has been deleted - so
+                                      without this a search can return a page of a file that is
+                                      not there.
+
+            gpu options:
+              --engine <name>         Which engine to report on, as for ocr. Default auto.
+              --retune                Forget the pages in flight learned for this card and engine,
+                                      so the next run learns them again. Measured speeds are kept.
 
             pages options:
               --shape drawn|scanned   drawn: a circuit diagram, where the drawing outweighs the
@@ -316,14 +377,32 @@ internal sealed class CommandLine
               --seed-from <file>      Take the seed text from this copy instead, while the manifest
                                       still records the file given. For two copies of one scan with
                                       different text layers: measure one, correct from the other.
+              --publisher             truth only: seed from born-digital pages of a library (given
+                                      first or by --library), whose text layer is the publisher's
+                                      own typesetting, instead of from one PDF. With --count <n>
+                                      (default 12), --min-chars <n> (default 900),
+                                      --per-document <n> (default 2) and --seed <n> (default 1).
+              --dpi <n>               Rasterisation resolution. Default 300.
+              --engine <name>         As for ocr.
               --sweep                 Measure deskew, denoise and resolution against each other.
+              --no-deskew             benchmark only: skip deskewing, which is on by default here.
+              --no-denoise            benchmark only: skip despeckling.
               --score-existing        Also score the text already in the files - point the truth
                                       set at another engine's output to compare against it.
+              --existing-name <name>  What to call that column. Default "existing text layer".
               --csv <path>            Write per-page detail.
+
+            baselines options:
+              --library <folder>      The library to take born-digital pages from.
+              --pages <n>             How many pages. Default 12.
+              --dpi <n>               Rasterisation resolution. Default 300.
+              --seed <n>              Seed for choosing the pages at random. Default 1.
 
             setup gpu options:
               --plan                  Say what would be downloaded, and the licences, and stop.
-              --accept-nvidia-licences  Required to download: NVIDIA's libraries come under its licences.
+              --accept-nvidia-licences
+                                      Required to download: NVIDIA's libraries come under its
+                                      licences.
               --no-tensorrt           Leave TensorRT out (1.9 GB less; about half the speed).
               --force                 Download ManualForge's own copies even if CUDA is already found.
               --downloads <folder>    Keep the archives there and reuse them; otherwise they are

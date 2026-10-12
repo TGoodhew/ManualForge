@@ -20,18 +20,27 @@ chapter 2, confirmed against the printed folio on each page.
 | After the repair, **full 584-document library** | **27 of 33**, 21 of them in the first ten |
 | After the whole library was repaired, 24 Sep 2026 | **27 of 33**, 21 in the first ten — unchanged |
 | The same, asked with `--model 54845A` | **33 of 33**, **32** in the first ten |
+| With the label bias, on by default since 25 Sep 2026 | **31 of 33**, 25 in the first ten |
+| With the notation bias as well, on by default since 10 Oct 2026 (#3), no `--model` | **33 of 33**, **32** in the first ten |
 
-That last row is not a fix for ranking; it is a caller handing over something the index never had.
-Every string in this table comes from one manual, so telling search which instrument is being asked
-about is worth six queries and eleven top-ten places. It biases rather than filters, so a technique
-described in another instrument's manual is still returned. The one query still outside the first
-ten is `The EXTernal command is only available on the 54810/20`, at 13, for the reason this document
-already gives: the note is printed verbatim on several continuation pages and they are all equally
-correct answers.
+Since 10 October 2026 the last row is what search does without being told the model, and it held
+after the TensorRT re-read of 11 October (`docs/measurements/ground-truth-with-notation.md`,
+`docs/measurements/ground-truth-after-reread.md`). The paragraphs below were written before it, and
+are kept as the record of how the score got there.
 
-A user who does not know the model gets the 27. That is still issue #3.
+The `--model` row is not a fix for ranking; it is a caller handing over something the index never had.
+Every string in this table comes from one manual, so on 24 September telling search which instrument
+was being asked about was worth six queries and eleven top-ten places. It biases rather than filters,
+so a technique described in another instrument's manual is still returned. The one query still
+outside the first ten is `The EXTernal command is only available on the 54810/20`, at 13, for the
+reason this document already gives: the note is printed verbatim on several continuation pages and
+they are all equally correct answers.
 
-The last row is not a disappointment, it is a category error corrected. This document measures one
+On 24 September a user who did not know the model got the 27; that was issue #3. Since 10 October
+2026 the notation bias gives the same 33 of 33, 32 in the first ten, without the model, with the
+same query at 13.
+
+The 24 September row is not a disappointment, it is a category error corrected. This document measures one
 manual, and that manual was repaired on 18 September; the pass that followed repaired the other 510
 and could not have moved these numbers. Six queries shifted by a rank or two, all of them downwards
 by one or two places, which is 868,303 newly indexed words competing. What that pass did buy is
@@ -56,12 +65,13 @@ them, and the sixth is the one this document already singles out.
 | `PROTection` | 42 | 108 | **11** |
 | `:WAVeform:SOURce` | 106 | beyond 200 | 88 |
 
-The right-hand column is what search does now: a page scores higher when one of the query's terms
-stands on a line of its own, which is what a syntax diagram looks like and what a paragraph does
+The right-hand column is what search did from 25 September 2026: a page scores higher when one of
+the query's terms stands on a line of its own, which is what a syntax diagram looks like and what a paragraph does
 not. It takes the table as a whole from 27 of 33 within the first 25 to **31**, and from 21 within
 the first ten to **25**, at a cost of one ordinary page in forty losing first place.
 `docs/measurements/ranking-label-bias.md` measures it three ways and records what was rejected
-beside it.
+beside it. Since 10 October 2026 a second bias is on as well, for query words written in mnemonic
+case, and the table reaches 33 of 33, 32 in the first ten (`docs/measurements/ranking-notation.md`).
 
 The mechanism is the one described under "The two that rank low" below, and corpus size is what
 sharpens it: bm25 prefers a prose page that uses the query's words many times over the syntax
@@ -69,9 +79,10 @@ diagram that *defines* the command, and a larger library simply holds more such 
 single-token queries — `ATTenuation`, `PROTection` — are worst hit, because a bare instrument term
 appears in hundreds of manuals.
 
-**So quote 27 of 33 for this library.** The honest summary is that the repair solved retrieval and
-did not solve ranking, and that any score from this table is a property of the corpus it was
-measured on as much as of the code.
+**So, on 18 September, the figure to quote for this library was 27 of 33.** The honest summary then
+was that the repair solved retrieval and did not solve ranking. The ranking biases of 25 September
+and 10 October addressed that, and the figure to quote now is 33 of 33, 32 in the first ten. Any
+score from this table is still a property of the corpus it was measured on as much as of the code.
 
 ### Measuring it yourself
 
@@ -81,9 +92,9 @@ measured on as much as of the code.
 
 That runs all 33 strings, scores where the correct page ranked, and writes a report. The strings
 live in `tools/ground-truth-54845A.tsv`; the reports are in [`docs/measurements/`](measurements/),
-one per run, dated, and not hand-edited. Run against the index as it stands on 2026-09-22 it
-reproduces the table below exactly — 27 of 33 at 25, 21 in the first ten — which is the only reason
-to trust it with an "after".
+one per run, dated, and not hand-edited. Run against the index as it stood on 2026-09-22 it
+reproduced the full-library figure in the Result table above exactly, 27 of 33 at 25 and 21 in the
+first ten, which is the only reason to trust it with an "after".
 
 Two things to know before reading any number it prints:
 
@@ -142,8 +153,9 @@ query matched both the PDF's own text and the recovered text.
 
 ## The two that rank low, and why
 
-These are the two that ranked low on the development library. On the full library six do, for the
-same reason at greater strength — see "The two figures differ" above. The analysis below is the
+These are the two that ranked low on the development library. On the full library six did on
+18 September, for the same reason at greater strength — see "The two figures differ" above. Since
+the ranking biases of 25 September and 10 October, none falls outside the first 25. The analysis below is the
 mechanism; the larger corpus only supplies more of what it describes.
 
 **`The EXTernal command is only available on the 54810/20` — rank 12.** The note is printed
@@ -165,16 +177,22 @@ measurement is recorded here so the next person does not spend the afternoon red
 ## Reproducing this
 
 ```
-manualforge doctor  <library>      # flags 75 of the 110 pages
-manualforge repair  <library>      # OCRs those 75 and keeps what the text layer missed
-manualforge index   <library>      # merges the result in - hours, not minutes, on a large library
+manualforge doctor  <library>      # flagged 75 of the 110 pages with the gate of 17-18 Sep 2026
+manualforge repair  <library>      # OCRs the flagged pages and keeps what the text layer missed
+manualforge index   <library>      # merges the result in
 manualforge search  ":WAVeform:BYTeorder {MSBFirst|LSBFirst}" --library <library> --limit 25
 ```
 
-The index step is the slow one and it is easy to underestimate. Merging a 20-document repair meant
-re-extracting 29 documents and 15,146 pages at 34 pages/min: **7.5 hours**. The indexer skips
-documents whose content and supplement hashes are unchanged, so only the repaired ones are redone —
-but repaired documents tend to be the large ones, which is exactly why the total is not small.
+The 75 was counted with the two-limb gate of 17–18 September 2026. The third gate limb
+(24 September) and reverse-video detection (on by default since 10 October) can change it.
+
+The index step was the slow one in September and it was easy to underestimate. Merging a
+20-document repair meant re-extracting 29 documents and 15,146 pages at 34 pages/min: **7.5 hours**.
+The indexer skips documents whose content and supplement hashes are unchanged, so only the repaired
+ones are redone, but repaired documents tend to be the large ones. Later merges of whole-library
+repairs took 4.7 and 2.0 minutes: the cost is the few text-heavy documents rather than the page
+count, and the indexer now extracts several documents at once. See `docs/UNDER-EXTRACTION.md`,
+"What it cost, on the whole corpus".
 
 To see what the audit saw on any one page:
 

@@ -27,7 +27,8 @@ builder.Services.AddSingleton(library);
 builder.Services
     .AddMcpServer(options =>
     {
-        options.ServerInfo = new() { Name = "manualforge", Version = "0.1.0" };
+        // The build's own version and commit, so a client's log says which build answered.
+        options.ServerInfo = new() { Name = "manualforge", Version = ManualForge.Core.Diagnostics.BuildStamp.Version };
 
         // Read by the client before any tool is called, and the place to say how this server relates
         // to the other one that may be looking at the same folder.

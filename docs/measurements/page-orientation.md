@@ -117,4 +117,5 @@ of them. In the sweep harness throughput fell from 47 to 39 pages a minute.
 - **Seven pages sit 3-8 pt apart** between our text layer and Acrobat's, a consistent translation
   on each. Whose layer moved is not known. Orientation does not change it.
 - **Every page already in the library was recognised with the classifier trusted.** Nothing is
-  re-read by this change.
+  re-read by this change. Later: the whole library was read again from its originals on 9-10 Oct
+  2026 with the classifier checked (#25, `fresh-run-from-originals.md`).

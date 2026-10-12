@@ -130,6 +130,8 @@ if (-not $Iscc) { throw 'Inno Setup 6 was not found. Install it (winget install 
 Write-Step 'Compiling the installer'
 $defines = @{
     AppVersion        = $version
+    # The four-part number Windows shows in the file's properties: 1.0.0+3441e55 is 1.0.0.0.
+    FileVersion       = ($version -replace '[+-].*$', '') + '.0'
     StageDir          = $stage
     OutputDir         = $packageDir
     RepoDir           = $repo

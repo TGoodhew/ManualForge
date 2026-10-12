@@ -16,7 +16,7 @@ namespace ManualForge.Core.Diagnostics;
 /// </summary>
 public static class BuildStamp
 {
-    /// <summary>The running program's version, as <c>0.1.0+3441e55</c>, or <c>+…dirty</c>.</summary>
+    /// <summary>The running program's version, as <c>1.0.0+3441e55</c>, or <c>+…dirty</c>.</summary>
     public static string Version { get; } = Read();
 
     /// <summary>Where the running assembly was loaded from, so two installs can be told apart.</summary>
@@ -63,7 +63,7 @@ public static class BuildStamp
             return informational;
 
         // No stamp at all rather than a wrong one: a missing attribute is a build-configuration
-        // problem, and saying "0.1.0" would hide it behind something that looks like an answer.
+        // problem, and saying "1.0.0" would hide it behind something that looks like an answer.
         return assembly.GetName().Version?.ToString() ?? "unknown";
     }
 

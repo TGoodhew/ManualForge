@@ -67,6 +67,8 @@ pictures. That has not been done and is not pretended.
 2. **Reverse video** — not the cause of the miss above, but real elsewhere: analyser screenshots
    whose readouts are white on black. Implemented and left off by default, because it finds
    photographs at about the same rate. Issue #12, `docs/measurements/reverse-video.md`.
+   Later: since 10 Oct 2026 reverse video is on by default (b9d6d08, #12); `--no-reverse-video`
+   turns it off.
 3. **The threshold miss** — the older sample's other miss was three blobs short of 40. Still
    possible, and it did not recur here.
 4. Everything else the sample did not happen to contain.
