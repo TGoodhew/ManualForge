@@ -513,7 +513,7 @@ For working on ManualForge, or installing it without the installer.
 git clone https://github.com/TGoodhew/ManualForge.git
 cd ManualForge
 dotnet build
-dotnet test        # optional: about 680 tests, under a minute, no GPU or network needed
+dotnet test        # optional: about 700 tests, under a minute, no GPU or network needed
 ```
 
 To build the installer, run `./tools/build-installer.ps1`. It publishes the program into one folder,

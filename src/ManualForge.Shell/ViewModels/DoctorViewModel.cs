@@ -36,6 +36,9 @@ public sealed partial class DoctorRow(DoctorFinding finding) : ObservableObject
 
     public string Title => Finding.Title;
 
+    /// <summary>What a screen reader calls this row's checkbox, which has no visible label of its own.</summary>
+    public string TickLabel => $"Recover text for {Title}";
+
     public int PageCount => Finding.PageCount;
 
     public int FlaggedPages => Finding.FlaggedPages;
