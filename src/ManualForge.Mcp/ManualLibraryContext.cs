@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using ManualForge.Core.Auditing;
 using ManualForge.Core.Indexing;
 
@@ -93,6 +94,29 @@ public sealed class ManualLibraryContext
                      || string.Equals(full, Root, StringComparison.OrdinalIgnoreCase);
 
         return inside && File.Exists(full) ? full : null;
+    }
+
+    /// <summary>
+    /// Text the repair recovered for a document, keyed by page; empty when there is none. Found by the
+    /// file's content, so text recovered from an earlier version of the file is not shown as this one's.
+    /// </summary>
+    public IReadOnlyDictionary<int, PageRepair> Recovered(string path)
+    {
+        if (!HasAudit)
+            return new Dictionary<int, PageRepair>();
+
+        try
+        {
+            using var stream = File.OpenRead(path);
+            var hash = Convert.ToHexString(SHA256.HashData(stream));
+
+            using var store = OpenAudit();
+            return store.Repairs(path, hash);
+        }
+        catch (Exception)
+        {
+            return new Dictionary<int, PageRepair>();
+        }
     }
 
     /// <summary>

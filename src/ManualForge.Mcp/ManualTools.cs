@@ -1,5 +1,4 @@
 using System.ComponentModel;
-using System.Security.Cryptography;
 using System.Text;
 using ManualForge.Core.Auditing;
 using ManualForge.Core.Indexing;
@@ -19,7 +18,7 @@ namespace ManualForge.Mcp;
 /// </para>
 /// </summary>
 [McpServerToolType]
-public sealed class ManualTools(ManualLibraryContext library)
+public sealed class ManualTools(ManualLibraryContext library, PageLinks links)
 {
     [McpServerTool(Name = "library_search")]
     [Description(
@@ -76,6 +75,8 @@ public sealed class ManualTools(ManualLibraryContext library)
             text.AppendLine($"--- {hit.Title}, page {hit.PageNumber}{marker} ---");
             text.AppendLine(hit.Snippet);
             text.AppendLine($"    path: {library.Relative(hit.Path)}");
+            if (links.Enabled)
+                text.AppendLine($"    link: {links.ForPage(library.Relative(hit.Path), hit.PageNumber)}");
 
             if (hit.MatchedOcrText)
             {
@@ -95,6 +96,9 @@ public sealed class ManualTools(ManualLibraryContext library)
         text.AppendLine(
             "These are snippets, not answers. Read the page with read_manual_page before telling the " +
             "user what it says, and cite the manual and page.");
+
+        if (links.Enabled)
+            text.AppendLine(CitationAdvice);
 
         if (anyOcr)
         {
@@ -239,19 +243,22 @@ public sealed class ManualTools(ManualLibraryContext library)
         if (page < 1 || page > pages.Count)
             return $"{path} has {pages.Count} pages; {page} is outside it.";
 
-        var recovered = Recovered(resolved);
+        var recovered = library.Recovered(resolved);
 
         var first = Math.Max(1, page - context);
         var last = Math.Min(pages.Count, page + context);
 
+        var relative = library.Relative(resolved);
         var text = new StringBuilder();
         text.AppendLine($"{Path.GetFileName(resolved)}, page {page} of {pages.Count:N0}");
+        if (links.Enabled)
+            text.AppendLine($"link: {links.ForPage(relative, page)}");
         text.AppendLine();
 
         for (var n = first; n <= last; n++)
         {
             if (first != last)
-                text.AppendLine($"--- page {n} ---");
+                text.AppendLine(links.Enabled ? $"--- page {n} ({links.ForPage(relative, n)}) ---" : $"--- page {n} ---");
 
             var embedded = pages[n - 1];
             var hasRecovered = recovered.TryGetValue(n, out var repair) && repair.OcrText.Length > 0;
@@ -285,29 +292,16 @@ public sealed class ManualTools(ManualLibraryContext library)
                 "the file's own text layer did not hold it. Treat it as what the page appears to say.");
         }
 
+        if (links.Enabled)
+            text.AppendLine(CitationAdvice);
+
         return text.ToString();
     }
 
-    /// <summary>Text the repair recovered for a document, keyed by page. Empty when there is none.</summary>
-    private IReadOnlyDictionary<int, PageRepair> Recovered(string path)
-    {
-        if (!library.HasAudit)
-            return new Dictionary<int, PageRepair>();
-
-        try
-        {
-            using var stream = File.OpenRead(path);
-            using var sha = SHA256.Create();
-            var hash = Convert.ToHexString(sha.ComputeHash(stream));
-
-            using var store = library.OpenAudit();
-            return store.Repairs(path, hash);
-        }
-        catch (Exception)
-        {
-            return new Dictionary<int, PageRepair>();
-        }
-    }
+    private const string CitationAdvice =
+        "Cite each page as a markdown link to the link given for it, e.g. [432A-OSM.pdf, p. 23](link): " +
+        "it opens ManualForge's view of that page on the user's PC, with the text recovered from it " +
+        "marked, so they can check what you say against the page. Use the links exactly as given.";
 
     [McpServerTool(Name = "library_status")]
     [Description(

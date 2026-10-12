@@ -1304,8 +1304,8 @@ src/ManualForge.Cli/              the command line
 src/ManualForge.Shell/            view models and the services behind them - no XAML, so testable
   ViewModels/                     library, doctor and search, each with no window attached
 src/ManualForge.App/              WinUI 3: XAML, file pickers, a GPU timer, opening a manual, nothing else
-src/ManualForge.Mcp/              MCP server: library_search, read_manual_page, library_status
-tests/ManualForge.Core.Tests/     705 tests, no GPU or network needed
+src/ManualForge.Mcp/              MCP server: library_search, read_manual_page, library_status, and the page view citations link to
+tests/ManualForge.Core.Tests/     735 tests, no GPU or network needed
 installer/ManualForge.iss         the Inno Setup installer; test-in-sandbox.ps1 tests it in Windows Sandbox
 art/icon/                         the icon's drawings, as SVG
 packages/, nuget.config           the TensorRT build of PaddleOcrNet (docs/paddleocrnet-fork.md)
@@ -1329,7 +1329,7 @@ docs/measurements/                what those produced: one dated file per run, n
 dotnet test ManualForge.slnx
 ```
 
-705 tests as of 1.1, under a minute, no GPU, models or network required. The ones that say most
+735 tests as of 1.2, under a minute, no GPU, models or network required. The ones that say most
 about how ManualForge behaves:
 
 - **`PageGeometryTests`** — the corner mapping for all four rotations, non-zero crop origins,

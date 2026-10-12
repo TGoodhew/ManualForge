@@ -24,6 +24,10 @@ public sealed class ManualToolsTests : IDisposable
 
     private ManualLibraryContext Library => ManualLibraryContext.At(_root);
 
+    /// <summary>The tools, with page links served (as when the MCP server's page server is up) or not.</summary>
+    private ManualTools Tools(bool links = false) =>
+        new(Library, new PageLinks(PageLinks.DefaultPort) { Enabled = links });
+
     private static IndexedPageText[] Pages(params string[] text) =>
         text.Select(Dehyphenator.Prepare).ToArray();
 
@@ -80,7 +84,7 @@ public sealed class ManualToolsTests : IDisposable
     {
         GivenAManual();
 
-        var answer = new ManualTools(Library).LibrarySearch("gorilla husbandry");
+        var answer = Tools().LibrarySearch("gorilla husbandry");
 
         Assert.DoesNotContain("real absence", answer, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("NOT evidence", answer, StringComparison.Ordinal);
@@ -94,7 +98,7 @@ public sealed class ManualToolsTests : IDisposable
         var pdf = GivenAManual();
         GivenAnAudit(pdf, flaggedPages: 75, repairedPages: 0);
 
-        var answer = new ManualTools(Library).LibrarySearch("gorilla husbandry");
+        var answer = Tools().LibrarySearch("gorilla husbandry");
 
         Assert.Contains("NOT a real absence yet", answer, StringComparison.Ordinal);
         Assert.Contains("54845A Programmer.pdf", answer, StringComparison.Ordinal);
@@ -110,7 +114,7 @@ public sealed class ManualToolsTests : IDisposable
         var pdf = GivenAManual();
         GivenAnAudit(pdf, flaggedPages: 4, repairedPages: 4);
 
-        var answer = new ManualTools(Library).LibrarySearch("gorilla husbandry");
+        var answer = Tools().LibrarySearch("gorilla husbandry");
 
         Assert.Contains("real absence rather than a truncated search", answer, StringComparison.Ordinal);
         Assert.Contains("never OCR'd has no text to match", answer, StringComparison.Ordinal);
@@ -126,7 +130,7 @@ public sealed class ManualToolsTests : IDisposable
             },
             "supplement-1");
 
-        var answer = new ManualTools(Library).LibrarySearch("LFR1");
+        var answer = Tools().LibrarySearch("LFR1");
 
         Assert.Contains("[OCR]", answer, StringComparison.Ordinal);
         Assert.Contains("96 %", answer.Replace("96%", "96 %", StringComparison.Ordinal), StringComparison.Ordinal);
@@ -146,7 +150,7 @@ public sealed class ManualToolsTests : IDisposable
                 [2] = new PageProvenance(16, 48, 0.96, "BWLimit DISPlay INPut AC DC LFR1 LFR2"),
             });
 
-        var answer = new ManualTools(Library).LibrarySearch("prose");
+        var answer = Tools().LibrarySearch("prose");
 
         Assert.DoesNotContain("[OCR]", answer, StringComparison.Ordinal);
         Assert.DoesNotContain("recovered by OCR", answer, StringComparison.Ordinal);
@@ -161,7 +165,7 @@ public sealed class ManualToolsTests : IDisposable
         TestPdf.TypesetOnly(Path.Combine(_root, "later.pdf"), "added after the index was built");
         File.WriteAllBytes(Path.Combine(_root, "placeholder.pdf"), []);
 
-        var answer = new ManualTools(Library).LibraryStatus();
+        var answer = Tools().LibraryStatus();
 
         Assert.Contains("NOT INDEXED", answer, StringComparison.Ordinal);
         Assert.Contains("later.pdf", answer, StringComparison.Ordinal);
@@ -177,11 +181,11 @@ public sealed class ManualToolsTests : IDisposable
     {
         var pdf = GivenAManual();
 
-        Assert.Contains("AUDIT  : never run", new ManualTools(Library).LibraryStatus(), StringComparison.Ordinal);
+        Assert.Contains("AUDIT  : never run", Tools().LibraryStatus(), StringComparison.Ordinal);
 
         GivenAnAudit(pdf, flaggedPages: 75, repairedPages: 10);
 
-        var audited = new ManualTools(Library).LibraryStatus();
+        var audited = Tools().LibraryStatus();
         Assert.Contains("75 page(s) in total", audited, StringComparison.Ordinal);
         Assert.Contains("65 page(s) still hold text that no search can reach", audited, StringComparison.Ordinal);
     }
@@ -200,7 +204,7 @@ public sealed class ManualToolsTests : IDisposable
                 pdf, 2, hash, 300, "BWLimit DISPlay INPut LFR1", 0.96, 4, DateTimeOffset.UtcNow));
         }
 
-        var answer = new ManualTools(Library).ReadManualPage(Path.GetFileName(pdf), 2);
+        var answer = Tools().ReadManualPage(Path.GetFileName(pdf), 2);
 
         Assert.Contains("recovered by OCR from the rendered page", answer, StringComparison.Ordinal);
         Assert.Contains("LFR1", answer, StringComparison.Ordinal);
@@ -210,13 +214,36 @@ public sealed class ManualToolsTests : IDisposable
     }
 
     [Fact]
+    public void WithPagesServedEachHitAndPageCarriesItsLink()
+    {
+        var pdf = GivenAManual();
+
+        var search = Tools(links: true).LibrarySearch("LFR1");
+        Assert.Contains("link: http://127.0.0.1:47332/manuals/54845A%20Programmer.pdf/page/2", search, StringComparison.Ordinal);
+        Assert.Contains("Cite each page as a markdown link", search, StringComparison.Ordinal);
+
+        var page = Tools(links: true).ReadManualPage(Path.GetFileName(pdf), 2, context: 1);
+        Assert.Contains("link: http://127.0.0.1:47332/manuals/54845A%20Programmer.pdf/page/2", page, StringComparison.Ordinal);
+        Assert.Contains("--- page 3 (http://127.0.0.1:47332/manuals/54845A%20Programmer.pdf/page/3) ---", page, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void WithoutPagesServedThereAreNoLinksToGoNowhere()
+    {
+        var pdf = GivenAManual();
+
+        Assert.DoesNotContain("http://", Tools().LibrarySearch("LFR1"), StringComparison.Ordinal);
+        Assert.DoesNotContain("http://", Tools().ReadManualPage(Path.GetFileName(pdf), 2), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void APathOutsideTheLibraryIsRefused()
     {
         GivenAManual();
 
         Assert.Contains(
             "not a file inside the manual library",
-            new ManualTools(Library).ReadManualPage(@"..\..\..\secrets.txt", 1),
+            Tools().ReadManualPage(@"..\..\..\secrets.txt", 1),
             StringComparison.Ordinal);
     }
 
