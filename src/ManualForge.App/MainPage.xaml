@@ -400,7 +400,9 @@
                         <Grid Grid.Column="1" RowSpacing="8">
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
                                 <RowDefinition Height="*" />
+                                <RowDefinition Height="Auto" />
                             </Grid.RowDefinitions>
 
                             <Grid Grid.Row="0" ColumnSpacing="8">
@@ -418,8 +420,16 @@
                                 <Button Grid.Column="2" Content="Show" Command="{x:Bind Doctor.ExplainCommand}" />
                             </Grid>
 
-                            <Border
+                            <!-- What the picture means for search, and whether this page needs anything (#74). -->
+                            <TextBlock
                                 Grid.Row="1"
+                                Text="{x:Bind Doctor.PageExplanation, Mode=OneWay}"
+                                Visibility="{x:Bind Doctor.HasPageExplanation, Mode=OneWay}"
+                                TextWrapping="Wrap"
+                                Style="{StaticResource CaptionTextBlockStyle}" />
+
+                            <Border
+                                Grid.Row="2"
                                 BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                                 BorderThickness="1"
                                 CornerRadius="4"
@@ -440,6 +450,19 @@
                                         Style="{StaticResource CaptionTextBlockStyle}" />
                                 </Grid>
                             </Border>
+
+                            <!-- What a repair read off this page, to set against the black lettering. -->
+                            <StackPanel Grid.Row="3" Spacing="4" Visibility="{x:Bind Doctor.HasPageRecoveredText, Mode=OneWay}">
+                                <TextBlock Text="Text recovered from this page" FontWeight="SemiBold" Style="{StaticResource CaptionTextBlockStyle}" />
+                                <ScrollViewer MaxHeight="140">
+                                    <TextBlock
+                                        Text="{x:Bind Doctor.PageRecoveredText, Mode=OneWay}"
+                                        TextWrapping="Wrap"
+                                        IsTextSelectionEnabled="True"
+                                        FontFamily="Consolas"
+                                        Style="{StaticResource CaptionTextBlockStyle}" />
+                                </ScrollViewer>
+                            </StackPanel>
                         </Grid>
                     </Grid>
                 </Grid>

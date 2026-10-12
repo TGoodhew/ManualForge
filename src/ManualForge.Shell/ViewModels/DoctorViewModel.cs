@@ -189,6 +189,8 @@ public sealed partial class DoctorViewModel(IDoctorService service, IUiDispatche
     partial void OnSelectedDocumentChanged(DoctorRow? value)
     {
         Diagnostic = null;
+        PageExplanation = null;
+        PageRecoveredText = null;
         if (value is not null)
             ExplainPage = FirstPageOf(value.PageRanges) ?? 1;
     }
@@ -203,8 +205,8 @@ public sealed partial class DoctorViewModel(IDoctorService service, IUiDispatche
     /// <summary>What the empty picture panel says, so it is clear what Show needs and what it draws.</summary>
     public string ExplainHint => SelectedDocument is null
         ? "Click or tick a document in the list to look at the pages the audit flagged in it. Show draws the page: "
-          + "grey is ink its text layer accounts for, black is ink nothing accounts for, and boxes are what "
-          + "was counted as lettering."
+          + "grey is text already in the document's text layer, black is everything else drawn on it, and red boxes "
+          + "mark lettering the text layer is missing."
         : $"Show draws page {ExplainPage:N0} of {SelectedDocument.Title}. Its flagged pages are listed under "
           + "its name.";
 
@@ -453,10 +455,22 @@ public sealed partial class DoctorViewModel(IDoctorService service, IUiDispatche
                 .ExplainAsync(SelectedDocument.Path, ExplainPage, CancellationToken.None)
                 .ConfigureAwait(true);
 
-            Status = Diagnostic is null
-                ? $"Page {ExplainPage:N0} could not be rendered."
-                : "Grey is ink an extracted glyph accounts for; black is ink nothing accounts for; " +
-                  "the boxes are what was counted as lettering.";
+            if (Diagnostic is null)
+            {
+                Status = $"Page {ExplainPage:N0} could not be rendered.";
+                PageExplanation = null;
+                PageRecoveredText = null;
+            }
+            else
+            {
+                var repair = Folder is null
+                    ? null
+                    : await _service.RecoveredAsync(Folder, SelectedDocument.Path, ExplainPage, CancellationToken.None)
+                        .ConfigureAwait(true);
+                Status = $"Page {ExplainPage:N0} of {SelectedDocument.Title}, as the audit saw it.";
+                PageExplanation = ExplainPageState(IsFlagged(SelectedDocument.PageRanges, ExplainPage), repair);
+                PageRecoveredText = repair?.OcrText;
+            }
         }
         catch (Exception ex)
         {
@@ -465,6 +479,68 @@ public sealed partial class DoctorViewModel(IDoctorService service, IUiDispatche
     }
 
     private bool CanExplain => SelectedDocument is not null && ExplainPage >= 1;
+
+    /// <summary>What the page Show drew means, and whether anything needs doing about it.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasPageExplanation))]
+    private string? _pageExplanation;
+
+    public bool HasPageExplanation => !string.IsNullOrEmpty(PageExplanation);
+
+    /// <summary>The text a repair recovered from that page, when there is some, to compare with the picture.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasPageRecoveredText))]
+    private string? _pageRecoveredText;
+
+    public bool HasPageRecoveredText => !string.IsNullOrEmpty(PageRecoveredText);
+
+    /// <summary>
+    /// Says, for the page in the picture, what its colours mean for search and where it stands. The
+    /// legend alone left it unclear whether anything was expected of whoever was looking (#74).
+    /// </summary>
+    public static string ExplainPageState(bool flagged, PageRepair? repair)
+    {
+        const string legend =
+            "Grey is text that is already in the document's own text layer, which search finds. Black is " +
+            "everything else drawn on the page: lines and pictures, and any lettering the text layer is missing. " +
+            "The red boxes mark the black shapes the audit judged to be lettering: text a search of the document " +
+            "alone could not find, and the reason the page was flagged. The picture shows the PDF as it is; " +
+            "recovered text is kept beside it for search rather than written into it, so recovered lettering " +
+            "still shows black here.";
+
+        if (repair is not null)
+        {
+            return legend + " " + string.Format(
+                CultureInfo.CurrentCulture,
+                "ManualForge has already read this page and recovered {0:N0} word(s) from it, on {1:d}. They go " +
+                "into search when the index is built, so there is nothing to do. What it read is below; it is " +
+                "OCR, so expect some misreadings.",
+                repair.WordCount, repair.RepairedUtc.LocalDateTime);
+        }
+
+        return flagged
+            ? legend + " The audit flagged this page and its text has not been recovered yet. To recover it, " +
+              "tick the document and press Recover text, then build the index on the Search tab."
+            : legend + " The audit did not flag this page: its text layer accounts for what is drawn on it, " +
+              "so there is nothing to do.";
+    }
+
+    /// <summary>Whether a page is in a list such as "14,16,21-26".</summary>
+    public static bool IsFlagged(string? ranges, int page)
+    {
+        foreach (var part in (ranges ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var bounds = part.Split('-', StringSplitOptions.TrimEntries);
+            if (int.TryParse(bounds[0], NumberStyles.None, CultureInfo.InvariantCulture, out var from)
+                && int.TryParse(bounds[^1], NumberStyles.None, CultureInfo.InvariantCulture, out var to)
+                && page >= from && page <= to)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     [RelayCommand(CanExecute = nameof(IsBusy))]
     public void Cancel()

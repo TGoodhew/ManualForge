@@ -20,6 +20,32 @@ public sealed class DoctorGuidanceTests
     }
 
     [Theory]
+    [InlineData("14,16,21-26", 16, true)]
+    [InlineData("14,16,21-26", 23, true)]
+    [InlineData("14,16,21-26", 15, false)]
+    [InlineData("", 1, false)]
+    public void APageIsFlaggedWhenItsListSaysSo(string ranges, int page, bool flagged)
+        => Assert.Equal(flagged, DoctorViewModel.IsFlagged(ranges, page));
+
+    [Fact]
+    public void ThePictureSaysWhetherAnythingNeedsDoing()
+    {
+        var repair = new PageRepair(@"D:\Manuals\3585B-SM-V1.pdf", 14, "h", 300, "HP 3466A", 0.9, 42,
+            new DateTimeOffset(2026, 10, 11, 7, 0, 0, TimeSpan.Zero));
+
+        var recovered = DoctorViewModel.ExplainPageState(flagged: true, repair);
+        Assert.Contains("red boxes mark the black shapes the audit judged to be lettering", recovered, StringComparison.Ordinal);
+        Assert.Contains("already read this page and recovered 42 word(s)", recovered, StringComparison.Ordinal);
+        Assert.Contains("nothing to do", recovered, StringComparison.Ordinal);
+
+        var waiting = DoctorViewModel.ExplainPageState(flagged: true, repair: null);
+        Assert.Contains("has not been recovered yet", waiting, StringComparison.Ordinal);
+        Assert.Contains("press Recover text", waiting, StringComparison.Ordinal);
+
+        Assert.Contains("did not flag this page", DoctorViewModel.ExplainPageState(flagged: false, repair: null), StringComparison.Ordinal);
+    }
+
+    [Theory]
     [InlineData("14,16,21-26", 14)]
     [InlineData("1,3,8", 1)]
     [InlineData(" 330-335", 330)]
