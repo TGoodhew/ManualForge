@@ -175,6 +175,29 @@ public class LibraryViewModelTests
     }
 
     [Fact]
+    public async Task AFileThatCannotBeOpenedIsNamedRatherThanLeftAsOneShort()
+    {
+        // LeCroy-5674 service.pdf: a download that never finished, skipped because it cannot be
+        // opened. It showed only as "165 of 166" in the Done column, with no reason anywhere.
+        var (model, service) = New();
+        service.SurveyResult.AddRange(
+        [
+            Record(@"C:\Manuals\a.pdf", TextClass.ImageOnly, 10, FileStatus.Completed),
+            Record(@"C:\Manuals\LeCroy-5674 service.pdf", TextClass.ImageOnly, 1, FileStatus.Skipped, ClassAction.Skip)
+                with { Blocker = ModificationBlocker.Corrupt },
+            Record(@"C:\Manuals\note.pdf", TextClass.GoodText, 4, FileStatus.Skipped, ClassAction.Skip)
+                with { Blocker = ModificationBlocker.Unknown },
+        ]);
+
+        await model.SurveyCommand.ExecuteAsync(null);
+
+        Assert.Contains("LeCroy-5674 service.pdf cannot be opened", model.Status, StringComparison.Ordinal);
+        var problem = Assert.Single(model.Errors);
+        Assert.Contains("damaged", problem, StringComparison.Ordinal);
+        Assert.Equal("1 of 2", model.Summary.Single(r => r.TextClass == TextClass.ImageOnly).Done);
+    }
+
+    [Fact]
     public async Task ChangingAnActionInTheTableChangesThePolicyTheRunUses()
     {
         // The specification asks to choose per class whether to OCR, skip or strip-and-redo, which
