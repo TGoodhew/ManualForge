@@ -41,6 +41,13 @@ public sealed partial class LibraryViewModel(
     private long _startedTicks;
     private int _errorsBeforeRun;
 
+    /// <summary>
+    /// Which build this is, for the window's status line: the version and the commit it was built
+    /// from, as <c>manualforge version</c> says it. Someone who only uses the app has no other way to
+    /// find it, and it is the first thing a bug report needs.
+    /// </summary>
+    public string Version { get; } = $"ManualForge {ManualForge.Core.Diagnostics.BuildStamp.Version}";
+
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(SurveyCommand))]
     [NotifyCanExecuteChangedFor(nameof(RunCommand))]

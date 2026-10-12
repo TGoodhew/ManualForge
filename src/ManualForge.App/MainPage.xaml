@@ -16,6 +16,7 @@
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
         <!-- Folder, and what to do with it -->
@@ -487,5 +488,13 @@
             </TabViewItem>
 
         </TabView>
+
+        <!-- Status line: which build this is, selectable so it can go into a bug report -->
+        <TextBlock Grid.Row="4"
+                   Text="{x:Bind ViewModel.Version}"
+                   IsTextSelectionEnabled="True"
+                   Style="{StaticResource CaptionTextBlockStyle}"
+                   Opacity="0.6"
+                   HorizontalAlignment="Right" />
     </Grid>
 </Page>
