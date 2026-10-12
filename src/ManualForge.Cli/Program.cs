@@ -139,9 +139,17 @@ namespace ManualForge.Cli
             if (!engine.Runtime.UsingGpu && options.Accelerator != OcrAccelerator.Cpu)
             {
                 Console.WriteLine();
-                Console.WriteLine("The GPU was not used. ONNX Runtime 1.30 hard-imports cublas64_13.dll, so this");
-                Console.WriteLine("needs the CUDA 13 runtime and cuDNN 9 for CUDA 13 on PATH - CUDA 12 will not load.");
-                Console.WriteLine("The hint above names the exact DLL that was missing. Otherwise it runs on CPU.");
+                if (GpuMemoryProbe.TryIdentify() is null)
+                {
+                    Console.WriteLine("No NVIDIA GPU was found (nvidia-smi is not there), so ManualForge runs on the CPU.");
+                }
+                else
+                {
+                    Console.WriteLine("The GPU was not used. It needs NVIDIA's CUDA 13 runtime, cuBLAS and cuDNN 9 for");
+                    Console.WriteLine("CUDA 13 (CUDA 12 will not load), and TensorRT 10 for TensorRT. `manualforge setup gpu`");
+                    Console.WriteLine("downloads them into ManualForge's own folder. The hint above names the DLL that was");
+                    Console.WriteLine("missing. Until then ManualForge runs on the CPU.");
+                }
             }
 
             return 0;

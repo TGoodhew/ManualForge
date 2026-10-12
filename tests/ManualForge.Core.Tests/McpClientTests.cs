@@ -176,7 +176,26 @@ public sealed class McpClientTests : IDisposable
     }
 
     [Fact]
-    public void ACopyHoldingCommentsTheEditLostIsKept()
+    public void SettingsNobodyChangedSinceGoBackByteForByte()
+    {
+        // The issue's test: the settings after uninstalling are the settings from before installing,
+        // layout and comments included, not the same values written out again.
+        Installed("AppData", "Roaming", "Code", "User");
+        var client = (JsonMcpClient)Client("vscode");
+        var before = "{\n    // the web one is for work\n    \"servers\": {\"web\": {\"url\": \"https://example.test/mcp\"}}\n}\n";
+        File.WriteAllText(client.ConfigPath, before);
+
+        client.Register(Entry);
+        var removal = client.Unregister();
+
+        Assert.True(removal.Changed);
+        Assert.Null(removal.Backup);
+        Assert.Equal(before, File.ReadAllText(client.ConfigPath));
+        Assert.Empty(Directory.GetFiles(Path.GetDirectoryName(client.ConfigPath)!, "*.bak"));
+    }
+
+    [Fact]
+    public void ACopyHoldingCommentsTheEditLostIsKeptWhenTheSettingsChangedSince()
     {
         Installed("AppData", "Roaming", "Code", "User");
         var client = (JsonMcpClient)Client("vscode");
@@ -188,10 +207,30 @@ public sealed class McpClientTests : IDisposable
             """);
 
         client.Register(Entry);
+        var settings = Read(client.ConfigPath);
+        settings["servers"]!["another"] = new JsonObject { ["command"] = "another.exe" };
+        File.WriteAllText(client.ConfigPath, settings.ToJsonString());
         var removal = client.Unregister();
 
         Assert.NotNull(removal.Backup);
         Assert.Contains("// the web one is for work", File.ReadAllText(removal.Backup!), StringComparison.Ordinal);
+        Assert.NotNull(Read(client.ConfigPath)["servers"]!["another"]);
+    }
+
+    [Fact]
+    public void CodexSettingsNobodyChangedSinceGoBackByteForByte()
+    {
+        Installed(".codex");
+        var config = Path.Combine(_home, ".codex", "config.toml");
+        var before = "model = \"gpt-5\"   # the default\n\n[mcp_servers.other]\ncommand = 'other.exe'\n\n\n";
+        File.WriteAllText(config, before);
+        var client = Client("codex");
+
+        client.Register(Entry);
+        client.Unregister();
+
+        Assert.Equal(before, File.ReadAllText(config));
+        Assert.False(File.Exists(config + ".before-manualforge.bak"));
     }
 
     [Fact]
@@ -349,5 +388,96 @@ public sealed class McpClientTests : IDisposable
             ["claude-desktop-store", "claude-desktop", "claude-code", "vscode", "vscode-insiders", "visual-studio",
              "cursor", "windsurf", "gemini", "codex", "lmstudio", "continue"],
             ids);
+    }
+
+    // ---------------------------------------------------------------- the record removal works from
+
+    private McpRegistrations Record(bool claudeOnPath = false) => McpRegistrations.Load(Environment(claudeOnPath));
+
+    private IReadOnlyList<McpClient> Clients(bool claudeOnPath = false) => McpClients.All(Environment(claudeOnPath));
+
+    [Fact]
+    public void RemovingTakesOutOnlyWhatWasRecorded()
+    {
+        // VS Code is registered by setup; Cursor already had the same entry, put there by hand, so setup
+        // changes nothing in it and an uninstall must leave it.
+        Installed("AppData", "Roaming", "Code", "User");
+        Installed(".cursor");
+        var cursor = (JsonMcpClient)Client("cursor");
+        cursor.Register(Entry);
+        var byHand = File.ReadAllText(cursor.ConfigPath);
+
+        var record = Record();
+        Assert.True(record.Register(Client("vscode"), Entry).Changed);
+        Assert.False(record.Register(cursor, Entry).Changed);
+        Assert.Equal("vscode", Assert.Single(record.Entries).Client);
+
+        var removals = Record().Remove(Clients());
+
+        Assert.Equal("vscode", Assert.Single(removals).Client.Id);
+        Assert.False(File.Exists(((JsonMcpClient)Client("vscode")).ConfigPath));
+        Assert.Equal(byHand, File.ReadAllText(cursor.ConfigPath));
+        Assert.False(File.Exists(McpRegistrations.PathFor(Environment())));
+    }
+
+    [Fact]
+    public void AnEntryManualForgeReplacedIsPutBackAsItWas()
+    {
+        var folder = Installed("AppData", "Roaming", "Claude");
+        var config = Path.Combine(folder, "claude_desktop_config.json");
+        var before = """{ "mcpServers": { "manualforge": { "command": "D:\\dev\\ManualForge.Mcp.exe", "args": ["--verbose"] } }, "theme": "light" }""";
+        File.WriteAllText(config, before);
+
+        var record = Record();
+        record.Register(Client("claude-desktop"), Entry);
+        // Registering again, on another library, must not make ManualForge's own entry the one to put back.
+        Record().Register(Client("claude-desktop"), Entry with { Library = @"E:\Manuals" });
+        Assert.Equal(Entry.Command, Read(config)["mcpServers"]!["manualforge"]!["command"]!.GetValue<string>());
+
+        var removal = Assert.Single(Record().Remove(Clients()));
+
+        Assert.True(removal.Restored);
+        Assert.True(JsonNode.DeepEquals(JsonNode.Parse(before), Read(config)));
+        Assert.False(File.Exists(config + ".before-manualforge.bak"));
+    }
+
+    [Fact]
+    public void WithoutARecordNothingIsRemoved()
+    {
+        Installed("AppData", "Roaming", "Code", "User");
+        var vscode = (JsonMcpClient)Client("vscode");
+        vscode.Register(Entry);
+
+        Assert.Empty(Record().Remove(Clients()));
+        Assert.Equal(McpClientState.Registered, vscode.State(Entry));
+    }
+
+    [Fact]
+    public void ACodexTableManualForgeReplacedIsPutBack()
+    {
+        Installed(".codex");
+        var config = Path.Combine(_home, ".codex", "config.toml");
+        string[] before = ["model = 'gpt-5'", "", "[mcp_servers.manualforge]", "command = 'D:\\dev\\ManualForge.Mcp.exe'"];
+        File.WriteAllLines(config, before);
+
+        Record().Register(Client("codex"), Entry);
+        Assert.Contains(@"MANUALFORGE_LIBRARY = 'D:\Manuals'", File.ReadAllText(config), StringComparison.Ordinal);
+
+        Assert.True(Assert.Single(Record().Remove(Clients())).Restored);
+        Assert.Equal(before, File.ReadAllLines(config));
+    }
+
+    [Fact]
+    public void ClaudeCodesOwnCommandPutsBackTheEntryItHadBefore()
+    {
+        var previous = """{"type":"stdio","command":"D:\\dev\\ManualForge.Mcp.exe","args":[]}""";
+        File.WriteAllText(Path.Combine(_home, ".claude.json"), $$"""{ "mcpServers": { "manualforge": {{previous}} } }""");
+
+        Record(claudeOnPath: true).Register(Client("claude-code", claudeOnPath: true), Entry);
+        _ran.Clear();
+
+        Assert.True(Assert.Single(Record(claudeOnPath: true).Remove(Clients(claudeOnPath: true))).Restored);
+        var add = Assert.Single(_ran, r => r.Arguments.Contains("add-json"));
+        Assert.Equal(["mcp", "add-json", "manualforge", previous, "--scope", "user"], add.Arguments);
     }
 }

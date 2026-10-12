@@ -94,6 +94,15 @@ public abstract class McpClient(string id, string displayName)
 
     public abstract McpChange Unregister();
 
+    /// <summary>
+    /// The <c>manualforge</c> entry as it stands, in the client's own form, or null when it has none. Taken
+    /// before ManualForge changes an entry that was already there, so removing ManualForge can put it back.
+    /// </summary>
+    public abstract string? Snapshot();
+
+    /// <summary>Puts back an entry <see cref="Snapshot"/> took.</summary>
+    public abstract McpChange Restore(string snapshot);
+
     /// <summary>What to tell the user afterwards, when the client reads its settings only at start.</summary>
     public virtual string? RestartNote => null;
 
@@ -218,16 +227,71 @@ public class JsonMcpClient(
         servers.Remove(McpServerEntry.Name);
 
         // A file ManualForge created holds nothing else once its entry is out: it goes too.
-        if (servers.Count == 0 && root!.Count == 1)
+        if (servers.Count == 0 && root!.Count == 1 && !File.Exists(BackupPathFor(ConfigPath)))
         {
             File.Delete(ConfigPath);
-            DropBackup(ConfigPath);
             return new McpChange(true, null);
         }
+
+        if (PutBackIfUnchanged(root!))
+            return new McpChange(true, null);
 
         var change = Write(root!);
         DropBackup(ConfigPath);
         return change with { Backup = File.Exists(BackupPathFor(ConfigPath)) ? BackupPathFor(ConfigPath) : null };
+    }
+
+    public override string? Snapshot() =>
+        TryRead(out var root) && root?[serversKey]?[McpServerEntry.Name] is JsonObject existing
+            ? existing.ToJsonString()
+            : null;
+
+    public override McpChange Restore(string snapshot)
+    {
+        if (!TryRead(out var root))
+            return new McpChange(false, null, "its settings could not be read as JSON, so they were left alone");
+
+        root ??= new JsonObject();
+        if (root[serversKey] is not JsonObject servers)
+        {
+            servers = new JsonObject();
+            root[serversKey] = servers;
+        }
+
+        servers[McpServerEntry.Name] = JsonNode.Parse(snapshot);
+        if (PutBackIfUnchanged(root))
+            return new McpChange(true, null);
+
+        var change = Write(root);
+        DropBackup(ConfigPath);
+        return change with { Backup = File.Exists(BackupPathFor(ConfigPath)) ? BackupPathFor(ConfigPath) : null };
+    }
+
+    /// <summary>
+    /// When taking ManualForge out leaves the settings saying exactly what they said before it went in,
+    /// the copy from before goes back byte for byte, with its layout and comments, rather than the same
+    /// settings written out again. Anything changed since, by the user or the app, keeps the rewrite.
+    /// </summary>
+    private bool PutBackIfUnchanged(JsonObject root)
+    {
+        var backup = BackupPathFor(ConfigPath);
+        try
+        {
+            if (!File.Exists(backup)
+                || JsonNode.Parse(File.ReadAllText(backup), documentOptions: Reading) is not JsonObject before
+                || !JsonNode.DeepEquals(before, root))
+            {
+                return false;
+            }
+
+            File.Copy(backup, ConfigPath, overwrite: true);
+            File.Delete(backup);
+            return true;
+        }
+        catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
     }
 
     /// <summary>What goes under the server's name.</summary>
@@ -338,6 +402,16 @@ public sealed class ClaudeCodeClient(McpEnvironment environment)
         var (exit, output) = environment.Run("claude", ["mcp", "remove", McpServerEntry.Name, "--scope", "user"]);
         return exit == 0 ? new McpChange(true, null) : new McpChange(false, null, "claude mcp remove failed: " + output.Trim());
     }
+
+    public override McpChange Restore(string snapshot)
+    {
+        if (!environment.OnPath("claude"))
+            return base.Restore(snapshot);
+
+        environment.Run("claude", ["mcp", "remove", McpServerEntry.Name, "--scope", "user"]);
+        var (exit, output) = environment.Run("claude", ["mcp", "add-json", McpServerEntry.Name, snapshot, "--scope", "user"]);
+        return exit == 0 ? new McpChange(true, null) : new McpChange(false, null, "claude mcp add-json failed: " + output.Trim());
+    }
 }
 
 /// <summary>
@@ -373,6 +447,27 @@ public sealed class CodexClient(McpEnvironment environment) : McpClient("codex",
         if (State(entry) == McpClientState.Registered)
             return new McpChange(false, null);
 
+        return new McpChange(true, WriteTables(Table(entry)));
+    }
+
+    public override string? Snapshot()
+    {
+        var lines = File.Exists(ConfigPath) ? File.ReadAllLines(ConfigPath) : [];
+        var ours = Ours(lines);
+        return ours.Count == 0 ? null : string.Join('\n', ours.Select(i => lines[i]));
+    }
+
+    public override McpChange Restore(string snapshot)
+    {
+        WriteTables(snapshot.Split('\n'));
+        if (!PutBackIfUnchanged(File.ReadAllLines(ConfigPath)))
+            DropBackup(ConfigPath);
+        return new McpChange(true, null);
+    }
+
+    /// <summary>Replaces ManualForge's tables with these lines, at the end of the file, and returns the backup.</summary>
+    private string? WriteTables(IEnumerable<string> tables)
+    {
         var lines = File.Exists(ConfigPath) ? File.ReadAllLines(ConfigPath).ToList() : [];
         var ours = Ours(lines.ToArray());
         foreach (var index in ours.OrderDescending())
@@ -382,12 +477,12 @@ public sealed class CodexClient(McpEnvironment environment) : McpClient("codex",
             lines.RemoveAt(lines.Count - 1);
         if (lines.Count > 0)
             lines.Add("");
-        lines.AddRange(Table(entry));
+        lines.AddRange(tables);
 
         var backup = Backup(ConfigPath);
         System.IO.Directory.CreateDirectory(Directory);
         File.WriteAllLines(ConfigPath, lines);
-        return new McpChange(true, backup);
+        return backup;
     }
 
     public override McpChange Unregister()
@@ -405,13 +500,34 @@ public sealed class CodexClient(McpEnvironment environment) : McpClient("codex",
         while (lines.Count > 0 && string.IsNullOrWhiteSpace(lines[^1]))
             lines.RemoveAt(lines.Count - 1);
 
-        if (lines.Count == 0)
-            File.Delete(ConfigPath);
-        else
-            File.WriteAllLines(ConfigPath, lines);
+        if (!PutBackIfUnchanged(lines))
+        {
+            if (lines.Count == 0)
+                File.Delete(ConfigPath);
+            else
+                File.WriteAllLines(ConfigPath, lines);
+            DropBackup(ConfigPath);
+        }
 
-        DropBackup(ConfigPath);
         return new McpChange(true, null);
+    }
+
+    /// <summary>As for JSON settings: the copy from before goes back byte for byte when the lines match it.</summary>
+    private bool PutBackIfUnchanged(IReadOnlyList<string> lines)
+    {
+        var backup = BackupPathFor(ConfigPath);
+        if (!File.Exists(backup))
+            return false;
+
+        var before = File.ReadAllLines(backup).ToList();
+        while (before.Count > 0 && string.IsNullOrWhiteSpace(before[^1]))
+            before.RemoveAt(before.Count - 1);
+        if (!before.SequenceEqual(lines))
+            return false;
+
+        File.Copy(backup, ConfigPath, overwrite: true);
+        File.Delete(backup);
+        return true;
     }
 
     internal static IReadOnlyList<string> Table(McpServerEntry entry) =>
@@ -482,6 +598,16 @@ public sealed class ContinueClient(McpEnvironment environment) : McpClient("cont
             return new McpChange(false, null);
 
         File.Delete(ConfigPath);
+        return new McpChange(true, null);
+    }
+
+    public override string? Snapshot() => File.Exists(ConfigPath) ? File.ReadAllText(ConfigPath) : null;
+
+    public override McpChange Restore(string snapshot)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(ConfigPath)!);
+        File.WriteAllText(ConfigPath, snapshot);
+        DropBackup(ConfigPath);
         return new McpChange(true, null);
     }
 
