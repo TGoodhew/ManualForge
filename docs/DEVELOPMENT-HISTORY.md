@@ -7,8 +7,9 @@ this was the README; how to install, use and uninstall ManualForge is now in
 Sections were written as the work was done, so figures are as measured at the time and some
 describe a state that later work changed - where that matters, a later section says so. The dated
 measurement reports are in [measurements/](measurements/), and the deeper write-ups beside this
-file: [UNDER-EXTRACTION.md](UNDER-EXTRACTION.md), [GROUND-TRUTH.md](GROUND-TRUTH.md) and
-[GROUND-TRUTH-54845A.md](GROUND-TRUTH-54845A.md).
+file: [UNDER-EXTRACTION.md](UNDER-EXTRACTION.md), [GROUND-TRUTH.md](GROUND-TRUTH.md),
+[GROUND-TRUTH-54845A.md](GROUND-TRUTH-54845A.md) and, for the TensorRT build of PaddleOcrNet that
+ManualForge uses, [paddleocrnet-fork.md](paddleocrnet-fork.md).
 
 ## Where it stood
 
@@ -17,16 +18,18 @@ bitonal, where roughly a quarter of files have no text layer and many of the res
 2000s-era OCR. The figures throughout are measured on a corpus of that shape: about 576 documents
 and 100,000 pages.
 
-**Status: phase 7 - benchmark mode, whose code is written and whose yardstick is not.** It OCRs a
-PDF end to end with an invisible text layer whose alignment is measured rather than assumed,
-classifies a whole library to decide what is worth re-OCRing, rebuilds files that refuse
-modification, processes a library resumably without ever overwriting a source at 104 pages/min, has
-a desktop application over all of it, and indexes every page so a question returns a manual, a page
-and a snippet - from the command line, the application, or Claude through MCP. Since phase 5 it also
-finds pages whose text layer is present but incomplete and re-OCRs only those, which is what
-`doctor` and `repair` do.
+**Status: 1.0, released 12 October 2026, with an installer.** It OCRs a PDF end to end with an
+invisible text layer whose alignment is measured rather than assumed, classifies a whole library to
+decide what is worth re-OCRing, rebuilds files that refuse modification, and processes a library
+resumably without ever overwriting a source: about 150 pages/min on an RTX 5070 Ti, more with
+TensorRT. It has a desktop application over all of it, and indexes every page so a question returns
+a manual, a page and a snippet - from the command line, the application, or Claude and other AI
+apps through MCP. Since phase 5 it also finds pages whose text layer is present but incomplete and
+re-OCRs only those, which is what `doctor` and `repair` do. Since 1.0 one installer puts all of it
+on a PC, with NVIDIA's libraries and every MCP app, and takes it all away again; see
+"October 2026: a faster card, TensorRT, the installer and 1.0" below.
 
-What each of the last two phases is actually waiting on:
+What each of the last two phases of the original plan is actually waiting on:
 
 * **Phase 6, a VLM sidecar** - not started.
 * **Phase 7, benchmark mode** - `truth`, `benchmark` and the error-rate scorer are written and
@@ -100,6 +103,11 @@ A 3.7x speedup, before phase 3 overlaps rasterisation and PDF assembly with infe
 
 ### What is installed
 
+This is the development machine as it was set up in September 2026. Since 1.0 nobody has to do
+this: the installer, or `manualforge setup gpu`, downloads only the DLLs ManualForge loads, from
+NVIDIA's own archives, into `%LOCALAPPDATA%\ManualForge\gpu`, and ManualForge looks there first
+([installer-gpu-libraries.md](measurements/installer-gpu-libraries.md)).
+
 - **CUDA Toolkit 13.4**, whose DLLs are at
   `C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.4\bin\x64`.
   ONNX Runtime 1.30 hard-imports `cublas64_13.dll` and `cublasLt64_13.dll`, so CUDA **13** is
@@ -128,7 +136,9 @@ manualforge gpu     ->   Active provider : Cuda
                          Using GPU       : True
 ```
 
-If it reports `Cpu`, the hint line names the exact DLL that failed to load.
+If it reports `Cpu`, the hint line names the exact DLL that failed to load. (Since #53 the provider
+is `TensorRt` when TensorRT is installed; since 1.0 a machine with no NVIDIA card is told so in as
+many words, and one missing libraries is pointed at `manualforge setup gpu`.)
 
 ### It does not depend on `PATH` being right
 
@@ -156,10 +166,12 @@ DLLs. A hard-coded path is a liability even when it is written down carefully, a
 path the README carried was a CUDA 12 layout, and it was wrong the first time it was used against
 a CUDA 13 install.
 
-Order of preference: `CUDA_PATH` and the per-version variables the installer sets, then the
-standard toolkit directory, newest version first; `CUDNN_PATH`, then `Program Files\NVIDIA\CUDNN`,
-then `C:\Tools`. The walk is bounded to four levels so a root given by mistake costs a moment
-rather than a scan of the volume.
+Order of preference, as it stands since 1.0: first the copies ManualForge's own installer downloads,
+in `%LOCALAPPDATA%\ManualForge\gpu` (or wherever `MANUALFORGE_GPU_LIBRARIES` points); then
+`CUDA_PATH` and the per-version variables NVIDIA's CUDA installer sets, then the standard toolkit
+directory, newest version first; `CUDNN_PATH`, then `Program Files\NVIDIA\CUDNN`, then `C:\Tools`;
+and for TensorRT, `TENSORRT_PATH`, then `C:\Tools`. The walk is bounded to four levels so a root
+given by mistake costs a moment rather than a scan of the volume.
 
 ### VRAM is the binding constraint, not compute
 
@@ -167,7 +179,9 @@ Peak VRAM is **7,556 MiB of 8,192**, and the desktop and anything else running a
 2.6–2.9 GB before work starts — a few hundred megabytes of headroom at batch size 8. That is why
 concurrency is sized against *free* VRAM at startup rather than the card's nominal 8 GB, and why
 going past it is a cliff rather than a slope. See "The pipeline" below for what happens when it is
-exceeded, and what it is worth when it is not.
+exceeded, and what it is worth when it is not. (Since #31 and #56 nothing is sized up front: pages
+in flight are tuned one run at a time on each card and engine, and the first setting that spills is
+remembered; [gpu-autotuning.md](measurements/gpu-autotuning.md).)
 
 ### Results are not bit-identical across providers
 
@@ -183,7 +197,9 @@ and it ships its own `onnxruntime.dll`, so it cannot coexist with `Microsoft.ML.
 one output folder — supporting both would mean two build configurations carried through the
 remaining phases. Its value is running on non-NVIDIA GPUs, which this tool does not need. The CPU
 path remains as the fallback and degrades gracefully. This is a deviation from the original spec,
-which asked for a selectable DirectML fallback; it is reversible at any point.
+which asked for a selectable DirectML fallback; it is reversible at any point. (`--engine directml`
+is still accepted, and runs on the CPU with a hint that DirectML is not available; 1.0 no longer
+lists it.)
 
 ## What a real corpus looks like
 
@@ -642,7 +658,9 @@ Deduplication runs only over the files marked for work, because hashing the whol
 effort on files nobody is touching costs more to discover than it saves. That is right for
 recognition and wrong for search: a duplicate that was skipped is never grouped, so phase 5 would
 still return one manual and its three identical twins as four separate results. The index needs its
-own pass over content hashes, independent of whether a file needed OCR.
+own pass over content hashes, independent of whether a file needed OCR. (It got one: the index
+records every document's `content_hash` and `search` folds identical copies into one result;
+`--show-duplicates` lists them separately.)
 
 ## Flattening files that refuse modification
 
@@ -774,7 +792,8 @@ can work alongside.
 The lever this points at instead is reducing the CPU work on the critical path — `--no-deskew` and
 `--no-denoise` are both CPU-side OpenCV passes that run on every page. What they cost and what they
 buy is a question for benchmark mode in phase 7, measured against the BASELINE folder rather than
-guessed at.
+guessed at. (Benchmark mode answered it: deskew and denoise earned nothing on clean type and cost a
+fifth of the throughput, so deskew is now off by default and `--deskew` turns it on.)
 
 ## The desktop application
 
@@ -819,7 +838,8 @@ results with an export. Cancel stops at the page in flight and says so — *"rec
 kept, so running again resumes from here"* — because a user who does not know that will never dare
 press it.
 
-The search tab exists and says it is phase 5, rather than pretending.
+The search tab existed at this point and said it was phase 5, rather than pretending. It searches
+the index now, and can build one.
 
 ```
 manualforge-app [folder]
@@ -850,6 +870,11 @@ template turns trimming on for Release and a self-contained publish permits it: 
 types by name at run time, so the trimmer cannot see who uses what, and the failure is not a build
 error but the window dying at startup with `0xC000027B`. That is the same exception the missing
 converter produced, and it is not worth risking twice to save a download.
+
+The installer changed the trade (#26). It chains in the .NET 10 Desktop Runtime and the Windows App
+Runtime 1.8 when a PC lacks them, so the installed app is framework-dependent on both, published
+into one folder with the command line and the MCP server; that folder is 297 MB where the three
+self-contained publishes were 896. A build from source still publishes the app self-contained.
 
 ### Two defects the view-model tests found
 
@@ -940,7 +965,8 @@ CREATE TABLE documents (
     title         TEXT NOT NULL,          -- file name without extension
     page_count    INTEGER NOT NULL,
     content_hash  TEXT NOT NULL,          -- SHA-256, so identical copies can be folded
-    indexed_utc   TEXT NOT NULL
+    indexed_utc   TEXT NOT NULL,
+    supplement_hash TEXT NOT NULL DEFAULT ''  -- changes when a repair adds text, so it is re-indexed
 );
 
 CREATE VIRTUAL TABLE pages USING fts5(
@@ -949,6 +975,16 @@ CREATE VIRTUAL TABLE pages USING fts5(
     doc_id UNINDEXED,       -- UNINDEXED so a query for a part number cannot match an id
     page_number UNINDEXED,
     tokenize = 'unicode61 remove_diacritics 2'
+);
+
+CREATE TABLE page_provenance (            -- only pages a repair touched
+    doc_id          INTEGER NOT NULL,
+    page_number     INTEGER NOT NULL,
+    embedded_chars  INTEGER NOT NULL,     -- text the file already had
+    ocr_chars       INTEGER NOT NULL,     -- text the repair recognised and added
+    ocr_confidence  REAL NOT NULL,
+    ocr_text        TEXT NOT NULL,        -- so a hit can say it matched recognised text
+    PRIMARY KEY (doc_id, page_number)
 );
 ```
 
@@ -1049,6 +1085,11 @@ trap.
 
 Expand the variables to real paths; Claude Desktop does not.
 
+Since 1.0 nobody has to write this by hand for ManualForge's half: the installer, or
+`manualforge setup mcp`, registers the server with every app on the PC that can launch one (twelve
+are known), records what it changed in `%LOCALAPPDATA%\ManualForge\mcp-registrations.json`, and
+`setup mcp --remove` undoes exactly that.
+
 
 ## Measuring the OCR
 
@@ -1061,6 +1102,8 @@ manualforge truth <pdf> --pages 148,149 --kind table --out <folder>
 manualforge benchmark --truth <folder> --sweep --csv report.csv
 ```
 
+Hand-correcting pages of scans was later tried and abandoned (see *What is not measured* above), so
+the error rates this repository does have come from the born-digital yardstick in the next section.
 The hand-correcting is the one part that cannot be automated, and it has its own guide:
 **[docs/GROUND-TRUTH.md](GROUND-TRUTH.md)** — how to find the pair of files being compared,
 choose pages worth measuring, what to correct and what to ignore, and how to read the result.
@@ -1108,6 +1151,16 @@ The order of operations is the guarantee:
 
 Both are moves on the same volume, so each is atomic and the original exists in exactly one place
 at every instant. If step 4 fails, the log names both paths.
+
+Two later refinements:
+
+* **A file whose printed text nobody can read** (a font that decodes to nonsense) has that text
+  silenced before it is recognised: still drawn, but extracted as spaces, so the new text layer is
+  the only one a search sees. The result is named `name_repaired.pdf`, so whoever opens it knows,
+  and the original keeps its name in `_Originals` (`7091165`, 10 October 2026).
+* **A file that replaced one finished earlier**, under the same name, no longer fails. If it is the
+  same bytes as the original already kept, that original stays the kept one; if not, the earlier
+  original moves to `_Originals\_replaced\<date-time>\` first, so both are kept (#65).
 
 A digitally signed file is processed like any other, but never silently: every signature invalidated
 is logged as a warning and listed in the run summary, and the untouched original is kept as always,
@@ -1196,30 +1249,41 @@ Each recognised word becomes one text-showing operation inside a single `BT`/`ET
 
 ## Project layout
 
+As of 1.0:
+
 ```
 src/ManualForge.Core/
   Classification/                 text-quality metrics, classifier, per-class policy
   Pdf/PdfCapabilities.cs          what blocks modification, detected up front
   Pdf/PdfFlattener.cs             lossless rebuild plus before/after verification
+  Pdf/CatalogCarrier.cs           carries bookmarks, page labels and links through a flatten
   Pdf/TextLayerStripper.cs        removes an existing hidden text layer for strip-and-redo
+  Pdf/UnreadableTextSilencer.cs   makes printed text nobody can read extract as spaces
   Pdf/ContentStreamLexer.cs       finds instructions' byte ranges, so edits cut rather than rewrite
   Text/ExistingText.cs            where a page already shows text, so new words go around it
-  State/JobStore.cs               SQLite per-file and per-page progress
-  Pipeline/LibraryProcessor.cs    classify, flatten, OCR, verify, replace
-  Pipeline/RecognitionPipeline.cs Channels: rasterise and recognise ahead of assembly
-  Ocr/GpuMemory.cs                free VRAM, and how many pages it will hold
-  Ocr/CudaLibraries.cs            finds the CUDA and cuDNN DLLs, so PATH need not be right
-  Geometry/PageGeometry.cs        image pixels ↔ PDF user space; rotation, crop origin
   Text/GlyphlessTrueTypeFont.cs   generates the blank font program
   Text/InvisibleFont.cs           Type0/CIDFontType2 objects, subsetting, ToUnicode
+  Text/PageWords.cs               letters grouped into words by type size
   Text/TextLayerWriter.cs         BT/ET, Tr 3, Tz, Tm emission
-  Ocr/PaddleOcrEngine.cs          PaddleOcrNet wrapper, word boxes, provider selection
+  State/JobStore.cs               SQLite per-file and per-page progress
+  State/SqlitePageOcrCache.cs     recognised pages, scoped to the settings and the bytes read
+  Pipeline/LibraryProcessor.cs    classify, flatten, OCR, verify, replace
+  Pipeline/RecognitionPipeline.cs Channels: rasterise and recognise ahead of assembly
+  Pipeline/SearchablePdfBuilder.cs end-to-end for one file
+  Pipeline/ContentDeduplicator.cs identical copies recognised once
+  Pipeline/GpuTuning.cs           pages in flight tuned per card and engine, run by run
+  Pipeline/ConcurrencyController.cs  steps a run down when the GPU starts spilling
+  Ocr/PaddleOcrEngine.cs          PaddleOcrNet wrapper, word boxes, provider selection, model fetch
+  Ocr/CudaLibraries.cs            finds the CUDA, cuDNN and TensorRT DLLs, so PATH need not be right
+  Ocr/GpuMemory.cs                free VRAM, and what nvidia-smi says about the card
+  Ocr/GpuProfile.cs               what each card and engine has learned, kept between runs
+  Geometry/PageGeometry.cs        image pixels <-> PDF user space; rotation, crop origin
   Rendering/PageRasteriser.cs     PDFium via PDFtoImage
   Verification/                   PdfPig re-extraction, baseline deviation, ink comparison
-  Pipeline/SearchablePdfBuilder.cs end-to-end for one file
   Diagnostics/RunLog.cs           Serilog: JSON lines, rolled daily, shared
+  Diagnostics/BuildStamp.cs       which build this is: version and commit
   Indexing/SearchIndex.cs         SQLite FTS5 over every page; the shared contract
-  Indexing/SearchQuery.cs         typing → FTS5, and command syntax read as notation
+  Indexing/SearchQuery.cs         typing -> FTS5, and command syntax read as notation
   Indexing/Dehyphenator.cs        rejoins words broken across line ends, for the index only
   Indexing/LibraryIndexer.cs      walks the library, extracts in parallel, merges repairs, indexes
   Indexing/LibraryReconciler.cs   which PDFs are not in the index, and why
@@ -1229,27 +1293,40 @@ src/ManualForge.Core/
   Auditing/DoctorRunner.cs        the audit over a whole library
   Auditing/DoctorStore.cs         findings and recovered text; outlives any re-index
   Auditing/PageRepairer.cs        OCR for flagged pages only; merge, never replace
+  Benchmarking/                   truth sets, the publisher yardstick, error rates
+  Setup/GpuLibrarySetup.cs        `setup gpu`: NVIDIA's libraries by manifest, checked, DLLs only
+  Setup/McpClients.cs             every app that can launch an MCP server, and how to tell it
+  Setup/McpRegistrations.cs       the record `setup mcp --remove` undoes
 src/ManualForge.Cli/              the command line
 src/ManualForge.Shell/            view models and the services behind them - no XAML, so testable
-  IDoctorService.cs               the audit and the repair, behind one seam
-  ViewModels/DoctorViewModel.cs   what the doctor tab does, with no window attached
+  ViewModels/                     library, doctor and search, each with no window attached
 src/ManualForge.App/              WinUI 3: XAML, a file picker, a GPU timer, nothing else
 src/ManualForge.Mcp/              MCP server: library_search, read_manual_page, library_status
-tests/ManualForge.Core.Tests/     357 tests, no GPU or network needed
-tools/measure-ground-truth.ps1    runs the 33 hand-read strings, scores where each one ranked
-tools/ground-truth-54845A.tsv     those strings, and the page each should return
-tools/measure-recovered-text.ps1  samples repaired pages; did the recovered text reach search?
-tools/setup-cuda.ps1              installs CUDA 13 and cuDNN 9, then checks what actually loaded
+tests/ManualForge.Core.Tests/     680 tests, no GPU or network needed
+installer/ManualForge.iss         the Inno Setup installer; test-in-sandbox.ps1 tests it in Windows Sandbox
+art/icon/                         the icon's drawings, as SVG
+packages/, nuget.config           the TensorRT build of PaddleOcrNet (docs/paddleocrnet-fork.md)
+tools/build-installer.ps1         publishes one folder, pins the runtimes, compiles the installer
+tools/build-icon.ps1              renders the icon's sizes and packs AppIcon.ico
+tools/build-paddleocrnet.ps1      builds the PaddleOcrNet fork into packages/
+tools/fresh-install-test.ps1      tests an installer end to end on a real PC (.cmd fetches and runs it)
+tools/compare-installed-build.ps1 the installed build against a source build, word for word
+tools/reread-library.ps1          reads a finished library again, then audits, repairs and re-indexes
+tools/read-library-from-scratch.ps1  puts every original back and reads the library again
+tools/measure-*.ps1, measure-*.cs  the measurements behind docs/measurements/
+tools/ground-truth-54845A.tsv     the 33 hand-read strings, and the page each should return
+tools/setup-cuda.ps1              for development: the CUDA toolkit, cuDNN and TensorRT under C:\Tools
 docs/measurements/                what those produced: one dated file per run, not hand-edited
 ```
 
 ## Tests
 
 ```
-dotnet test
+dotnet test ManualForge.slnx
 ```
 
-357 tests, a few seconds, no models and no network required:
+680 tests as of 1.0, under a minute, no GPU, models or network required. The ones that say most
+about how ManualForge behaves:
 
 - **`PageGeometryTests`** — the corner mapping for all four rotations, non-zero crop origins,
   text-matrix direction, points-per-pixel, rotation normalisation.
@@ -1304,6 +1381,21 @@ dotnet test
   returned - that the original is kept byte for byte, that a document that fails verification
   leaves its source untouched, that an owner password is flattened first, that identical copies are
   recognised once, and that an interrupted document resumes from the recognition it already has.
+  Since #65, also that a finished file replaced by another of the same name keeps both originals.
+- **`PageOcrCacheTests`** and **`CachedPageReuseTests`** - recognised pages are reused only for the
+  same settings and the same bytes, so a page read from a different file is read again (#58).
+- **`UnreadableTextSilencerTests`** - printed text nobody can read is silenced, not removed: the
+  page renders the same and extracts as spaces.
+- **`TensorRtDefaultsTests`** - which models run on TensorRT by default, and that the page cache
+  keeps TensorRT's readings apart from CUDA's.
+- **`GpuLibrarySetupTests`** - `setup gpu` against fake NVIDIA manifests: a SHA-256 that does not
+  match installs nothing, only the DLLs are kept, and removal takes away only what it put there.
+- **`McpClientTests`** - `setup mcp` against a scratch profile for every app it knows: merged, never
+  overwritten, backed up once, and removed by the record, with settings nobody changed put back
+  byte for byte (#26).
+- **`ManualToolsTests`** and **`SearchContractTests`** - the MCP tools and the index schema other
+  programs read, which is a contract.
+- **`SearchViewModelTests`** - the app's search tab, with no window attached.
 
 ## One page that cannot be read no longer costs the document (1 October 2026, #21)
 
@@ -1335,6 +1427,84 @@ the exception: if the copy in the library has text on a page the new reading can
 earlier copy stays, so a re-read never makes a page worse. Tony chose this over never replacing a
 partial document, which would leave a 120-page scan with one bad page entirely unsearchable.
 
+## October 2026: a faster card, TensorRT, the installer and 1.0
+
+Nine days, 9 to 12 October, took ManualForge from a tool run from a source checkout to a 1.0 with an
+installer. In order:
+
+**A new card (9 October).** The RTX 3060 Ti (8 GB) was replaced by an RTX 5070 Ti (16 GB). Three
+pages in flight became the default on a 16 GB card, and every estimate was re-based on what the new
+card measured, 151.7 pages a minute ([gpu-concurrency-5070ti.md](measurements/gpu-concurrency-5070ti.md)).
+PaddleOcrNet 2.2.1 came in the same day: the same words in the same places, and deskew no longer
+shifts text sideways.
+
+**Flattening keeps what makes a manual navigable (#28).** Rebuilding a locked file imported its
+pages and nothing else, so seven flattened manuals had lost their bookmarks and five their printed
+page numbers. Checking the fix found worse: every internal link in a flattened file led to a
+detached copy of its page. Bookmarks, page labels and links now come through, pointing at the real
+pages ([flattening-keeps-catalog.md](measurements/flattening-keeps-catalog.md)).
+
+**The library read again from its originals (#25, 9 to 10 October).** Every original was put back
+and the whole library read again from scratch with one build: 172 files and 23,045 pages at 151.7
+pages a minute, in 10 h 40 min against an estimate of 15. Reviewing it found two bugs and one
+damaged file, all fixed that morning. One of them is why a file whose printed text nobody can read
+now has that text silenced and is named `name_repaired.pdf` (see "Safety")
+([fresh-run-from-originals.md](measurements/fresh-run-from-originals.md)).
+
+**Search and the audit (10 October).** Ranking a page that prints the query's mnemonics in their own
+case above prose closed #3: the 33 hand-read strings all in the first 25, 32 in the first ten
+([ranking-notation.md](measurements/ranking-notation.md)). The audit looks for white lettering on
+black by default (#12). Letters are grouped into words by the type size rather than the glyph box
+(#47), a table's rules are left out when a stacked column is cut into rows (#50), and the table gap
+was adjudicated against Acrobat (#22) ([tables-adjudicated.md](measurements/tables-adjudicated.md)).
+
+**Tuned on any card (#31, #56, #63).** No card's figures are built in any more. Pages in flight are
+tuned one run at a time: a clean run lets the next try one more, a run that spills steps down, and
+the first setting that spills is remembered for that card and engine
+([gpu-autotuning.md](measurements/gpu-autotuning.md)).
+
+**TensorRT (#34, #53, #46).** Every change of the recogniser's input width cost cuDNN 9 to 18 ms of
+planning ([recognition-shape-changes.md](measurements/recognition-shape-changes.md)). ONNX Runtime's
+TensorRT provider avoids that, but PaddleOcrNet could not select it, so ManualForge builds against a
+fork that can ([paddleocrnet-fork.md](paddleocrnet-fork.md)). With the classifier and recogniser on
+TensorRT and the detector on CUDA, the default, 280 test pages ran at 151.4 pages a minute against
+CUDA's 78.4, with 1.0% of words read differently and accuracy against Acrobat within noise
+([tensorrt.md](measurements/tensorrt.md)). The whole library was then read again with it, 22,087
+pages at 163.9 pages a minute, and audited again
+([reread-with-tensorrt.md](measurements/reread-with-tensorrt.md)).
+
+**Every failure accounted for (#58, #59, #60, 11 October).** Recognised pages are cached by a
+SHA-256 of the bytes read, not just by the file's path, every failure is logged, and a file is
+inspected before anything is recognised.
+
+**The installer and 1.0 (#26, 11 to 12 October).** Getting ManualForge working used to take a CUDA
+toolkit, cuDNN and TensorRT under `C:\Tools` with administrator rights, three `dotnet publish`
+commands and MCP settings edited by hand. One installer now does all of it, per user:
+
+* `manualforge setup gpu` downloads only the DLLs ManualForge loads, from NVIDIA's own archives,
+  checked against NVIDIA's SHA-256, into `%LOCALAPPDATA%\ManualForge\gpu`: about 1.7 GB, or 3.6 GB
+  with TensorRT. NVRTC is left out, because it is never loaded
+  ([installer-gpu-libraries.md](measurements/installer-gpu-libraries.md)).
+* `manualforge setup mcp` registers the MCP server with every app on the PC that can launch one,
+  twelve in all, records what it changed, and `--remove` undoes exactly that.
+* `manualforge setup models` fetches the OCR models during setup instead of on the first run.
+* The program is one framework-dependent folder of 297 MB, against 896 MB before, and the installer
+  is 157 MB. It chains in the .NET 10 Desktop Runtime, the Windows App Runtime 1.8 and the Visual
+  C++ Redistributable only when a PC lacks them, and stops and names whatever is running before an
+  upgrade or an uninstall.
+
+It was tested end to end on a freshly installed PC with `tools/fresh-install-test.ps1`: CUDA and
+TensorRT installs, an upgrade with Claude Desktop's MCP server running, and uninstalls that left
+every app's settings, the user environment and the library byte for byte as they were. Testing it
+for real found four bugs no unit test had: .NET reinstalled on every install, an empty program
+folder left after an upgrade, a running MCP server holding files open, and a finished file replaced
+by a new copy of the same name failing on every run (#65). The installed build reads all seven
+`_compare` books word for word as a build from source does, on TensorRT and on CUDA
+([installed-build-words.md](measurements/installed-build-words.md)).
+
+ManualForge got its own icon the same day (#67): a manual laid on an anvil, drawn twice, once for
+40 px and up and once for the 16 to 32 px of title bars and taskbars.
+
 ## Resume
 
 Per-file and per-page state lives in SQLite at `<root>/_Originals/manualforge.db`.
@@ -1342,8 +1512,9 @@ Per-file and per-page state lives in SQLite at `<root>/_Originals/manualforge.db
 * **Resumable, page by page.** An interrupted document costs the page in flight, not the document.
 * **Idempotent.** Re-running over a finished folder does nothing:
   `Nothing outstanding. Every file is already finished or deliberately skipped.`
-* **Change-aware.** A source file that changes is detected by size, timestamp and a hash of its
-  first and last 256 KB, and its recorded state is discarded.
+* **Change-aware.** A source file whose size or content changes (a hash of its first and last
+  256 KB) has its recorded state discarded. A changed timestamp alone no longer counts: since 30
+  September 2026 a file restored from backup with the same bytes keeps its record.
 
 ### It caches recognition, not a half-built PDF
 
@@ -1384,12 +1555,17 @@ that silently disabled resume entirely, which is how the first version of this s
 end-to-end test caught it. The cache for a document is released once it completes, so it holds the
 documents in flight rather than the library.
 
+Since #58 (11 October 2026) entries are also scoped by a SHA-256 of every byte of the file being
+recognised, and the fingerprint includes the engine's own settings (TensorRT's readings are kept
+apart from CUDA's). A path alone let pages recognised from one file be reused for a different file
+that later took its name.
+
 ## Known gaps
 
 ### An estimate is an average, and the work is not evenly spread
 
 `status`, `survey` and `repair` estimate remaining time from measured rates — 104 pages/min on the
-GPU, and at first 46 for a repair — held in one place, `MeasuredThroughput`, so that a figure which goes stale
+GPU at the time (151.7 since the RTX 5070 Ti), and at first 46 for a repair — held in one place, `MeasuredThroughput`, so that a figure which goes stale
 goes stale once. This section used to say they still quoted 55.9 pages/min, the pre-pipeline serial
 rate; that was fixed in `115d036` and the note outlived it, which is its own small lesson about
 documentation that records a problem rather than a behaviour.
@@ -1450,11 +1626,13 @@ page's badges *are* covered by glyphs, from an icon font, and they decode to `N 
 is accounted for and the characters are not the letters on the page, so the page is sound by every
 test here and unsearchable to a reader. Issue #16.
 
-Reverse video is real elsewhere, and is implemented: `doctor --reverse-video` finds the readouts on
-spectrum-analyser screenshots, which no text layer holds. It is **off by default**, because on 458
-pages of application notes it flagged 41% more pages and about half of those were photographs and
-oscilloscope traces. A discriminator was tried, made things worse, and was removed.
-`docs/measurements/reverse-video.md` and `recall-after-the-third-limb.md` have both stories.
+Reverse video is real elsewhere, and is implemented: the audit finds the readouts on
+spectrum-analyser screenshots, which no text layer holds. It was off by default at first, because on
+458 pages of application notes it flagged 41% more pages and about half of those were photographs
+and oscilloscope traces; a discriminator was tried, made things worse, and was removed. Since 10
+October 2026 (#12) it is **on by default**, and no longer looks where the text layer already has the
+lettering; `doctor --no-reverse-video` turns it off. `docs/measurements/reverse-video.md` and
+`recall-after-the-third-limb.md` have both stories.
 
 ## Open questions
 
@@ -1473,8 +1651,9 @@ oscilloscope traces. A discriminator was tried, made things worse, and was remov
    because round letters are drawn slightly below the baseline to look aligned. The default is now
    **-0.04**, which cuts mean baseline error from 0.86 pt to 0.66 pt. `manualforge baselines`
    re-measures it; see "Where a word's baseline really sits" in `docs/measurements/`.
-7. **Ranking** — the repair put the right page in the index; bm25 does not always put it near the
-   top. Boosting a page that carries a query term on a line of its own took the ground truth from
-   21 of 33 in the first ten to 25, measured against two controls that had no hand in the change.
-   Six strings are still outside the first ten and `:WAVeform:SOURce` sits at 88, so issue #3
-   stays open. `docs/measurements/ranking-label-bias.md`.
+7. ~~**Ranking**~~ — resolved (#3, closed 10 October 2026). The repair put the right page in the
+   index; bm25 did not always put it near the top. Boosting a page that carries a query term on a
+   line of its own took the ground truth from 21 of 33 in the first ten to 25
+   (`ranking-label-bias.md`). Ranking a page that prints the query's mnemonics in their own case,
+   `SOURce` rather than `source`, above prose took it to **33 of 33 in the first 25 and 32 in the
+   first ten**, with `:WAVeform:SOURce` moving from 92 to 8 (`ranking-notation.md`).

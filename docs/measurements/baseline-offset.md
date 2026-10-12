@@ -2,7 +2,8 @@
 
 `TextLayerOptions.BaselineOffsetFraction` decides where the invisible text layer is written relative
 to the box the recogniser returns. It was **0.0**, with a comment guessing that "a small positive
-value helps when the corpus is mostly mixed case", and the README's open question 6 said to tune it
+value helps when the corpus is mostly mixed case", and open question 6 (now under *Open questions* in
+`docs/DEVELOPMENT-HISTORY.md`) said to tune it
 against ground truth in phase 7 rather than guess.
 
 The guess was wrong in its **sign**. It is now **-0.04**, measured.
@@ -54,7 +55,8 @@ and no single number satisfies both.
 The pages are clean digital type. A scan's ink carries speckle and bleed-through that can extend a
 detected box further than a rendered glyph's, so the constant may want to be slightly different
 there — that needs hand-corrected scanned pages, which was attempted and abandoned. Accuracy on
-scans is not measured; see *What is not measured* in the README and the closing note on issue #6.
+scans is not measured; see *What is not measured* in `docs/DEVELOPMENT-HISTORY.md` and the closing
+note on issue #6.
 
 The measurement also uses the *rendered* ink rather than a recogniser's box. Those should agree,
 since the recogniser reads the same render, but "should" is doing work in that sentence.

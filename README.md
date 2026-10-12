@@ -21,9 +21,11 @@ verified, and the original is then moved, unchanged, into an `_Originals` folder
 library. Files that need no work are never touched. See
 [What happens to your library folder](#what-happens-to-your-library-folder).
 
-It works on any NVIDIA GPU with CUDA 13. On an RTX 5070 Ti it read a whole library at about 150
-pages a minute, and dense pages such as tables at about 85–90. It also runs on the CPU alone, at
-about 15 pages a minute on dense pages.
+It works on any NVIDIA GPU whose driver supports CUDA 13 (in practice a GTX 16 or RTX 20 series card, or newer). With
+CUDA on an RTX 5070 Ti it read a whole library at about 150 pages a minute, and dense pages such as
+tables at about 85–90. TensorRT is faster still: nearly twice as fast on dense pages, and about 164
+pages a minute when the whole library was read again with it. It also runs on the CPU alone, at about
+15 pages a minute on dense pages.
 
 A note on accuracy: what ManualForge measures is how *much* text it recovers. How *correctly* it
 reads a scanned page has not been measured. The details, and the full story of how ManualForge was
@@ -44,12 +46,14 @@ then **Run anyway**. The release page gives the installer's SHA-256, if you want
 
 The installer asks for:
 
-1. **Your library folder:** the folder of PDF manuals ManualForge reads and searches.
+1. **Your library folder:** the folder of PDF manuals that Claude and other AI apps search through
+   ManualForge. It is also set as the `MANUALFORGE_LIBRARY` variable, unless that is already set. The
+   desktop app and the command line are given a folder each time instead.
 2. **What to set up:**
    - **NVIDIA's libraries for the GPU:** CUDA and cuDNN (about 1.7 GB), and optionally TensorRT
      (another 1.9 GB, which reads about twice as fast). These are offered only on a PC with an NVIDIA
      card. They come from NVIDIA, under NVIDIA's licences, which the installer shows and asks you to
-     accept. Without them ManualForge runs on the CPU, about seven times slower.
+     accept. Without them ManualForge runs on the CPU, about ten times slower.
    - **Connect ManualForge to the AI apps on this PC,** such as Claude Desktop, Claude Code and VS Code.
      See [Connect Claude and other apps](#connect-claude-and-other-apps).
    - **Let a terminal run `manualforge` from any folder.** This adds the program folder to your
@@ -57,16 +61,19 @@ The installer asks for:
 
 It then:
 - installs the .NET 10 Desktop Runtime, the Windows App Runtime 1.8 and the Visual C++
-  Redistributable, but only those the PC doesn't already have;
+  Redistributable, but only those the PC doesn't already have, or has in a version too old;
 - downloads the GPU libraries you chose, and the OCR models (about 25 MB);
 - adds **ManualForge** to the Start menu.
 
 Everything it downloads comes from its publisher and is checked against a SHA-256 before it is used.
-The GPU libraries go into `%LOCALAPPDATA%\ManualForge\gpu`. Nothing goes on `PATH`, and the display
-driver is never touched.
+The GPU libraries go into `%LOCALAPPDATA%\ManualForge\gpu`. They are not put on `PATH`, and the
+display driver is never touched.
 
 The last page says which version was installed and what it runs on: `TensorRt`, `Cuda` or `Cpu`. From a
 terminal, `manualforge version` and `manualforge gpu` say the same.
+
+The commands in this README are written as `manualforge`. Unless you ticked the `PATH` option, use
+the program's full path instead: `& "$env:LOCALAPPDATA\Programs\ManualForge\manualforge.exe"`.
 
 To build ManualForge yourself instead, see [Build from source](#build-from-source).
 
@@ -187,20 +194,21 @@ So, after a run:
 | `_Originals\manualforge.db` | progress, and recognition cached so an interrupted run resumes |
 | `_Originals\manualforge-doctor.db` | what the audit found, and the text `repair` recovered |
 | `_Originals\manualforge-index.db` | the search index |
+| `_Originals\reread-progress.json` | how far `tools/reread-library.ps1` has got, so it can carry on; only there if you have used it |
 
 Leave `_Originals` where it is and don't edit what's in it. It is the only copy of every original
 that was replaced.
 
 `doctor`, `repair`, `index` and search never change a PDF. Text that `repair` recovers is kept in
 `manualforge-doctor.db` and added to the search index, not written into the file. Folders named
-`_Originals`, `BASELINE` and `_GroundTruth` are never processed or indexed.
+`_Originals`, `BASELINE` and `_GroundTruth` at the top of the library are never processed or indexed.
 
 ### Process a library
 
 The usual sequence, each step safe to stop with Ctrl+C and run again:
 
 ```powershell
-manualforge survey D:\Manuals     # classify every file and show what would be done; changes nothing
+manualforge survey D:\Manuals     # classify every file and show what would be done; changes no PDF
 manualforge run    D:\Manuals     # OCR the files that need it, replacing each only once verified
 manualforge doctor D:\Manuals     # find pages whose text layer is incomplete
 manualforge repair D:\Manuals     # read those pages and keep what they were missing
@@ -242,7 +250,8 @@ manualforge index  D:\Manuals     # build or update the search index
   time, and say when they don't have one yet. `--gpu-concurrency <n>` fixes the number instead.
   What was learned is kept in `%LOCALAPPDATA%\ManualForge\gpu-profiles.json`, separately for
   TensorRT and CUDA. `manualforge gpu` shows it, and `manualforge gpu --retune` makes the next run
-  learn it again, keeping the measured speeds. Deleting that file forgets the speeds too.
+  learn it again, keeping the measured speeds. That applies to the engine in use; add `--engine cuda`
+  to retune CUDA on a PC that has TensorRT. Deleting that file forgets the speeds too.
 - **TensorRT:** when it's installed, ManualForge uses it automatically, and reads pages almost twice as
   fast. The first run on a card spends about a minute preparing it; later runs reuse that preparation,
   which is kept under `%LOCALAPPDATA%\ManualForge\models\tensorrt`. TensorRT reads about 1 word in 100
@@ -295,6 +304,7 @@ The app does the same work with live progress:
   problems shown as they happen, and a report to export
 - in the Doctor tab, review what the audit found, see the picture the detector worked from for any
   page, and repair the documents you tick
+- in the Search tab, build or update the index and search it
 
 Cancel keeps every page already recognised, so running again carries on.
 
@@ -320,6 +330,9 @@ When a new version reads better, finished files can be read again from their kep
 ./tools/reread-library.ps1          # read everything again, then audit, repair and re-index
 ```
 
+It reads the library named by `MANUALFORGE_LIBRARY`, which the installer sets. Add
+`-Library D:\Manuals` to name another, or if that variable is not set.
+
 The script runs unattended, which suits an overnight run:
 - it keeps the PC awake and logs to `%LOCALAPPDATA%\ManualForge\reread`
 - if it is interrupted, running it again carries on from where it stopped
@@ -340,14 +353,14 @@ manualforge index D:\Manuals
 | Command | What it does |
 |---|---|
 | `manualforge reconcile <library>` | Which PDFs are not in the index, and why. `--trim-missing` also removes indexed files that are gone. |
-| `manualforge index <library> --reindex --compact` | Rebuild the index from scratch and shrink it; worth doing after a large repair. |
+| `manualforge index <library> --reindex --compact` | Read every document into the index again and shrink it; worth doing after a large repair. Files that are gone stay in the index until `reconcile --trim-missing`. |
 | `manualforge index <library> --sidecars <folder>` | Also write a plain-text file per manual. |
 | `manualforge doctor <file.pdf> --explain <page> --dump page.png` | Show why one page was or wasn't flagged. |
 | `manualforge survey <library> --trim-missing` | Forget records of files you have deleted or moved. |
 | `manualforge doctor <library> --trim-missing` | The same for the audit: forget findings and repairs of files that are gone. Files `run` renames are forgotten under their old names automatically, in the audit and the index. |
 | `manualforge gpu` / `manualforge version` | Which execution provider is active, and how many pages it reads at once on your card; which build is installed. |
 | `manualforge gpu --retune` | Forget how many pages your card reads at once, so the next run learns it again. Measured speeds are kept. |
-| `manualforge setup gpu` / `--remove` | Download CUDA, cuDNN and TensorRT from NVIDIA into ManualForge's own folder, without administrator rights; or take them away again. |
+| `manualforge setup gpu --accept-nvidia-licences` / `--remove` | Download CUDA, cuDNN and TensorRT from NVIDIA into ManualForge's own folder, without administrator rights; or take them away again. Without `--accept-nvidia-licences` it lists what it would download, and the licences, and stops. |
 | `manualforge setup mcp` / `--list` / `--remove` | Register the MCP server with every app on the machine that can use it; see where it is registered; or take it out again. |
 
 `manualforge` with no arguments lists every command and option.
@@ -385,7 +398,7 @@ The uninstaller:
   ```powershell
   $lib  = 'D:\Manuals'
   $orig = Join-Path $lib '_Originals'
-  $skip = (Join-Path $orig '_superseded'), (Join-Path $orig '_replaced'), (Join-Path $orig 'broken')
+  $skip = (Join-Path $orig '_superseded'), (Join-Path $orig '_replaced')
 
   # List what would be copied back; /L copies nothing.
   robocopy $orig $lib *.pdf /S /COPY:DAT /R:1 /W:1 /L /XD $skip
@@ -395,7 +408,7 @@ The uninstaller:
 
   # Check every original now matches the library byte for byte. This must print nothing.
   Get-ChildItem $orig -Recurse -File -Filter *.pdf |
-      Where-Object { $_.FullName -notmatch '\\_Originals\\(_superseded|_replaced|broken)\\' } |
+      Where-Object { $_.FullName -notmatch '\\_Originals\\(_superseded|_replaced)\\' } |
       ForEach-Object {
           $copy = Join-Path $lib $_.FullName.Substring($orig.Length + 1)
           if ((Get-FileHash -LiteralPath $_.FullName).Hash -ne (Get-FileHash -LiteralPath $copy).Hash) { "DIFFERS: $copy" }
@@ -422,7 +435,9 @@ For working on ManualForge, or installing it without the installer.
 
 - Windows 10 or 11, x64
 - [.NET 10 SDK](https://dotnet.microsoft.com/download)
-- For the GPU, which is optional but about seven times faster: an NVIDIA card and a current driver
+- The [Visual C++ Redistributable](https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist)
+  14.40 or later, which ONNX Runtime needs
+- For the GPU, which is optional but about ten times faster: an NVIDIA card and a current driver
 - To build the installer: [Inno Setup 6](https://jrsoftware.org/isinfo.php) (`winget install JRSoftware.InnoSetup`)
 
 ### 1. Build
@@ -431,12 +446,12 @@ For working on ManualForge, or installing it without the installer.
 git clone https://github.com/TGoodhew/ManualForge.git
 cd ManualForge
 dotnet build
-dotnet test        # optional: about 700 tests, a few seconds, no GPU or network needed
+dotnet test        # optional: about 680 tests, under a minute, no GPU or network needed
 ```
 
 To build the installer, run `./tools/build-installer.ps1`. It publishes the program into one folder,
 pins the runtimes it chains in, and writes `artifacts\installer\package\ManualForge-Setup-<version>.exe`.
-`tools\fresh-install-test.ps1` tests an installer on a PC, end to end.
+`./tools/fresh-install-test.ps1` tests an installer on a PC, end to end.
 
 ### 2. Set up the GPU (optional)
 
@@ -491,7 +506,7 @@ Open a new terminal, then fetch the OCR models and check the install:
 ```powershell
 manualforge setup models
 manualforge version
-manualforge gpu        # "Active provider : TensorRt" or "Cuda" on a GPU; if it says Cpu, it says why
+manualforge gpu        # "Active provider" says TensorRt or Cuda on a GPU; if it says Cpu, it says why
 ```
 
 Then connect the AI apps with `manualforge setup mcp` (see
@@ -524,10 +539,11 @@ directly with `Stop-Process -Name ManualForge.Mcp`.
 5. **Remove the models, logs and what was learned about your GPU (optional):**
    `Remove-Item -LiteralPath "$env:LOCALAPPDATA\ManualForge" -Recurse -Force`
 6. **Decide what to do with your library**, as in [Uninstall](#uninstall).
-7. **Remove CUDA and cuDNN (optional)**, if `setup-cuda.ps1` installed them and nothing else uses
-   them: uninstall the *NVIDIA CUDA* entries in Settings › Apps, delete the `cudnn-*` and
-   `tensorrt-*` folders under `C:\Tools`, and remove the `...\bin\x64` entries that `setup-cuda.ps1`
-   added to your user `PATH`, and its `CUDA_PATH` user variable.
+7. **Remove CUDA, cuDNN and TensorRT (optional)**, if `setup-cuda.ps1` installed them and nothing
+   else uses them: uninstall the *NVIDIA CUDA* entries in Settings › Apps, delete the `cudnn-*` and
+   `tensorrt-*` folders under `C:\Tools`, and remove the entries `setup-cuda.ps1` added to your user
+   `PATH` (CUDA's and cuDNN's `...\bin\x64`, and TensorRT's `...\tensorrt-*\bin`), and its `CUDA_PATH`
+   user variable.
 
 ## More
 

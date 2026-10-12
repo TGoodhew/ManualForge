@@ -123,3 +123,7 @@ Five of the six are compound commands; the sixth is a sentence. All retrieve the
 it, and neither bias shipped so far touches them — both are scoped to shapes these do not have. The
 two ideas left on #3 — page geometry, and treating command syntax as notation rather than prose —
 aim squarely at the five, which is the argument for trying them next.
+
+> **Later:** the second idea shipped on 10 Oct 2026 as the notation bias (cf009a9, #3), which ranks a
+> page printing the query's mnemonics in their own case above prose. It does touch these: all 33
+> strings now come back in the first 25 and 32 in the first ten (`ranking-notation.md`).

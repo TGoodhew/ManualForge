@@ -74,6 +74,10 @@ the table borders. This corpus is full of such forms. Issue #11, which also prop
 discriminator: rule fragments sit in perfect vertical columns at one x, repeated down the page at
 the row pitch, and lettering does not.
 
+Later done: the rule-segment filter, added on 24 September 2026, drops three or more hairline blobs
+of identical width sharing one x (`RuleSegmentRun` in `DoctorOptions`, `--rule-run` on the command
+line). It only ever removes flags.
+
 The mitigation that already exists is that these pages are cheap to repair and the repair is
 harmless: OCR of a page with no recoverable text returns almost nothing, and the merge adds nothing
 to the index. A false positive here costs GPU time, not correctness.
@@ -126,7 +130,7 @@ So the honest statement is: **the detector finds roughly half of the under-extra
 sample is far too small to say that to better than a factor of two.** Narrowing it needs a sample of
 a few hundred unflagged pages, which is a day of looking at pictures, not an afternoon.
 
-### The miss that is worth fixing, and why it has not been
+### The miss that was worth fixing, and why it waited
 
 `clean-33` is not a threshold problem, it is a **gate** problem, and gate problems are the ones that
 cannot be recovered by tuning: a page that is never rendered cannot be flagged whatever the
@@ -152,12 +156,11 @@ ratings, schematics whose designators are missing, figures holding part numbers.
 dense line art read as lettering — the carrier strokes of an AM waveform — which is the family this
 document already describes. `docs/measurements/new-flags-precision.md` has the twelve.
 
-Everything below is why it waited, and it still describes what the change costs: it changes what the
-audit looks at, so it invalidates the corpus run above and the 2.5 hours that produced it, and it
-needs its own precision measurement afterwards
-— adding a limb that renders every illustrated page could easily flag thousands more. Shipping the
-measured detector with a known, named, diagnosed gap is more useful than shipping an unmeasured one
-that might be better.
+It waited because of what the change cost: it changed what the audit looks at, so it invalidated the
+corpus run above and the 2.5 hours that produced it, and it needed its own precision measurement
+afterwards, since a limb that renders every illustrated page could easily flag thousands more. Until
+that measurement was made, shipping the measured detector with a known, named, diagnosed gap was
+more useful than shipping an unmeasured one that might be better.
 
 ## Two blind spots found while looking
 
@@ -168,6 +171,11 @@ are properties of the method rather than of the sample.
 ink, so the blob detector cannot see it (clean-37). On that page the button labels duplicate the
 adjacent prose so nothing is lost, but a page whose only content is a reverse-video screenshot would
 be missed entirely.
+
+Later fixed: since 10 October 2026 the audit looks inside solid blocks of ink for glyph-shaped holes
+by default (#12; `--no-reverse-video` turns it off). On 2,547 screenshot-heavy pages it added 87
+flags, and 17 of 20 drawn at random gave the repair real text. `docs/measurements/reverse-video.md`
+has the working.
 
 **Scan furniture inflates blob counts.** Spiral-binding holes (flagged-02) and halftone dots
 (flagged-17) produce glyph-shaped blobs in quantity. They did not change a verdict on this sample,

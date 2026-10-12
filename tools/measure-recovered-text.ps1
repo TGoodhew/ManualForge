@@ -19,7 +19,7 @@
 
 .EXAMPLE
     ./tools/measure-recovered-text.ps1 -After .\sidecars-after -Before .\sidecars-before `
-        -BeforeIndex .\index-before.db -Sample 25 -Out docs/measurements/recovered-text.md
+        -BeforeIndex .\index-before.db -Sample 25 -Out "$env:TEMP\recovered-text.md"
 #>
 [CmdletBinding()]
 param(

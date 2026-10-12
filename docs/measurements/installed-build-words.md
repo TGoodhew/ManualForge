@@ -40,7 +40,9 @@ first, and its words were taken from the searchable copy (`tools/pdf-words.cs`).
 | 431C-OSM | 27,586 | yes | 27,592 | yes |
 
 All 14 pairs are identical, word for word. The two engines differ from each other by a few words a
-book, which matches the 0.6% that #34 measured. Each pair took the same time within a few seconds,
+book. That is expected: with the classifier and recogniser on TensorRT, the default, about 1.0% of
+words are read differently from CUDA (`tensorrt.md`). The 0.6% that #34 measured was the recogniser
+alone. Each pair took the same time within a few seconds,
 so neither build fell back to another provider.
 
 Together with `installer-gpu-libraries.md`, this means the installer's layout reads exactly as the

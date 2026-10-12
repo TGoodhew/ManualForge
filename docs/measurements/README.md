@@ -1,18 +1,24 @@
 # Measurements
 
-One file per run of `tools/measure-ground-truth.ps1`, kept so that a claim about search quality can
-be checked against the run that produced it rather than against somebody's recollection of it.
+One file per measurement, kept so that a claim about search quality, speed or recognition can be
+checked against the run that produced it rather than against somebody's recollection of it.
 
-Nothing in here is hand-edited. If a number looks wrong, re-run the harness and commit what it says.
+Some files are a harness's own output, and say so on their second line or in their header (see
+"Reading the generated reports" below). Those are never hand-edited: if a number looks wrong, re-run
+the harness and commit what it says. The rest are dated write-ups of runs. Their results stay as they
+were measured, and where something they say about how ManualForge works has changed since, a dated
+note in place says so.
 
 | File | What it measures |
 |---|---|
 | **`installer-gpu-libraries.md`** | **#26: what an installer must download for the GPU.** NVIDIA's per-component archives hold the toolkit's own DLLs, byte for byte. NVRTC is never loaded: four A/B runs, TensorRT and CUDA on both books, read identical words without it, and the CUDA runs match the pre-#34 baselines. So the installer fetches cudart, cuBLAS, cuDNN and optionally TensorRT, and nothing else. |
+| **`installed-build-words.md`** | **#26: the installed build reads every word a build from source does.** The seven `_compare` books, each read on TensorRT and on CUDA by the installer's framework-dependent build and by the repository's Release build, both loading the NVIDIA libraries the installer downloaded: 14 pairs, identical word for word (`tools/compare-installed-build.ps1`). With `installer-gpu-libraries.md`, the installer's layout reads exactly as the setup every earlier measurement was made with. |
 | **`reread-with-tensorrt.md`** | **#46: the whole library read again with TensorRT and re-audited with reverse video**, in 8 h 28 min. Under-extracted pages 19,712 → 20,569, nearly all reverse video. Search text +0.07%: the re-read hardly moved scanned text, and the gains are screenshots. Every harness identical or one place better. What it found: the damaged 8340B manual's record pointed at the copy as received (now kept in `_Originals\broken`); a refused file's cached pages survive the failure; and one marginal spill held the card at one page in flight (#56). |
 | `ground-truth-before-reread.md` / `ground-truth-after-reread.md` | The 33 strings either side of it. Identical, rank for rank: 33 found, 33 in the first 25, 32 in the first ten. |
 | `ordinary-pages-before-reread.md` / `ordinary-pages-after-reread.md` | The harm control either side of it. Identical: 40 found, 38 in the first ten, 26 first. |
 | `command-pages-before-reread.md` / `command-pages-after-reread.md` | 60 commands from other manuals: 38 → 39 in the first ten, 49 found both times. |
 | `recovered-text-after-reread.md` | 25 repaired pages against the backup index: 21 already findable, 2 newly, the same 2 as #25 not findable before or after. |
+| **`tensorrt.md`** | **#53: TensorRT through our PaddleOcrNet fork.** On CUDA the fork reads byte for byte as before. TensorRT on the classifier and recogniser, the default, runs 280 test pages at 151.4 a minute against CUDA's 78.4 and reads 1.0% of words differently, with accuracy against Acrobat within noise; adding the detector (`--tensorrt-models det,cls,rec`) gives 165.0 and 2.3%. Engines build in about a minute per card and are cached. |
 | **`tables-adjudicated.md`** | **#22 re-examined: the "fifth worse than Acrobat" on table pages was mostly Acrobat's errors.** Where the two read a parts-list token differently, ours is the well-formed reading 1,916 times to Acrobat's 272, and right by eye in every sample but the one chosen to favour Acrobat. What remains: columns of repeated entries read as one word (0.3% of tokens) and character confusions (8/B, A/4). Table-structure models cannot help: they sort our OCR's text into cells, they do not read it. |
 | **`word-grouping.md`** | **#47: 9,935 pages were indexed with words broken into letters** (`A g ile nt Te chn o log i e s`), because PdfPig's default grouping has no tolerance when a font's glyph boxes come out flat. Grouping on space characters and gaps over 0.15 of the type size reads 99.9% of `pdftotext`'s words on the affected pages and 99.7% on ordinary ones, against 70.1% and 99.4%. 5,702 pages are left, and they are scans and letter-spaced headings, not grouping. `tools/measure-word-grouping.cs`. |
 | **`ranking-notation.md`** | **The third ranking change (#3): a page that prints the query's mnemonics in their own case (`SOURce`) beats prose using the same words.** Ground truth 31 → 33 in the first 25 and 27 → 32 in the first ten, flat from 1.2 to 3.0; on 60 commands from other manuals, 21 pages up and none down. Also why the prose controls could not see it, and the new control that can. |
@@ -27,20 +33,21 @@ Nothing in here is hand-edited. If a number looks wrong, re-run the harness and 
 | `recovered-text-reaches-search.md` | The pass those 33 strings cannot see: 25 repaired pages across 25 other documents, asked for a phrase that exists only in recovered text. 21 newly findable, 4 already findable, 0 missing. |
 | `ground-truth-with-model-hint.md` | The same 33 strings asked with `--model 54845A`, as a caller who knows the instrument would. 33 of 33, and 32 in the first ten against 21 without. |
 | `new-flags-precision.md` | Twelve pages the new render-gate limb added, looked at by eye. 11 genuine, 1 false positive — enough to decide the repair was worth running. |
-| `ground-truth-after-compact.md` | The same 33 strings after the index was rebuilt from scratch and vacuumed, 385 MB down to 306 MB. Identical scores, which is what a rebuild losing nothing looks like. |
+| `ground-truth-after-compact.md` | The same 33 strings after the index was rebuilt from scratch and vacuumed on 25 Sep, 385 MB down to 306 MB, with the label bias on. Scores identical to `ground-truth-with-label-bias.md` on the 385 MB index that morning (33 found, 31 in the first 25, 25 in the first ten), which is what a rebuild losing nothing looks like. |
 | `ground-truth-after-reaudit.md` | The 33 strings after the re-audit and the third repair. Still 27 of 33, 21 in the first ten: 700k more words of competition changed nothing by more than a rank or three. |
 | `recovered-text-after-reaudit.md` | 25 pages from the third repair. 21 newly findable, 2 already findable, 2 whose *document* returns at ranks 4 and 2 but whose page sits below 25. |
 | **`page-orientation.md`** | The whole-page orientation classifier called 26 of 100 upright table pages rotated, and 39 of 100 typical pages, and turned them before detection. Checking its verdict when it fires cuts missing tokens by a fifth on both books and keeps the sideways fold-outs it is genuinely needed for. Also where the rest of the table gap is: lone single characters. |
 | **`single-characters.md`** | The rest of the table gap: lone check digits and quantities. No detector setting finds an isolated glyph, so the engine now reads ink no word covers, and cuts columns boxed as one tall word back into rows. Acrobat tokens read on 100 tables 32,194 → 33,480; typical pages unharmed. Also the guards each step needed, found by looking at what it let through. |
 | **`deskew-offset.md`** | **Deskew placed the text layer 3-5 pt beside the ink** on every page it straightened - a quarter of the table pages - and read nothing more for it. Now off by default. Found because the single-character harness was faithfully following our shift. |
-| **`gpu-concurrency-5070ti.md`** | The GPU defaults re-measured on a 16 GB RTX 5070 Ti (#31). Three pages in flight, not two: about 85 pages a minute against 74.9, same output. Six falls off the memory cliff to 13.7. **Batch size changes the words read**, not only the speed, so it stays at 8. The server pack fills the card even serially, which makes #22's timing a measurement of spilling. |
+| **`gpu-autotuning.md`** | **#31, #56, #63: pages in flight tuned on whatever card a run is on, one run at a time.** No card's figures are built in. A run steps down when Windows counts its GPU memory spilling to system RAM, past a margin of 128 MiB on CUDA and 512 on TensorRT, whose warm-up moves memory out and brings it back. A clean run of 100 pages or more lets the next run try one more. What is learned is kept per card and engine in `gpu-profiles.json`. Free memory was the wrong signal, and climbing within a run lost to a fixed setting. Batch size is not tuned, because it changes the words read. |
+| **`gpu-concurrency-5070ti.md`** | Superseded for pages in flight by `gpu-autotuning.md`: the fixed setting it chose is no longer built in. The GPU defaults re-measured on a 16 GB RTX 5070 Ti (#31). Three pages in flight, not two: about 85 pages a minute against 74.9, same output. Six falls off the memory cliff to 13.7. **Batch size changes the words read**, not only the speed, so it stays at 8. The server pack fills the card even serially, which makes #22's timing a measurement of spilling. |
 | **`flattening-keeps-catalog.md`** | #28: flattening dropped bookmarks, page labels and every other catalog entry, and sent every internal link to a detached copy of its page (all 141 of 2235_lg's). Now carried and verified. 169 of 170 originals verify, all 25 with bookmarks keep them, and the 7 affected files are re-read. Also a 1–4% rendering difference on two files, traced on 461A-462A-OSM to PDFium redrawing the scan a pixel over once the invisible font is embedded; no data changes. |
 | **`recognition-shape-changes.md`** | Why the GPU is idle more than half the time (#32): ONNX Runtime's CUDA convolutions pay 9–18 ms each time the input shape changes, and OCR changes shape on nearly every call. Everything else ruled out by measurement. Width buckets bought +6% and changed the words read, and space recovery split part numbers, so both were rejected. Continued in #34. |
 | **`server-models-on-tables.md`** | PP-OCRv5's larger model pack, which nothing had ever selected. Closes a fifth of the table gap - 21.5% to 17.2% - for **9.4x the runtime**. Not a trade worth making, and it rules out model size as the explanation. |
 | **`real-tables-against-acrobat.md`** | **The one that counts.** 100 *captioned* table pages — the previous two books were mostly drawings that passed a token-shape filter. Acrobat leads by 21.5% on content and wins 49 pages to 5, over a population of 6,206 pages in 243 documents. Also the sequence of three wrong conclusions that got here. |
 | **`typical-tables-against-acrobat.md`** | The other 99.3% of table pages, stratified across five digit-share bands. ManualForge +6.7% overall and at parity or ahead in every band below 45% digits, leading 46 pages to 23. The loss really is confined to the tail. |
 | **`tables-against-acrobat.md`** | **The round we lose.** 20 dense table pages: Acrobat leads on content-bearing tokens 8,674 to 7,963 and on 10 pages to 1. Also why the metric flatters us on tables - a table is mostly numbers and any digit string scores - so the real gap is probably wider. |
-| **`recognition-sweep-tables.md`** | Nine recogniser configurations over 120 dense table pages, for #19. The yield is **flat** - content-bearing tokens vary 7% end to end and the signal share sits at 75.2-75.8% throughout - so no setting reads this material better and the model is the ceiling. Read the issue for the two flaws in the sweep itself. |
+| **`recognition-sweep-tables.md`** | Nine recogniser configurations over 120 dense table pages, for #19, by `tools/sweep-recognition.ps1`; seven completed (both 600 dpi runs produced nothing), and the confidence-floor section was added once `--drop-score` existed. The yield is **flat** - content-bearing tokens vary 7% end to end and the signal share sits at 75.2-75.8% throughout - so no setting reads this material better and the model is the ceiling. Read the issue for the two flaws in the sweep itself. |
 | **`circuit-diagrams-against-acrobat.md`** | The harder round, on pages chosen by geometry rather than text. Acrobat produces 47% more words and two thirds of its extras are single characters; counting only content-bearing tokens reverses it to ManualForge +17.7%, leading 15 pages to 4. Also what this metric cannot see. |
 | **`schematics-against-acrobat.md`** | The first head-to-head with another engine, on 24 schematic pages from 24 documents with the text layer removed by construction. ManualForge finds 45% more words and they are real - 47% component designators against Acrobat's 4.6%. Also the two places Acrobat genuinely wins, and why the page-selection method needs a geometry signal next time. |
 | **`notation-symbols.md`** | Whether electronic notation survives recognition, after a real error found by eye. The `±`-as-`v` corruption is 62 occurrences in 20 of 630 documents and concentrated in one bad scan. Also: two bigger-looking numbers that turned out to be almost entirely false positives, and why only ground truth can settle it. |
@@ -56,26 +63,66 @@ Nothing in here is hand-edited. If a number looks wrong, re-run the harness and 
 | `ground-truth-after-shared-folder-ingest.md` | The 33 strings after 31 documents and 3,742 pages arrived from the shared folder (#17). Identical: 33 found, 31 in the first 25, 25 in the first ten. |
 | `ordinary-pages-after-shared-folder-ingest.md` | The harm control for that ingest. 40 of 40 retrievable, 38 in the first ten. The two below it lose to documents the library already held - a second copy of the same 8657B volume, and an 8903B manual reusing the same boilerplate - so neither was displaced by the new material. Not directly comparable with the runs above: the sample is drawn from the dump, and the dump grew. |
 
+## Reading the generated reports
+
+These files are a harness's own output. Each harness asks `manualforge search` a fixed, seeded set of
+queries and records where the correct page ranked. The absolute score matters less than the
+difference between two runs with the same seed, which ask the same queries. "Defaults" in a report
+means the defaults on the day it was measured.
+
+- **`ground-truth-*`, `ranking-recovered-1.0.md`, `ranking-recovered-1.2.md`,
+  `ranking-recovered-text-default.md`**, from `tools/measure-ground-truth.ps1`. The 33 hand-read
+  strings in `tools/ground-truth-54845A.tsv` (`docs/GROUND-TRUTH-54845A.md` says where they came
+  from), asked at `--limit 200`. *Rank* is the correct page's place in the results, or `not in 200`.
+  *Source* is the marker search printed on that page: `[OCR]` when the words matched were text the
+  repair recovered, `[part OCR]` when the page holds both its own text layer and recovered text, and
+  blank when they were the PDF's own text. The header records the index, when it was written, its
+  size and the repo commit.
+- **`ordinary-pages-*`**, from `tools/measure-ordinary-pages.ps1`. 40 pages drawn at random (seed 1)
+  from an `index --sidecars` dump, each asked for eight consecutive words of its own text, taken from
+  a third of the way into the page, at `--limit 25`. *Rank* is that page's place, or `not in 25`.
+  *Search arguments* are the extra options passed to search; empty means the defaults. Every one of
+  these files has the same title and records no index or commit, so which run it is lives in its
+  file name and in the table above.
+- **`command-pages-*`**, from `tools/measure-command-pages.ps1`. 60 SCPI commands as printed on pages
+  drawn at random (seed 1) from every manual but the 54845A Programmer, asked exactly as printed at
+  `--limit 200`. *Page rank* is that page's place; *Manual rank* is the first page of the same
+  manual, since a command printed in a summary table or an index is a fair answer too. `not found`
+  means not in the first 200. The header records the index, but not when it was written or the
+  commit.
+- **`recovered-text-*`**, from `tools/measure-recovered-text.ps1`. 25 repaired pages, one per
+  document (seed 1), each asked for six words of the text the repair added to that page, at
+  `--limit 25`. *Before* is the page's place in the index as it was before the repair, *After* its
+  place in the index after it, and `not found` means not in the first 25. These files record no
+  index or commit either.
+
+`tools/measure-bare-terms.ps1` asks one distinctive word from each of 60 random pages. Its results
+are quoted in `ranking-recovered-text.md`, `ranking-notation.md` and `word-grouping.md`, but no run
+of it is committed here.
+
 ## Adding one
 
+Write the report somewhere scratch, read it, then copy it here under a name no other report has:
+
 ```
-./tools/measure-ground-truth.ps1 -Label "after the full repair" \
-    -Out docs/measurements/ground-truth-after-full-repair.md
+./tools/measure-ground-truth.ps1 -Label "after the full repair" `
+    -Out "$env:TEMP\ground-truth-after-full-repair.md"
 ```
 
-The second harness needs the library dumped to text twice, which `index --sidecars` does and which
-takes a few minutes each way:
+The other harnesses need the library dumped to text, which `index --sidecars` does and which takes a
+few minutes. The recovered-text harness needs it twice, with and without the repair's text:
 
 ```
 manualforge index <library> --index <tmp>\with.db    --sidecars <tmp>\after
 manualforge index <library> --index <tmp>\without.db --sidecars <tmp>\before --no-repairs
 
-./tools/measure-recovered-text.ps1 -After <tmp>\after -Before <tmp>\before \
-    -BeforeIndex <snapshot of the old index> -Out docs/measurements/<name>.md
+./tools/measure-recovered-text.ps1 -After <tmp>\after -Before <tmp>\before `
+    -BeforeIndex <snapshot of the old index> -Out "$env:TEMP\recovered-text.md"
 ```
 
-Each report records the index file it read, when that index was written, its size and the repo
-commit, because a score without those is not a measurement of anything.
+`measure-ground-truth.ps1` records the index file it read, when that index was written, its size and
+the repo commit, because a score without those is not a measurement of anything. The other harnesses
+record less (see above), so say in the file name and in the table what each run was.
 
 To measure an index that has since been overwritten, pass `-Index` a copy. Copying
 `_Originals/manualforge-index.db` aside before a repair costs 300 MB and is the difference between
@@ -93,13 +140,26 @@ that bias was harmless but because every query it asks is one the bias never see
 `measure-bare-terms.ps1` exists for that reason: one distinctive word per page, which is the shape a
 single-token change actually moves. A control that cannot respond is not evidence.
 
+Every harness takes the search options under test as `-Extra`. Run each once with them and once
+without: the same seed asks the same queries, so the pair measures the change and nothing else. The
+label, recovered-text and notation biases are already on at 1.4 by default, so passing
+`--rank-labels 1.4` measures nothing; `1.0` turns one off.
+
 ```
-./tools/measure-ground-truth.ps1    -Extra @('--rank-labels','1.4')   # the target
-./tools/measure-recovered-text.ps1  -Extra @('--rank-labels','1.4')   # other documents
-./tools/measure-ordinary-pages.ps1  -Extra @('--rank-labels','1.4')   # ordinary prose, does it harm?
-./tools/measure-bare-terms.ps1      -Extra @('--rank-labels','1.4')   # one-word queries, does it harm?
-./tools/measure-command-pages.ps1   -Extra @('--rank-labels','1.4')   # commands from other manuals
+$change = @('--rank-labels', '1.8')   # the option under test
+$dump   = '<tmp>\after'               # from index --sidecars, as above
+
+./tools/measure-ground-truth.ps1   -Extra $change                   # the target
+./tools/measure-recovered-text.ps1 -Extra $change -After $dump -Before <tmp>\before `
+    -BeforeIndex <copy of the index>                                # other documents
+./tools/measure-ordinary-pages.ps1 -Extra $change -Sidecars $dump   # ordinary prose, does it harm?
+./tools/measure-bare-terms.ps1     -Extra $change -Sidecars $dump   # one-word queries, does it harm?
+./tools/measure-command-pages.ps1  -Extra $change -Sidecars $dump   # commands from other manuals
 ```
+
+`measure-recovered-text.ps1` applies `-Extra` only to `-AfterIndex`, the library's own index by
+default. Given a copy of that index as `-BeforeIndex`, *Before* is the ranking without the change and
+*After* the ranking with it.
 
 The last three are the ones that decide, and only the ones whose queries the change can act on
 count: the prose and bare-word controls never hold a word in mnemonic case, so a change scoped to

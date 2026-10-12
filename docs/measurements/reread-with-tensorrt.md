@@ -68,6 +68,10 @@ two pages in flight, the first guess for a card with no profile. At file 105 the
 132 MiB go out to system RAM, 4 MiB over its 128 MiB margin, and recorded two as unsafe. Every
 later run on this card starts at one. #56 has the evidence and keeps the measured repair rates.
 
+> **Later:** fixed on 11 Oct 2026 (e788f1d, #56). TensorRT runs now have their own margin of 512 MiB,
+> and each engine is tuned and remembered apart, so this card climbs to three pages in flight on
+> TensorRT (`gpu-autotuning.md`).
+
 ## Before and after
 
 | | Under-extracted pages | in documents | Repaired | Search text | Recovered by repair |

@@ -135,6 +135,9 @@ kept, and written down here so the next person does not spend the afternoon redi
 
 ## Where that left it, on 25 September
 
+> **Superseded:** this was the position on 25 Sep. Since 10 Oct 2026 reverse video is on by default
+> (b9d6d08, #12) and `--no-reverse-video` turns it off. The sweep at the top of this file is why.
+
 ```
 manualforge doctor <folder> --reverse-video            # on
 manualforge doctor <folder> --reverse-video-area 180   # smallest block worth opening, pt²
@@ -163,6 +166,11 @@ The miss is still a miss — the text a reader can see is not the text the layer
 was misdiagnosed, and reverse video was never going to fix it. Issue #16 covers the real cause.
 
 ## It was never actually off — 25 Sep 2026
+
+> **Superseded:** the fix below made the limb opt-in, as everything then described it. Since 10 Oct
+> 2026 it is on by default again, on purpose (b9d6d08, #12): `DoctorOptions.ReverseVideo` defaults to
+> `true`, the CLI reads `--no-reverse-video`, and `DoctorOptionWiringTests` pins that default. The
+> case made below for leaving it off was answered by the sweep at the top of this file.
 
 The CLI wired the flag backwards:
 

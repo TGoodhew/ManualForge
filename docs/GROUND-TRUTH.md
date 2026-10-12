@@ -5,15 +5,21 @@ measures against, so the question *"is this OCR better than Acrobat's?"* gets a 
 opinion.
 
 **Why it cannot be automated:** the thing being measured is how well machines read these pages. Any
-machine-produced answer is the thing under test, not a yardstick for it. A person reading the page
-image is the only source of truth there is.
+machine-produced answer is the thing under test, not a yardstick for it. For a scan, a person
+reading the page image is the only source of truth there is.
+
+(Born-digital pages are the exception: their text layer is the publisher's own typesetting.
+`manualforge truth --publisher --library <folder> --out <folder>` seeds a set from those with nothing
+to correct. A clean render of digital type is an easier read than a scan, though, so what it
+measures is the recogniser's floor, not its accuracy on scanned manuals. See
+`docs/measurements/publisher-truth-benchmark.md`.)
 
 **How long:** about **15 minutes a page**, and you want **9 to 12 pages**. Call it two to three
 hours, and it does not have to be done in one sitting — the files are plain text and half-finished
 work is fine to leave.
 
 **Do it once.** The corrected pages stay valid forever. Every future change — a new engine, a
-different resolution, turning deskew off — is measured against the same set for free.
+different resolution, a different preprocessing setting — is measured against the same set for free.
 
 ---
 
@@ -52,8 +58,9 @@ You need:
 
 * A PDF viewer that shows a page at a readable zoom — anything will do.
 * A plain-text editor. **Notepad is fine.** Use UTF-8 so `Ω` and `±` survive.
-* The `manualforge` command line, from `src\ManualForge.Cli\bin\...\manualforge.exe`, or build with
-  `dotnet build`.
+* The `manualforge` command line. The installer puts it at
+  `%LOCALAPPDATA%\Programs\ManualForge\manualforge.exe`; a build from source puts it under
+  `src\ManualForge.Cli\bin\...\manualforge.exe`.
 
 Set these once in a PowerShell window and keep it open — every command below uses them:
 
@@ -316,13 +323,18 @@ alignment does not matter, and the line breaks are wherever they fall.
 
 ```powershell
 & $mf benchmark --truth $Truth --library $Baseline --score-existing --existing-name "Acrobat" `
-      --engine cuda --csv "$Truth\results.csv"
+      --no-deskew --engine cuda --csv "$Truth\results.csv"
 ```
 
 This reports two things side by side:
 
 * **Acrobat** — the text already in the BASELINE files, scored against your corrections.
-* **300 dpi** — ManualForge re-OCRing the same page images now, scored against the same corrections.
+* **300 dpi, no deskew** — ManualForge re-OCRing the same page images now, scored against the same
+  corrections.
+
+Pass `--no-deskew`. `benchmark` deskews unless told not to, while `ocr` and `run` do not deskew
+unless told to, so without it the numbers describe a setting ManualForge does not read with by
+default.
 
 Then compare configurations to answer the open questions:
 
@@ -397,5 +409,7 @@ whose page numbering differs from the copy you corrected against. Check the pair
 
 **Symbols come out wrong** — the text file is not UTF-8. Re-save it as UTF-8 in your editor.
 
-**The OCR run says it is on CPU** — the CUDA runtime is not on `PATH` for that shell. It still works,
-just slower; see "Set up the GPU" in the README.
+**The OCR run says it is on CPU** — ManualForge did not find CUDA 13 and cuDNN 9. It still works,
+just slower. `manualforge gpu` says which provider is active and, if it is the CPU, why;
+`manualforge setup gpu` fetches the libraries into ManualForge's own folder, with nothing on `PATH`.
+See "Set up the GPU" in the README.

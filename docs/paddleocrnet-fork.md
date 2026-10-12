@@ -18,9 +18,14 @@ and upstream's own changes are taken in as they come.
 ## What the fork changes
 
 - `OcrExecutionProvider.TensorRt`, which `Auto` never selects, with `PaddleOcrServiceOptions.TensorRt`
-  (`TensorRtOptions`: engine cache, FP16, and the shape limits).
-- The detector, line classifier and recognizer each get a TensorRT engine with its own shape profile.
-  This has to be per model, because all three name their input `x`. Everything else stays on CUDA.
+  (`TensorRtOptions`: engine cache, FP16, the shape limits, and `Models`).
+- The detector, line classifier and recognizer can each get a TensorRT engine with its own shape
+  profile. This has to be per model, because all three name their input `x`. Everything else stays
+  on CUDA.
+- `TensorRtOptions.Models` (a `TensorRtModels` flags enum) chooses which of the three run on
+  TensorRT; the rest run on CUDA. The fork's default is all three. ManualForge runs the classifier and
+  recognizer on TensorRT and leaves the detector on CUDA (`OcrEngineOptions.TensorRtModels`,
+  `--tensorrt-models`).
 - If TensorRT can't be loaded, OCR runs on CUDA, not CPU. If one model's engine can't be built, that
   model alone falls back to CUDA.
 - Unit tests, README and CHANGELOG, following upstream's `CONTRIBUTING.md`: no API breaks, no changed
@@ -59,9 +64,10 @@ dotnet test ..\PaddleOcrNet\test\PaddleOcrNet.Tests\PaddleOcrNet.Tests.csproj -c
 
 ## Offering it upstream
 
-The plan is a pull request from `feature/tensorrt` to FarhanLodi/PaddleOcrNet, opened only once
-ManualForge has proved it against the baselines. It should open by saying an AI wrote it, link #11,
-include the before/after measurements and the integration-suite result, and offer logs.
+As of October 2026 the plan is a pull request from `feature/tensorrt` to FarhanLodi/PaddleOcrNet,
+opened only once ManualForge has proved it against the baselines. It should open by saying an AI
+wrote it, link #11, include the before/after measurements and the integration-suite result, and
+offer logs.
 
 ## Retiring the fork
 
@@ -70,6 +76,6 @@ When a PaddleOcrNet release carries TensorRT support (the script warns once upst
 1. Delete `packages/`, and remove the `local` source and its mapping from `nuget.config`.
 2. Pin the released version in `Directory.Packages.props`.
 3. Check that the released API matches `OcrExecutionProvider.TensorRt` and `TensorRtOptions`, and
-   adjust `Ocr/PaddleOcrEngine.cs` if it doesn't.
+   adjust `src/ManualForge.Core/Ocr/PaddleOcrEngine.cs` if it doesn't.
 4. Re-measure against the baselines: a different build of the same provider can still read slightly
    differently.
