@@ -216,10 +216,12 @@ function Start-AndWait([string] $exe, [string] $arguments) {
     return $process.ExitCode
 }
 
-# Setup and the uninstaller each hand over to a copy of themselves in %TEMP% (is-*.tmp, _iu*.tmp).
+# Setup and the uninstaller each hand over to a copy of themselves in %TEMP% (is-*.tmp\ManualForge-Setup-*.tmp,
+# and _unins.tmp in Inno Setup 6.7, _iu*.tmp in older ones). The uninstaller's copy outlives the original,
+# and asks about the data folder after it has gone.
 function Wait-ForSetupCopies {
     $deadline = (Get-Date).AddMinutes(30)
-    while ((Get-Date) -lt $deadline -and (Get-Process | Where-Object { $_.Name -like '_iu*' -or $_.Name -like 'ManualForge-Setup-*' })) { Start-Sleep -Seconds 1 }
+    while ((Get-Date) -lt $deadline -and (Get-Process | Where-Object { $_.Name -like '_unins*' -or $_.Name -like '_iu*' -or $_.Name -like 'ManualForge-Setup-*' })) { Start-Sleep -Seconds 1 }
 }
 
 # A minimal MCP client over stdio: initialize, list the tools, call two of them.
@@ -481,14 +483,14 @@ try {
     if (Test-Path $nvidiaSmi) { Invoke-Logged 'nvidia-smi-after' $nvidiaSmi @() | Out-Null }
 
     Write-Step 'Reading the sample (4 pages) on the CPU'
-    $ocrCpu = Invoke-Logged 'ocr-cpu' $cli @('ocr', $Sample, '--pages', '1-4', '--engine', 'cpu', '--out', "$work\ocr-cpu.pdf", '--text', "$results\ocr-cpu.txt")
+    $ocrCpu = Invoke-Logged 'ocr-cpu' $cli @('ocr', $Sample, '--pages', '1-4', '--engine', 'cpu', '--out', "$work\ocr-cpu.pdf", '--overwrite', '--text', "$results\ocr-cpu.txt")
     $wordsCpu = if (Test-Path "$results\ocr-cpu.txt") { @((Get-Content "$results\ocr-cpu.txt" -Raw) -split '\s+' | Where-Object { $_ -and $_ -notmatch '^-+$' }).Count } else { 0 }
     Check 'OCR on the CPU' ($ocrCpu.Code -eq 0 -and $wordsCpu -gt 0) ("{0} words, {1:N0} s" -f $wordsCpu, $ocrCpu.Seconds)
 
     if ($provider -ne 'Cpu' -and $provider -ne 'unknown') {
         Write-Step "Reading the sample (4 pages) on the GPU, twice: the first builds and caches what the GPU needs"
         foreach ($pass in 1, 2) {
-            $ocrGpu = Invoke-Logged "ocr-gpu-$pass" $cli @('ocr', $Sample, '--pages', '1-4', '--out', "$work\ocr-gpu.pdf", '--text', "$results\ocr-gpu-$pass.txt")
+            $ocrGpu = Invoke-Logged "ocr-gpu-$pass" $cli @('ocr', $Sample, '--pages', '1-4', '--out', "$work\ocr-gpu.pdf", '--overwrite', '--text', "$results\ocr-gpu-$pass.txt")
             $wordsGpu = if (Test-Path "$results\ocr-gpu-$pass.txt") { @((Get-Content "$results\ocr-gpu-$pass.txt" -Raw) -split '\s+' | Where-Object { $_ -and $_ -notmatch '^-+$' }).Count } else { 0 }
             Check "OCR on the GPU, pass $pass" ($ocrGpu.Code -eq 0 -and $wordsGpu -gt 0) ("{0} words, {1:N0} s" -f $wordsGpu, $ocrGpu.Seconds)
         }
