@@ -103,6 +103,17 @@ public class LibraryViewModelTests
         return (new LibraryViewModel(service) { Folder = @"C:\Manuals" }, service);
     }
 
+    [Fact]
+    public void TheStatusLineSaysWhichBuildThisIs()
+    {
+        // The app's only way to tell a user its version: the same stamp `manualforge version` prints.
+        // That stamp is the running program's, which here is the test host, so only the wording is
+        // checked; the installed app's own stamp was seen in its window.
+        var model = new LibraryViewModel(new FakeLibraryService());
+
+        Assert.Equal($"ManualForge {ManualForge.Core.Diagnostics.BuildStamp.Version}", model.Version);
+    }
+
     // ---------------------------------------------------------------- survey before committing
 
     [Fact]

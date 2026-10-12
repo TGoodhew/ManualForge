@@ -49,6 +49,10 @@ WizardStyle=modern
 CloseApplications=yes
 RestartApplications=no
 ChangesEnvironment=yes
+; Has Windows refresh its icons when setup and the uninstaller finish. The program keeps one path
+; across versions, and an upgrade from 0.1.0, which had the template's icon, kept that icon on the
+; taskbar: Windows took the button's icon from the Start menu entry, and that from its icon cache.
+ChangesAssociations=yes
 
 [Tasks]
 Name: gpu; Description: "Download NVIDIA's libraries for the GPU (CUDA and cuDNN, about 1.7 GB)"; Check: HasNvidiaGpu
