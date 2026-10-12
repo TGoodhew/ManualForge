@@ -21,15 +21,65 @@ verified, and the original is then moved, unchanged, into an `_Originals` folder
 library. Files that need no work are never touched. See
 [What happens to your library folder](#what-happens-to-your-library-folder).
 
-It works on any NVIDIA GPU whose driver supports CUDA 13 (in practice a GTX 16 or RTX 20 series card, or newer). With
-CUDA on an RTX 5070 Ti it read a whole library at about 150 pages a minute, and dense pages such as
-tables at about 85–90. TensorRT is faster still: nearly twice as fast on dense pages, and about 164
-pages a minute when the whole library was read again with it. It also runs on the CPU alone, at about
-15 pages a minute on dense pages.
+It works on any NVIDIA GPU whose driver supports CUDA 13 (in practice a GTX 16 or RTX 20 series
+card, or newer). With CUDA on an RTX 5070 Ti it read a whole library at about 150 pages a minute,
+and dense pages such as tables at about 85–90. TensorRT is faster still: nearly twice as fast on
+dense pages, and about 164 pages a minute when the whole library was read again with it. It also
+runs on the CPU alone, at about 15 pages a minute on dense pages.
 
 A note on accuracy: what ManualForge measures is how *much* text it recovers. How *correctly* it
 reads a scanned page has not been measured. The details, and the full story of how ManualForge was
 built and measured, are in [docs/DEVELOPMENT-HISTORY.md](docs/DEVELOPMENT-HISTORY.md).
+
+## An example: how does the chopper work in the HP 432A?
+
+The HP 432A is a thermistor-bridge RF power meter, and its operating and service manual is one of
+632 in the library ManualForge was built on. The scan already has a text layer, so a PDF reader can search it.
+But its most useful page for this question is Figure 4-2, the block diagram, and the text layer has
+none of the words drawn on it. Search the PDF for "chopper" and you get schematic pages; the block
+diagram, which shows where the chopper sits in the signal path, never comes up.
+
+ManualForge's audit found that page 23 draws far more than its text layer holds, read the picture of
+the page, and added what it found to the index. Asked across the whole library,
+the block diagram now comes first:
+
+```
+> manualforge search chopper --library D:\Manuals
+
+  432A-OSM  page 23  [OCR]
+    … Model 432A Block Diagram … RANGE I [CHOPPER] AMPLIFIER AMPL RANGE CALIBRATION …
+    (recovered by OCR at 82% mean confidence; the file's own text layer does not hold this)
+```
+
+Ask Claude "How does the chopper work in the 432A?" and it does the same: `library_search` finds
+page 23, and `read_manual_page` returns the page's own text plus what ManualForge recovered from
+the drawing, marked as such:
+
+```
+--- recovered by OCR from the rendered page, 82% mean confidence at 300 dpi; the PDF's own text layer does not hold this ---
+...
+CHOPPER
+AMPLIFIER
+...
+5KHz
+MULTI-
+VIBRATOR
+...
+VOLTAGE-TO-TIME CONVERTER
+COMPENSATION BRIDGE
+...
+LOW-PASS
+FILTER
+```
+
+With that and the Principles of Operation two pages earlier (page 21, paragraph 4-4), the answer is
+in the manual's own words. The two thermistor bridges produce dc voltages, VRF and VCOMP. Their
+difference, VCOMP − VRF, "is chopped, amplified and fed to an electronic switch actuated by the
+controlled width pulses": a 5 kHz multivibrator and voltage-to-time converter set the width of each
+pulse from VCOMP + VRF, and the chopper amplifier sets its height from VCOMP − VRF. The meter
+averages those pulses, so it reads the product of the two, which paragraphs 4-10 and 4-11 show is
+proportional to the RF power. Without the recovered text, nothing would point a search, or Claude,
+at the diagram that ties it together.
 
 ## Install
 
