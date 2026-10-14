@@ -1312,6 +1312,7 @@ packages/, nuget.config           the TensorRT build of PaddleOcrNet (docs/paddl
 tools/build-installer.ps1         publishes one folder, pins the runtimes, compiles the installer
 tools/build-icon.ps1              renders the icon's sizes and packs AppIcon.ico
 tools/build-paddleocrnet.ps1      builds the PaddleOcrNet fork into packages/
+tools/invoke-sandbox-test.ps1     runs installer/test-in-sandbox.ps1 in Windows Sandbox, then closes it
 tools/fresh-install-test.ps1      tests an installer end to end on a real PC (.cmd fetches and runs it)
 tools/compare-installed-build.ps1 the installed build against a source build, word for word
 tools/check-ui-help.ps1           every control in the app has a tooltip and a name for a screen reader

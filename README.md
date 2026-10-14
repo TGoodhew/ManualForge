@@ -591,7 +591,8 @@ dotnet test        # optional: about 700 tests, under a minute, no GPU or networ
 
 To build the installer, run `./tools/build-installer.ps1`. It publishes the program into one folder,
 pins the runtimes it chains in, and writes `artifacts\installer\package\ManualForge-Setup-<version>.exe`.
-`./tools/fresh-install-test.ps1` tests an installer on a PC, end to end.
+`./tools/invoke-sandbox-test.ps1` then installs, checks and uninstalls it in Windows Sandbox, and closes
+the sandbox afterwards. `./tools/fresh-install-test.ps1` tests an installer on a PC, end to end.
 
 ### 2. Set up the GPU (optional)
 

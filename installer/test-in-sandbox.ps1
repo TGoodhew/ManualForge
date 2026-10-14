@@ -10,6 +10,8 @@
     Reads the installer from C:\Installer (read-only) and writes everything to C:\Results, which is a
     folder on the host: transcript.txt, the installer's logs, ocr.txt, and summary.txt last of all, which
     says the run has finished. A sample.pdf beside the installer, if there is one, is OCR'd on the CPU.
+    Exits 1 if a check failed, else 0; the .wsb then shuts the sandbox down either way.
+    tools\invoke-sandbox-test.ps1 runs it from the host.
 
     Windows PowerShell 5.1: it is what a clean Windows has.
 #>
@@ -20,6 +22,7 @@ $library = Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'Manuals'
 $app = Join-Path $env:LOCALAPPDATA 'Programs\ManualForge'
 $cli = Join-Path $app 'manualforge.exe'
 $checks = New-Object System.Collections.Generic.List[string]
+$exitCode = 1   # until the summary is written
 
 Start-Transcript -Path (Join-Path $results 'transcript.txt') -Force | Out-Null
 
@@ -161,4 +164,9 @@ finally {
     $failed = @($checks | Where-Object { $_ -like 'FAIL*' }).Count
     @("ManualForge sandbox test, $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')", "$($checks.Count) checks, $failed failed", '') + $checks |
         Set-Content -Path (Join-Path $results 'summary.txt') -Encoding UTF8
+    $exitCode = [int] ($failed -gt 0)
 }
+# Said before going, so a sandbox that doesn't close shows whether this got here. Environment.Exit, not exit:
+# nothing this started that is still running can then hold PowerShell open (#84).
+Set-Content -Path (Join-Path $results 'exited.txt') -Value "exit $exitCode at $(Get-Date -Format 'HH:mm:ss')" -Encoding UTF8
+[Environment]::Exit($exitCode)
