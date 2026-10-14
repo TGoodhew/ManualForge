@@ -1,6 +1,7 @@
 using ManualForge.Core.Auditing;
 using ManualForge.Core.Indexing;
 using ManualForge.Mcp;
+using ModelContextProtocol.Protocol;
 using Xunit;
 
 namespace ManualForge.Core.Tests;
@@ -228,12 +229,37 @@ public sealed class ManualToolsTests : IDisposable
     }
 
     [Fact]
+    public void ACitedPageCanBeOpenedInABrowserPaneWhenAsked()
+    {
+        GivenAManual();
+
+        var search = Tools(links: true).LibrarySearch("LFR1");
+        Assert.Contains("browser pane beside the conversation", search, StringComparison.Ordinal);
+        Assert.Contains("Keep the markdown link in the citation either way", search, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TheReadPageAlsoComesAsAResourceLink()
+    {
+        var pdf = GivenAManual();
+
+        var result = Tools(links: true).ReadManualPageWithLink(Path.GetFileName(pdf), 2, context: 1);
+
+        Assert.Contains("FREQUENCY", Assert.IsType<TextContentBlock>(result.Content[0]).Text, StringComparison.Ordinal);
+        var link = Assert.IsType<ResourceLinkBlock>(Assert.Single(result.Content, c => c is ResourceLinkBlock));
+        Assert.Equal("http://127.0.0.1:47332/manuals/54845A%20Programmer.pdf/page/2", link.Uri);
+        Assert.Equal("54845A Programmer.pdf, p. 2", link.Name);
+    }
+
+    [Fact]
     public void WithoutPagesServedThereAreNoLinksToGoNowhere()
     {
         var pdf = GivenAManual();
 
         Assert.DoesNotContain("http://", Tools().LibrarySearch("LFR1"), StringComparison.Ordinal);
         Assert.DoesNotContain("http://", Tools().ReadManualPage(Path.GetFileName(pdf), 2), StringComparison.Ordinal);
+        Assert.Single(Tools().ReadManualPageWithLink(Path.GetFileName(pdf), 2).Content);
+        Assert.Single(Tools(links: true).ReadManualPageWithLink(Path.GetFileName(pdf), 99).Content);
     }
 
     [Fact]

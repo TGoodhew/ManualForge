@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Text;
 using ManualForge.Core.Auditing;
 using ManualForge.Core.Indexing;
+using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 
 namespace ManualForge.Mcp;
@@ -212,6 +213,15 @@ public sealed class ManualTools(ManualLibraryContext library, PageLinks links)
         }
     }
 
+    /// <summary>
+    /// The page's text, and the page as a resource link as well as the text's own link (#82).
+    ///
+    /// <para>
+    /// A markdown link in a reply is opened by Claude Desktop in the default browser. A resource
+    /// link is the client's to present, so it may open where the user is already looking. It is
+    /// only on this tool, because this is the page Claude reads before citing it.
+    /// </para>
+    /// </summary>
     [McpServerTool(Name = "read_manual_page")]
     [Description(
         "Read the full text of one page of a manual, optionally with the pages either side. " +
@@ -219,11 +229,33 @@ public sealed class ManualTools(ManualLibraryContext library, PageLinks links)
         "page, never enough to answer from. The text is what the PDF's own text layer holds, plus " +
         "anything the repair recovered from the rendered page, which is marked separately. On an " +
         "OCR'd scan it carries OCR errors - quote it as what the manual appears to say.")]
-    public string ReadManualPage(
+    public CallToolResult ReadManualPageWithLink(
         [Description("The manual, as the path returned by library_search.")] string path,
         [Description("Page number, 1-based, as returned by library_search.")] int page,
         [Description("Also include this many pages either side. Default 0, maximum 3.")] int context = 0)
     {
+        var content = new List<ContentBlock> { new TextContentBlock { Text = Read(path, page, context, out var link) } };
+
+        if (link is not null)
+        {
+            content.Add(new ResourceLinkBlock
+            {
+                Uri = link,
+                Name = $"{Path.GetFileName(path)}, p. {page}",
+                Description = "ManualForge's view of this page",
+                MimeType = "text/html",
+            });
+        }
+
+        return new CallToolResult { Content = content };
+    }
+
+    /// <summary>What <c>read_manual_page</c> says, as text.</summary>
+    public string ReadManualPage(string path, int page, int context = 0) => Read(path, page, context, out _);
+
+    private string Read(string path, int page, int context, out string? link)
+    {
+        link = null;
         var resolved = library.Resolve(path);
         if (resolved is null)
             return $"'{path}' is not a file inside the manual library.";
@@ -252,7 +284,10 @@ public sealed class ManualTools(ManualLibraryContext library, PageLinks links)
         var text = new StringBuilder();
         text.AppendLine($"{Path.GetFileName(resolved)}, page {page} of {pages.Count:N0}");
         if (links.Enabled)
-            text.AppendLine($"link: {links.ForPage(relative, page)}");
+        {
+            link = links.ForPage(relative, page);
+            text.AppendLine($"link: {link}");
+        }
         text.AppendLine();
 
         for (var n = first; n <= last; n++)
@@ -301,7 +336,18 @@ public sealed class ManualTools(ManualLibraryContext library, PageLinks links)
     private const string CitationAdvice =
         "Cite each page as a markdown link to the link given for it, e.g. [432A-OSM.pdf, p. 23](link): " +
         "it opens ManualForge's view of that page on the user's PC, with the text recovered from it " +
-        "marked, so they can check what you say against the page. Use the links exactly as given.";
+        "marked, so they can check what you say against the page. Use the links exactly as given. " +
+        SidePanelAdvice;
+
+    /// <summary>
+    /// A reply's links open in the default browser (#82). A client with a browser pane beside the
+    /// conversation can show the page there instead, but only if Claude opens it, so it is asked to
+    /// when the user wants to see the page. Worded without naming any client's tools.
+    /// </summary>
+    internal const string SidePanelAdvice =
+        "If you can open web pages in a browser pane beside the conversation, and the user asks to " +
+        "see a cited page (e.g. 'show me that page' or 'open it here'), open its link in that pane " +
+        "yourself. Keep the markdown link in the citation either way, since not every app has one.";
 
     [McpServerTool(Name = "library_status")]
     [Description(
