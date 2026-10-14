@@ -5,7 +5,8 @@
 .DESCRIPTION
     Run by test-in-sandbox.wsb when the sandbox logs on; tools\build-installer.ps1 writes that file.
     The sandbox is a clean Windows with no GPU, no .NET and no Windows App Runtime, so this tests the
-    CPU path, chaining in both runtimes, the Start menu entry, and that uninstalling leaves nothing.
+    CPU path, chaining in both runtimes, the Start menu entry, and that uninstalling leaves nothing. It also
+    walks the wizard to the library page, with and without GPIB MCP and on an upgrade, and cancels (#83).
 
     Reads the installer from C:\Installer (read-only) and writes everything to C:\Results, which is a
     folder on the host: transcript.txt, the installer's logs, ocr.txt, and summary.txt last of all, which
@@ -53,6 +54,134 @@ function Get-Leftovers {
     return $found
 }
 
+# ---- the wizard's library page (#83), driven by window messages
+
+# Inno Setup's controls are its own classes, which UI Automation reports as plain panes with no patterns: it
+# can find them by class and caption, but not press or fill them. So they are found through UI Automation and
+# worked with the window messages a click or a typed value sends. As GPIB MCP's sandbox test does.
+$gpibKey = 'HKCU:\Software\GpibMcp'
+$pageQuestion = 'Which folder holds the PDF manuals'
+$BM_CLICK = 0xF5; $WM_SETTEXT = 0x0C; $WM_GETTEXT = 0x0D
+
+function Initialize-WizardDriver {
+    Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
+    if (-not ('WizardWindow' -as [type])) {
+        Add-Type @'
+using System; using System.Runtime.InteropServices; using System.Text;
+public static class WizardWindow {
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr SendMessage(IntPtr h, int m, IntPtr w, string l);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr SendMessage(IntPtr h, int m, IntPtr w, StringBuilder l);
+    [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, int m, IntPtr w, IntPtr l);
+}
+'@
+    }
+}
+
+# Ends any Setup still running - the .tmp that shows the wizard and the .exe that started it.
+function Stop-Setup {
+    Get-Process | Where-Object { $_.ProcessName -like 'ManualForge-Setup-*' } | Stop-Process -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 2
+}
+
+# What the wizard is showing: the current page (other pages are off screen) and any message box. Inno's own
+# message boxes are windows of their own, not under the wizard's, so every window of the process is looked at.
+function Get-Shown($wizard) {
+    $mine = New-Object System.Windows.Automation.PropertyCondition ([System.Windows.Automation.AutomationElement]::ProcessIdProperty), $wizard.Id
+    foreach ($window in [System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Children, $mine)) {
+        $window
+        $window.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition) |
+            Where-Object { -not $_.Current.IsOffscreen }
+    }
+}
+
+function Get-Texts($wizard) { (Get-Shown $wizard | ForEach-Object { $_.Current.Name } | Where-Object { $_ }) -join "`r`n" }
+
+function Find-Control($wizard, [string] $caption) {
+    Get-Shown $wizard | Where-Object { ($_.Current.Name -replace '&', '') -like $caption -and $_.Current.IsEnabled } | Select-Object -First 1
+}
+
+# Posted, not sent: a click that opens a message box would otherwise wait until someone closed it.
+function Invoke-Button($wizard, [string] $caption) {
+    $control = Find-Control $wizard $caption
+    if (-not $control) { return $false }
+    [void][WizardWindow]::PostMessage([IntPtr]$control.Current.NativeWindowHandle, $BM_CLICK, [IntPtr]::Zero, [IntPtr]::Zero)
+    Start-Sleep -Milliseconds 1500
+    return $true
+}
+
+function Get-LibraryBox($wizard) {
+    $box = Get-Shown $wizard.Process | Where-Object { $_.Current.ClassName -like '*Edit*' } | Select-Object -First 1
+    [IntPtr]$box.Current.NativeWindowHandle
+}
+
+function Get-LibraryBoxValue($wizard) {
+    $text = New-Object System.Text.StringBuilder 1024
+    [void][WizardWindow]::SendMessage((Get-LibraryBox $wizard), $WM_GETTEXT, [IntPtr]1024, $text)
+    $text.ToString()
+}
+
+function Set-LibraryBox($wizard, [string] $value) {
+    [void][WizardWindow]::SendMessage((Get-LibraryBox $wizard), $WM_SETTEXT, [IntPtr]::Zero, $value)
+}
+
+# Starts the wizard and clicks Next until the library page shows. Returns its process, or $null.
+function Open-LibraryPage([string] $label, [string[]] $more = @()) {
+    Initialize-WizardDriver
+    Start-Process $setup.FullName -ArgumentList (@("/LOG=`"$results\wizard-$label.log`"") + $more) | Out-Null
+    $process = $null
+    for ($i = 0; $i -lt 60 -and -not $process; $i++) {
+        $process = Get-Process | Where-Object { $_.ProcessName -like 'ManualForge-Setup-*' -and $_.Path -like '*.tmp' -and $_.MainWindowHandle -ne 0 } |
+            Select-Object -First 1
+        if (-not $process) { Start-Sleep -Seconds 1 }
+    }
+    if (-not $process) { Check "$label - the wizard opens" $false; Stop-Setup; return $null }
+    for ($i = 0; $i -lt 8 -and (Get-Texts $process) -notmatch $pageQuestion; $i++) {
+        # The licence page holds Next back until the agreement is accepted.
+        Invoke-Button $process 'I accept*' | Out-Null
+        if (-not (Invoke-Button $process 'Next')) { Start-Sleep -Seconds 1 }
+    }
+    if ((Get-Texts $process) -notmatch $pageQuestion) { Check "$label - the wizard reaches the library page" $false; Stop-Setup; return $null }
+    return [pscustomobject]@{ Process = $process }
+}
+
+function Close-Wizard($wizard) {
+    # Cancel, then "Exit Setup?" - Yes.
+    if (Invoke-Button $wizard.Process 'Cancel') { Invoke-Button $wizard.Process 'Yes' | Out-Null }
+    if (-not $wizard.Process.WaitForExit(20000)) { Stop-Setup }
+}
+
+# GPIB MCP as its installer leaves it: the key with a Manuals value ('' for none), or no key at all ($null).
+function Set-GpibMcp($manuals) {
+    Remove-Item $gpibKey -Recurse -Force -ErrorAction SilentlyContinue
+    if ($null -ne $manuals) {
+        New-Item -Path $gpibKey -Force | Out-Null
+        Set-ItemProperty $gpibKey -Name Manuals -Value $manuals
+    }
+}
+
+# Opens the library page, checks what its box starts with, and cancels. $expected '' means the box must be
+# empty, and then Next must refuse to go on until a folder is typed.
+function Test-LibraryPage([string] $label, [string] $expected, [bool] $saysGpib, [string[]] $more = @()) {
+    $wizard = Open-LibraryPage $label $more
+    if (-not $wizard) { return }
+    $text = Get-Texts $wizard.Process
+    $value = Get-LibraryBoxValue $wizard
+    Check "$label - the box starts with $(if ($expected) { $expected } else { 'nothing' })" ($value -eq $expected) "'$value'"
+    Check "$label - the page $(if ($saysGpib) { 'says' } else { 'does not say' }) it is GPIB MCP's folder" (($text -match 'This is GPIB MCP') -eq $saysGpib)
+    if (-not $expected) {
+        Invoke-Button $wizard.Process 'Next' | Out-Null
+        # The message box shows under the wizard's window.
+        $said = Get-Texts $wizard.Process
+        Check "$label - Next with an empty box says a folder is needed" ($said -match 'needs a folder of manuals') (($said -split "`r`n" | Select-String 'folder') -join ' / ')
+        Invoke-Button $wizard.Process 'OK' | Out-Null
+        Check "$label - ... and stays on the page" ((Get-Texts $wizard.Process) -match $pageQuestion)
+        Set-LibraryBox $wizard 'C:\Manuals-Typed'
+        Invoke-Button $wizard.Process 'Next' | Out-Null
+        Check "$label - with a folder typed, Next goes on" ((Get-Texts $wizard.Process) -notmatch $pageQuestion)
+    }
+    Close-Wizard $wizard
+}
+
 $shortcut = Join-Path ([Environment]::GetFolderPath('Programs')) 'ManualForge.lnk'
 $uninstallKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{A6AE7B23-BB07-4BEE-9AD0-0B669785EDE5}_is1'
 
@@ -66,6 +195,28 @@ try {
     Write-Host "Already present: $(if ($before) { $before -join '; ' } else { 'nothing' })"
     New-Item -ItemType Directory -Force $library | Out-Null
     $testStarted = Get-Date
+    $gpibFolder = 'C:\Manuals-Gpib'; $switchFolder = 'C:\Manuals-Switch'
+
+    Write-Step 'The library page: GPIB MCP installed with a manual folder'
+    Set-GpibMcp $gpibFolder
+    Test-LibraryPage 'gpib' $gpibFolder $true
+    Test-LibraryPage 'gpib-switch' $switchFolder $false @("/LIBRARY=`"$switchFolder`"")
+    Write-Step 'The library page: GPIB MCP not installed'
+    Set-GpibMcp $null
+    Test-LibraryPage 'no-gpib' '' $false
+    Test-LibraryPage 'no-gpib-switch' $switchFolder $false @("/LIBRARY=`"$switchFolder`"")
+    Write-Step 'The library page: GPIB MCP installed without a manual folder'
+    Set-GpibMcp ''
+    Test-LibraryPage 'gpib-none' '' $false
+    Test-LibraryPage 'gpib-none-switch' $switchFolder $false @("/LIBRARY=`"$switchFolder`"")
+    Stop-Setup
+
+    Write-Step 'A silent install with no folder to use'
+    Set-GpibMcp $null
+    $refused = Start-Process $setup.FullName -Wait -PassThru -ArgumentList @(
+        '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/LOG=`"$results\install-no-library.log`"")
+    Check 'it stops, and says why in its log' ($refused.ExitCode -ne 0 -and (Select-String -Path "$results\install-no-library.log" -Pattern 'needs a folder of manuals' -Quiet)) "code $($refused.ExitCode)"
+    Check '... before installing anything' (-not (Test-Path $app) -and -not (Test-Path 'HKCU:\Software\ManualForge'))
 
     Write-Step 'Installing silently'
     $started = Get-Date
@@ -141,6 +292,15 @@ try {
     }
     Get-WinEvent -FilterHashtable @{ LogName = 'Application'; Level = 2; StartTime = $testStarted } -ErrorAction SilentlyContinue |
         Select-Object -First 10 | Format-List TimeCreated, ProviderName, Message | Out-String | Write-Host
+
+    Write-Step 'The library page on an upgrade'
+    Set-GpibMcp $null
+    Test-LibraryPage 'upgrade' $library $false
+    Set-GpibMcp $gpibFolder
+    Test-LibraryPage 'upgrade-gpib' $gpibFolder $true
+    Test-LibraryPage 'upgrade-switch' $switchFolder $false @("/LIBRARY=`"$switchFolder`"")
+    Set-GpibMcp $null
+    Stop-Setup
 
     Write-Step 'Uninstalling silently'
     $uninstaller = Get-ChildItem $app -Filter 'unins*.exe' -ErrorAction SilentlyContinue | Select-Object -First 1

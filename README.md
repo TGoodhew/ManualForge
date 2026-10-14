@@ -159,6 +159,10 @@ The installer asks for:
 1. **Your library folder:** the folder of PDF manuals that Claude and other AI apps search through
    ManualForge. It is also set as the `MANUALFORGE_LIBRARY` variable, unless that is already set, and
    the desktop app opens on it. The command line is given a folder each time.
+   If [GPIB MCP](https://github.com/TGoodhew/GPIB-MCP) is installed with a manual folder, the box starts
+   with that folder, so both search the same manuals. Otherwise an upgrade starts with the folder
+   ManualForge already uses, and a new install starts empty. Setup won't go on without a folder. For a
+   silent install, give it as `/LIBRARY="D:\Manuals"`.
 2. **What to set up:**
    - **NVIDIA's libraries for the GPU:** CUDA and cuDNN (about 1.7 GB), and optionally TensorRT
      (another 1.9 GB, which reads about twice as fast). These are offered only on a PC with an NVIDIA
