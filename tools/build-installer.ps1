@@ -167,9 +167,11 @@ Write-Host ("   {0}: {1:N0} MB" -f $package.Name, ($package.Length / 1MB))
 
 # A clean Windows to try it in, with Windows Sandbox enabled; the sandbox is given no GPU (vGPU off), so
 # this tests the CPU path, the runtimes, the Start menu entry and uninstalling, and it is thrown away
-# when closed. In sandbox\:
+# when closed. Keep vGPU off: with it on, a test sandbox twice hard-reset the host (#84). In sandbox\:
 #   test-in-sandbox.wsb  runs installer\test-in-sandbox.ps1 at logon: installs silently, checks,
-#                        uninstalls, and writes what it found to results\ (summary.txt last).
+#                        uninstalls, writes what it found to results\ (summary.txt last), and shuts the
+#                        sandbox down. tools\invoke-sandbox-test.ps1 starts it, waits, prints the summary,
+#                        and closes the sandbox if it did not close itself.
 #   try-in-sandbox.wsb   just opens C:\Installer, to click through the wizard by hand.
 #   kit\                 what the sandbox sees as C:\Installer: the package and the test script. A
 #                        sample.pdf put here is OCR'd on the CPU by the test, and kept across builds.
@@ -195,7 +197,7 @@ function Write-Sandbox([string] $name, [string] $extraFolders, [string] $command
   <vGPU>Disable</vGPU>
   <Networking>Enable</Networking>
   <LogonCommand>
-    <Command>$command</Command>
+    <Command>$([System.Security.SecurityElement]::Escape($command))</Command>
   </LogonCommand>
 </Configuration>
 "@ | Set-Content -Path $path -Encoding UTF8
@@ -208,5 +210,8 @@ Write-Sandbox 'test-in-sandbox.wsb' @"
       <SandboxFolder>C:\Results</SandboxFolder>
       <ReadOnly>false</ReadOnly>
     </MappedFolder>
-"@ 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Installer\test-in-sandbox.ps1'
+"@ ('cmd.exe /c powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Installer\test-in-sandbox.ps1' +
+    # Whatever the test did, shut down when it ends; shutdown.txt shows whether that was even tried.
+    ' & shutdown.exe /s /f /t 0 > C:\Results\shutdown.txt 2>&1')
 Write-Sandbox 'try-in-sandbox.wsb' '' 'explorer.exe C:\Installer'
+Write-Host '   tools\invoke-sandbox-test.ps1 runs the test, and closes the sandbox if it does not close itself.'
