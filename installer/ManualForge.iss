@@ -58,6 +58,12 @@ ChangesEnvironment=yes
 ; taskbar: Windows took the button's icon from the Start menu entry, and that from its icon cache.
 ChangesAssociations=yes
 
+[Messages]
+; The library page is the only folder box (DisableDirPage). The box can start empty (#83), and Inno's own
+; check of it says this when it is empty or not a full path, and won't go on. In a silent install with no
+; /LIBRARY= and nothing to fill the box, it is logged, and Setup stops before installing anything.
+InvalidPath=ManualForge needs a folder of manuals to search.%n%nChoose the folder that holds your PDF manuals, as a full path such as D:\Manuals or \\server\share\Manuals. It can be empty for now.
+
 [Tasks]
 ; Only what would download something. An upgrade over libraries already current offers neither, and
 ; so never asks for NVIDIA's licences again; the Ready page says they are installed (#78).
@@ -102,6 +108,7 @@ const
   EnvironmentKey = 'Environment';
   StateKey = 'Software\ManualForge';
   LibraryVariable = 'MANUALFORGE_LIBRARY';
+  GpibMcpKey = 'Software\GpibMcp';
   DotNetKey = 'SOFTWARE\dotnet\Setup\InstalledVersions\x64\sharedfx\Microsoft.WindowsDesktop.App';
   VcRuntimeKey = 'SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64';
   { ONNX Runtime is built with Visual Studio 17.10 or later, whose std::mutex crashes on a runtime
@@ -235,7 +242,16 @@ end;
 
 function Library(Param: String): String;
 begin
-  Result := LibraryPage.Values[0];
+  Result := Trim(LibraryPage.Values[0]);
+end;
+
+{ GPIB MCP's manual folder, or '' when GPIB MCP isn't installed or has none. Its installer writes this
+  value and removes the whole key on uninstall, so the value being there means GPIB MCP is installed. }
+function GpibMcpManuals: String;
+begin
+  if not RegQueryStringValue(HKCU, GpibMcpKey, 'Manuals', Result) then
+    Result := '';
+  Result := Trim(Result);
 end;
 
 function TensorRtArgument(Param: String): String;
@@ -257,20 +273,32 @@ end;
 
 procedure InitializeWizard;
 var
-  Existing: String;
+  GpibLibrary, Initial, Description: String;
 begin
+  { One library for ManualForge and GPIB MCP (#83). /LIBRARY="D:\Manuals" answers this page on the command
+    line, for a silent install; else GPIB MCP's folder; else, on an upgrade, the folder ManualForge already
+    uses; else nothing, and the user must choose. }
+  GpibLibrary := GpibMcpManuals;
+  Initial := Trim(ExpandConstant('{param:LIBRARY|}'));
+  if Initial = '' then
+    Initial := GpibLibrary;
+  if Initial = '' then
+    if RegQueryStringValue(HKCU, StateKey, 'Library', Initial) then
+      Initial := Trim(Initial)
+    else
+      Initial := '';
+
+  Description := 'ManualForge reads and searches this folder. It never deletes a manual: every file it ' +
+    'replaces with a searchable copy is kept, untouched, in an _Originals folder inside it.';
+  { Only when the box starts with GPIB MCP's folder: a /LIBRARY= naming another isn't GPIB MCP's. }
+  if (GpibLibrary <> '') and
+     (CompareText(RemoveBackslashUnlessRoot(Initial), RemoveBackslashUnlessRoot(GpibLibrary)) = 0) then
+    Description := Description + #13#10#13#10 + 'This is GPIB MCP''s manual folder, so both search the same manuals.';
+
   LibraryPage := CreateInputDirPage(wpLicense, 'Your manuals',
-    'Which folder holds the PDF manuals ManualForge should search?',
-    'ManualForge reads and searches this folder. It never deletes a manual: every file it replaces with ' +
-    'a searchable copy is kept, untouched, in an _Originals folder inside it.', False, '');
+    'Which folder holds the PDF manuals ManualForge should search?', Description, False, '');
   LibraryPage.Add('Library folder:');
-  { /LIBRARY="D:\Manuals" answers this page on the command line, for a silent install. }
-  Existing := ExpandConstant('{param:LIBRARY|}');
-  if Existing = '' then
-    if not RegQueryStringValue(HKCU, StateKey, 'Library', Existing) then
-      if not RegQueryStringValue(HKCU, EnvironmentKey, LibraryVariable, Existing) then
-        Existing := ExpandConstant('{userdocs}\Manuals');
-  LibraryPage.Values[0] := Existing;
+  LibraryPage.Values[0] := Initial;
 
   NvidiaPage := CreateInputOptionPage(wpSelectTasks, 'NVIDIA''s licences',
     'The GPU libraries come from NVIDIA, under NVIDIA''s licences.',
