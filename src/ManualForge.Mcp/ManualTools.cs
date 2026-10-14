@@ -2,7 +2,6 @@ using System.ComponentModel;
 using System.Text;
 using ManualForge.Core.Auditing;
 using ManualForge.Core.Indexing;
-using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 
 namespace ManualForge.Mcp;
@@ -213,15 +212,6 @@ public sealed class ManualTools(ManualLibraryContext library, PageLinks links)
         }
     }
 
-    /// <summary>
-    /// The page's text, and the page as a resource link as well as the text's own link (#82).
-    ///
-    /// <para>
-    /// A markdown link in a reply is opened by Claude Desktop in the default browser. A resource
-    /// link is the client's to present, so it may open where the user is already looking. It is
-    /// only on this tool, because this is the page Claude reads before citing it.
-    /// </para>
-    /// </summary>
     [McpServerTool(Name = "read_manual_page")]
     [Description(
         "Read the full text of one page of a manual, optionally with the pages either side. " +
@@ -229,33 +219,11 @@ public sealed class ManualTools(ManualLibraryContext library, PageLinks links)
         "page, never enough to answer from. The text is what the PDF's own text layer holds, plus " +
         "anything the repair recovered from the rendered page, which is marked separately. On an " +
         "OCR'd scan it carries OCR errors - quote it as what the manual appears to say.")]
-    public CallToolResult ReadManualPageWithLink(
+    public string ReadManualPage(
         [Description("The manual, as the path returned by library_search.")] string path,
         [Description("Page number, 1-based, as returned by library_search.")] int page,
         [Description("Also include this many pages either side. Default 0, maximum 3.")] int context = 0)
     {
-        var content = new List<ContentBlock> { new TextContentBlock { Text = Read(path, page, context, out var link) } };
-
-        if (link is not null)
-        {
-            content.Add(new ResourceLinkBlock
-            {
-                Uri = link,
-                Name = $"{Path.GetFileName(path)}, p. {page}",
-                Description = "ManualForge's view of this page",
-                MimeType = "text/html",
-            });
-        }
-
-        return new CallToolResult { Content = content };
-    }
-
-    /// <summary>What <c>read_manual_page</c> says, as text.</summary>
-    public string ReadManualPage(string path, int page, int context = 0) => Read(path, page, context, out _);
-
-    private string Read(string path, int page, int context, out string? link)
-    {
-        link = null;
         var resolved = library.Resolve(path);
         if (resolved is null)
             return $"'{path}' is not a file inside the manual library.";
@@ -284,10 +252,7 @@ public sealed class ManualTools(ManualLibraryContext library, PageLinks links)
         var text = new StringBuilder();
         text.AppendLine($"{Path.GetFileName(resolved)}, page {page} of {pages.Count:N0}");
         if (links.Enabled)
-        {
-            link = links.ForPage(relative, page);
-            text.AppendLine($"link: {link}");
-        }
+            text.AppendLine($"link: {links.ForPage(relative, page)}");
         text.AppendLine();
 
         for (var n = first; n <= last; n++)
