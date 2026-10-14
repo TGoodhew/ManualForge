@@ -6,6 +6,7 @@
     <PackageReference Include="PDFtoImage" />
     <PackageReference Include="PdfPig" />
     <PackageReference Include="PDFsharp" />
+    <PackageReference Include="System.Security.Cryptography.Pkcs" />
     <PackageReference Include="Microsoft.Data.Sqlite" />
     <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" />
     <PackageReference Include="SQLitePCLRaw.core" />

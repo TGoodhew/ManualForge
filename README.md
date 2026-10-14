@@ -456,7 +456,11 @@ ManualForge's view of that page in your browser:
 - Previous and Next, which the arrow keys also do, and a link to the whole PDF;
 - any text ManualForge recovered from the page by OCR, marked as such, and the PDF's own text.
 
-Claude Desktop asks before opening a link. The links work only on your own PC, and only while an app
+Claude Desktop asks before opening a link, and opens it in your default browser, not in its side
+panel. To see a page next to the conversation, ask Claude, e.g. "show me that page here". Where
+Claude has a browser pane beside the conversation, it opens the page there itself.
+
+The links work only on your own PC, and only while an app
 with ManualForge connected is running, since ManualForge's MCP server serves the pages. It answers
 only on `127.0.0.1`, serves only the PDFs in your library, and a link carries only the manual's path
 within the library, never your user name. Port 47332 is the default; set `MANUALFORGE_PAGE_PORT` to

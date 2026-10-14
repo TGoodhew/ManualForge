@@ -301,7 +301,18 @@ public sealed class ManualTools(ManualLibraryContext library, PageLinks links)
     private const string CitationAdvice =
         "Cite each page as a markdown link to the link given for it, e.g. [432A-OSM.pdf, p. 23](link): " +
         "it opens ManualForge's view of that page on the user's PC, with the text recovered from it " +
-        "marked, so they can check what you say against the page. Use the links exactly as given.";
+        "marked, so they can check what you say against the page. Use the links exactly as given. " +
+        SidePanelAdvice;
+
+    /// <summary>
+    /// A reply's links open in the default browser (#82). A client with a browser pane beside the
+    /// conversation can show the page there instead, but only if Claude opens it, so it is asked to
+    /// when the user wants to see the page. Worded without naming any client's tools.
+    /// </summary>
+    internal const string SidePanelAdvice =
+        "If you can open web pages in a browser pane beside the conversation, and the user asks to " +
+        "see a cited page (e.g. 'show me that page' or 'open it here'), open its link in that pane " +
+        "yourself. Keep the markdown link in the citation either way, since not every app has one.";
 
     [McpServerTool(Name = "library_status")]
     [Description(

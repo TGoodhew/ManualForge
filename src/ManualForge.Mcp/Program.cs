@@ -54,7 +54,7 @@ builder.Services
             "When a result gives a link for a page, make each citation of that page a markdown link " +
             "to it, e.g. [432A-OSM.pdf, p. 23](link). The link opens ManualForge's view of the page " +
             "on the user's own PC, so they can check what you cite against the page itself. Use the " +
-            "link exactly as given; never make one up.";
+            "link exactly as given; never make one up. " + ManualTools.SidePanelAdvice;
     })
     .WithStdioServerTransport()
     .WithTools<ManualTools>();

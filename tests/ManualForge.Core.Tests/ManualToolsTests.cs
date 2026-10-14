@@ -228,6 +228,16 @@ public sealed class ManualToolsTests : IDisposable
     }
 
     [Fact]
+    public void ACitedPageCanBeOpenedInABrowserPaneWhenAsked()
+    {
+        GivenAManual();
+
+        var search = Tools(links: true).LibrarySearch("LFR1");
+        Assert.Contains("browser pane beside the conversation", search, StringComparison.Ordinal);
+        Assert.Contains("Keep the markdown link in the citation either way", search, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void WithoutPagesServedThereAreNoLinksToGoNowhere()
     {
         var pdf = GivenAManual();
