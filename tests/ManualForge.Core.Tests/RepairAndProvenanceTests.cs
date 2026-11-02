@@ -76,6 +76,45 @@ public sealed class RepairAndProvenanceTests : IDisposable
     }
 
     [Fact]
+    public async Task TheDoctorTabListsOnlyThePagesStillToRecover()
+    {
+        // 1 November 2026: the list under each document named every page the audit had flagged, long
+        // after all of them had been recovered, so a library with nothing to do looked full of work.
+        var library = At("library");
+        var database = DoctorStore.DefaultPathFor(library);
+        Directory.CreateDirectory(Path.GetDirectoryName(database)!);
+        var partly = Path.Combine(library, "partly.pdf");
+        var done = Path.Combine(library, "done.pdf");
+
+        static PageAudit Flagged(int page) =>
+            new(page, 40, 30, 200, 2, 0, 0, false, false,
+                new InkAnalysis(0.03, 0.02, 120, 9), false, PageVerdict.UnderExtracted,
+                ["most of this page is drawn"]) { EstimatedRecoverableCharacters = 102 };
+
+        using (var store = new DoctorStore(database))
+        {
+            store.Save(new DocumentAudit(partly, "Partly", "hash-1", 6, [Flagged(2), Flagged(3), Flagged(5)])
+            { Verdict = DocumentVerdict.UnderExtracted });
+            store.Save(new DocumentAudit(done, "Done", "hash-2", 4, [Flagged(2)])
+            { Verdict = DocumentVerdict.UnderExtracted });
+
+            store.SaveRepair(Repair(partly, 3, "hash-1", "CHANnel INPut"));
+            store.SaveRepair(Repair(done, 2, "hash-2", "LFR1"));
+
+            // Recovered from an older copy of the file, so it no longer counts.
+            store.SaveRepair(Repair(partly, 5, "hash-0", "stale"));
+        }
+
+        var standing = await new ManualForge.Shell.DoctorService().ReadAsync(library, CancellationToken.None);
+
+        var findings = standing.Findings.ToDictionary(f => f.Title);
+        Assert.Equal("2,5", findings["Partly"].OutstandingPageRanges);
+        Assert.Equal(2, findings["Partly"].OutstandingPages);
+        Assert.Equal("", findings["Done"].OutstandingPageRanges);
+        Assert.Equal(0, findings["Done"].OutstandingPages);
+    }
+
+    [Fact]
     public void AnUnchangedFileCanBeRecognisedAndSkipped()
     {
         using var store = new DoctorStore(At("doctor.db"));

@@ -49,7 +49,8 @@ public sealed partial class DoctorRow(DoctorFinding finding) : ObservableObject
 
     public int RecoverableCharacters => Finding.RecoverableCharacters;
 
-    public string PageRanges => Finding.FlaggedPageRanges;
+    /// <summary>The pages still waiting for their text to be recovered, such as "14,16,21-26".</summary>
+    public string PageRanges => Finding.OutstandingPageRanges;
 
     public string Kind => Finding.Verdict switch
     {
@@ -122,6 +123,7 @@ public sealed partial class DoctorViewModel(IDoctorService service, IUiDispatche
     [NotifyCanExecuteChangedFor(nameof(CancelCommand))]
     [NotifyPropertyChangedFor(nameof(IsBusy))]
     [NotifyPropertyChangedFor(nameof(IsIdle))]
+    [NotifyPropertyChangedFor(nameof(CanSelectAll))]
     [NotifyPropertyChangedFor(nameof(PageProgress))]
     [NotifyPropertyChangedFor(nameof(WorkProgress))]
     [NotifyPropertyChangedFor(nameof(IsWorkIndeterminate))]
@@ -134,6 +136,7 @@ public sealed partial class DoctorViewModel(IDoctorService service, IUiDispatche
     private string? _headline;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ExplainHint))]
     private bool _hasAudit;
 
     /// <summary>
@@ -188,7 +191,7 @@ public sealed partial class DoctorViewModel(IDoctorService service, IUiDispatche
     [NotifyPropertyChangedFor(nameof(ExplainHint))]
     private DoctorRow? _selectedDocument;
 
-    /// <summary>A newly chosen document starts at the first page the audit flagged in it.</summary>
+    /// <summary>A newly chosen document starts at the first of its pages still to recover.</summary>
     partial void OnSelectedDocumentChanged(DoctorRow? value)
     {
         Diagnostic = null;
@@ -205,12 +208,14 @@ public sealed partial class DoctorViewModel(IDoctorService service, IUiDispatche
     }
 
     /// <summary>What the empty picture panel says, so it is clear what Show needs and what it draws.</summary>
-    public string ExplainHint => SelectedDocument is null
-        ? "Click or tick a document in the list to look at the pages the audit flagged in it. Show draws the page: "
-          + "grey is text already in the document's text layer, black is everything else drawn on it, and red boxes "
-          + "mark lettering the text layer is missing."
-        : $"Show draws page {ExplainPage:N0} of {SelectedDocument.Title}. Its flagged pages are listed under "
-          + "its name.";
+    public string ExplainHint => SelectedDocument is not null
+        ? $"Show draws page {ExplainPage:N0} of {SelectedDocument.Title}. The pages still to recover are listed "
+          + "under its name."
+        : HasAudit && Documents.Count == 0
+            ? "No document has pages left to recover, so there is nothing here to look at."
+            : "Click or tick a document in the list to look at the pages still to recover in it. Show draws the page: "
+              + "grey is text already in the document's text layer, black is everything else drawn on it, and red boxes "
+              + "mark lettering the text layer is missing.";
 
     /// <summary>
     /// The page whose diagnostic picture to show. A number rather than a picker, because what
@@ -535,20 +540,19 @@ public sealed partial class DoctorViewModel(IDoctorService service, IUiDispatche
     }
 
     /// <summary>
-    /// Ticks every row that still has work outstanding.
-    ///
-    /// <para>
-    /// Parameterless rather than taking a flag, because a XAML CommandParameter arrives as a string
-    /// and binding it to a bool argument fails at run time rather than at build time — which is
-    /// exactly the class of defect the no-logic-in-the-view rule exists to avoid.
-    /// </para>
+    /// The tick box at the head of the list's tick boxes: ticked when every document is, clear when
+    /// none is, and in between otherwise. Ticking it ticks every document and clearing it unticks
+    /// them all. It replaced the All and None buttons, which sat off to one side where they were not
+    /// seen as the way to tick everything.
     /// </summary>
-    [RelayCommand]
-    public void SelectEverything() => SelectAll(true);
+    public bool? AllSelected
+    {
+        get => SelectedCount == 0 ? false : SelectedCount == Documents.Count ? true : null;
+        set => SelectAll(value == true);
+    }
 
-    /// <summary>Unticks every row, for picking a handful out of several hundred.</summary>
-    [RelayCommand]
-    public void SelectNothing() => SelectAll(false);
+    /// <summary>Whether the head tick box can be used: there is something to tick and nothing running.</summary>
+    public bool CanSelectAll => IsIdle && Documents.Count > 0;
 
     /// <summary>Ticks or unticks every row currently shown.</summary>
     public void SelectAll(bool selected)
@@ -571,7 +575,7 @@ public sealed partial class DoctorViewModel(IDoctorService service, IUiDispatche
         RecountSelected();
     }
 
-    /// <summary>Set while All or None ticks rows in bulk, which should not move what Show draws.</summary>
+    /// <summary>Set while the head tick box ticks rows in bulk, which should not move what Show draws.</summary>
     private bool _ticking;
 
     /// <summary>Re-reads the store without narrating it, after something has changed underneath.</summary>
@@ -595,8 +599,11 @@ public sealed partial class DoctorViewModel(IDoctorService service, IUiDispatche
     {
         var previous = Documents.ToDictionary(d => d.Path, StringComparer.OrdinalIgnoreCase);
 
+        // Only what is still to do. A document whose flagged pages have all been recovered has
+        // nothing left to tick, and listing several hundred of them looked like several hundred jobs
+        // waiting. The headline still counts them.
         Documents.Clear();
-        foreach (var finding in standing.Findings)
+        foreach (var finding in standing.Findings.Where(f => f.OutstandingPages > 0))
         {
             if (previous.TryGetValue(finding.Path, out var row))
             {
@@ -621,7 +628,11 @@ public sealed partial class DoctorViewModel(IDoctorService service, IUiDispatche
             Documents.Add(added);
         }
 
+        if (SelectedDocument is not null && !Documents.Contains(SelectedDocument))
+            SelectedDocument = null;
+
         RecountSelected();
+        OnPropertyChanged(nameof(ExplainHint));
 
         var summary = standing.Summary;
         Headline = summary.DocumentsAudited == 0
@@ -643,5 +654,13 @@ public sealed partial class DoctorViewModel(IDoctorService service, IUiDispatche
                 : "Tick the documents to recover text from, then press Recover text.";
     }
 
-    private void RecountSelected() => SelectedCount = Documents.Count(d => d.Selected);
+    private void RecountSelected()
+    {
+        SelectedCount = Documents.Count(d => d.Selected);
+
+        // Raised every time, not only when the count changes: one ticked row of one is all, and the
+        // same row of two is not.
+        OnPropertyChanged(nameof(AllSelected));
+        OnPropertyChanged(nameof(CanSelectAll));
+    }
 }

@@ -392,6 +392,29 @@ public sealed class DoctorStore : IDisposable
     }
 
     /// <summary>
+    /// The pages of a document with recovered text, as <see cref="Repairs"/> would key them, without
+    /// reading the text itself: across a library that is tens of thousands of pages of OCR.
+    /// </summary>
+    public IReadOnlySet<int> RepairedPageNumbers(string path, string contentHash)
+    {
+        using var command = _connection.CreateCommand();
+        command.CommandText = """
+            SELECT page_number
+            FROM page_repairs
+            WHERE path = $p AND content_hash = $h
+            """;
+        command.Parameters.AddWithValue("$p", Path.GetFullPath(path));
+        command.Parameters.AddWithValue("$h", contentHash);
+
+        var pages = new HashSet<int>();
+        using var reader = command.ExecuteReader();
+        while (reader.Read())
+            pages.Add(reader.GetInt32(0));
+
+        return pages;
+    }
+
+    /// <summary>
     /// A one-line reckoning of where the audit stands, which is what a search result needs before
     /// it can honestly claim an absence is real.
     /// </summary>
