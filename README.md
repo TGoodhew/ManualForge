@@ -180,8 +180,11 @@ It then:
 - installs the .NET 10 Desktop Runtime, the Windows App Runtime 1.8 and the Visual C++
   Redistributable, but only those the PC doesn't already have, or has in a version too old;
 - downloads the GPU libraries you chose, and the OCR models (about 25 MB);
-- adds **ManualForge** to the Start menu, and **ManualForge library** to Explorer's **Send to** menu
-  (see [Add manuals](#add-manuals)).
+- adds **ManualForge** to the Start menu, **Add to ManualForge library** to Explorer's right-click
+  menu for PDFs, and **ManualForge library** to its **Send to** menu (see [Add manuals](#add-manuals)).
+  The right-click entry is a small package, signed by The Schnauzer Group LLC, that Windows needs
+  before it lists an app on Windows 11's first menu; it is registered for you alone, and needs no
+  administrator.
 
 Everything it downloads comes from its publisher and is checked against a SHA-256 before it is used.
 The GPU libraries go into `%LOCALAPPDATA%\ManualForge\gpu`. They are not put on `PATH`, and the
@@ -378,8 +381,9 @@ manualforge index  D:\Manuals     # build or update the search index
 
 ### Add manuals
 
-To add manuals you have downloaded, select them in Explorer, right-click, and choose **Send to ›
-ManualForge library**. On Windows 11, Send to is under **Show more options**. From a terminal:
+To add manuals you have downloaded, select them in Explorer, right-click, and choose **Add to
+ManualForge library**. On Windows 10, and under **Show more options** on Windows 11, **Send to ›
+ManualForge library** does the same. From a terminal:
 
 ```powershell
 manualforge add "C:\Users\me\Downloads\HP 8563E Service.pdf" "C:\Users\me\Downloads\11721A.pdf"
@@ -396,7 +400,7 @@ work is done on just those files as the sequence above: `run`, `doctor`, `repair
   copy. Nothing in the library is ever overwritten.
 - **Which library:** the one the installer recorded (`MANUALFORGE_LIBRARY`). `--library <folder>`
   chooses another. `--copy-only` copies and stops.
-- **In the app:** Send to opens ManualForge if it isn't running, and shows the **Added** tab. Each
+- **In the app:** either entry opens ManualForge if it isn't running, and shows the **Added** tab. Each
   manual is copied in at once, and the rest waits until anything already running (a run, an audit, a
   repair or an index) finishes, so two jobs never share the GPU. Its progress shows where a run's
   always does, and on the Doctor and Search tabs. If a step is cancelled, the manuals are already in
@@ -559,8 +563,8 @@ The uninstaller:
 - stops ManualForge if it is running, and says which app started each MCP server;
 - takes ManualForge out of every AI app it was added to, and puts back any entry it replaced. An app's
   settings that nothing else has changed since go back exactly as they were;
-- removes the GPU libraries ManualForge downloaded, the program, the Start menu entry and the Send to
-  entry. It also
+- removes the GPU libraries ManualForge downloaded, the program, the Start menu entry, and the
+  right-click and Send to entries. It also
   removes the `PATH` entry and the `MANUALFORGE_LIBRARY` variable, if it was the one that set them;
 - asks whether to remove the models, logs and what ManualForge learned about your GPU
   (`%LOCALAPPDATA%\ManualForge`);

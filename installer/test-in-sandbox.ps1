@@ -51,6 +51,7 @@ function Get-Leftovers {
     if (((Get-ItemProperty 'HKCU:\Environment' -ErrorAction SilentlyContinue).Path) -like "*$app*") { $found += 'PATH entry' }
     if (Test-Path $shortcut) { $found += "shortcut $shortcut" }
     if (Test-Path $sendTo) { $found += "Send To entry $sendTo" }
+    if (Get-AppxPackage -Name $menuPackage) { $found += "Explorer menu package $menuPackage" }
     if (Test-Path $uninstallKey) { $found += 'Apps & features entry' }
     return $found
 }
@@ -185,6 +186,7 @@ function Test-LibraryPage([string] $label, [string] $expected, [bool] $saysGpib,
 
 $shortcut = Join-Path ([Environment]::GetFolderPath('Programs')) 'ManualForge.lnk'
 $sendTo = Join-Path ([Environment]::GetFolderPath('SendTo')) 'ManualForge library.lnk'
+$menuPackage = 'SchnauzerGroup.ManualForge'
 $uninstallKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{A6AE7B23-BB07-4BEE-9AD0-0B669785EDE5}_is1'
 
 try {
@@ -262,6 +264,13 @@ try {
         Check 'Setup, the uninstaller and the programs are signed by The Schnauzer Group LLC and timestamped' (-not $bad) $(if ($bad) { ($bad | Split-Path -Leaf) -join ', ' } else { "$($signed.Count) files" })
     }
     else { Write-Host "Setup is not signed ($($setupSignature.Status)); signatures not checked." }
+
+    # The first right-click menu's entry (#89): a signed build registers its package; an unsigned one has none.
+    if ($setupSignature.Status -eq 'Valid') {
+        $menu = Get-AppxPackage -Name $menuPackage
+        Check 'Explorer menu package registered (#89)' ([bool] $menu) $(if ($menu) { "$($menu.Version), $($menu.SignatureKind)" } else { 'not registered; see install.log' })
+        Check '... with the handler beside the program' (Test-Path (Join-Path $app 'ManualForge.ExplorerMenu.dll'))
+    }
     Check 'Send To entry (#89)' (Test-Path $sendTo)
     if (Test-Path $sendTo) {
         $link = (New-Object -ComObject WScript.Shell).CreateShortcut($sendTo)
@@ -332,6 +341,19 @@ try {
     }
     Get-WinEvent -FilterHashtable @{ LogName = 'Application'; Level = 2; StartTime = $testStarted } -ErrorAction SilentlyContinue |
         Select-Object -First 10 | Format-List TimeCreated, ProviderName, Message | Out-String | Write-Host
+
+    if ($setupSignature.Status -eq 'Valid') {
+        # An upgrade with the package registered: Setup removes it before replacing the files, and registers
+        # the new one after (#89). Installing the same build again goes the same way.
+        Write-Step 'Installing again over itself'
+        $again = Start-Process $setup.FullName -Wait -PassThru -ArgumentList @(
+            '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/TASKS=mcp',
+            "/LIBRARY=`"$library`"", "/LOG=`"$results\install-again.log`"")
+        Check 'installing again exits 0' ($again.ExitCode -eq 0) "code $($again.ExitCode)"
+        Check '... and leaves the Explorer menu package registered' ([bool] (Get-AppxPackage -Name $menuPackage))
+        $menuLog = Select-String -Path "$results\install-again.log" -Pattern 'Explorer menu package' | ForEach-Object { $_.Line -replace '^.*?Explorer', 'Explorer' }
+        Write-Host ($menuLog -join "`n")
+    }
 
     Write-Step 'The library page on an upgrade'
     Set-GpibMcp $null

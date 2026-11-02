@@ -16,6 +16,12 @@
        download that doesn't match.
     3. Compiles installer\ManualForge.iss with Inno Setup 6 into artifacts\installer\package.
 
+    Step 1 also builds ManualForge.ExplorerMenu.dll, the handler for "Add to ManualForge library" on
+    Windows 11's first right-click menu (#89), with Visual Studio's C++ tools, and, in a signed build,
+    packs installer\explorer-menu\AppxManifest.xml into the sparse package that declares it. Windows
+    registers only a package whose signature it trusts, so an unsigned build has no package, and Setup
+    offers the Send To entry alone.
+
     With -SignScript, ManualForge's own programs are signed after publishing (step 1), and Inno Setup
     signs the Setup program and the uninstaller it builds (step 3), all with that script. It is given
     the files to sign, and must sign and timestamp them and fail if it cannot. The signing account and
@@ -68,6 +74,15 @@ foreach ($required in 'manualforge.exe', 'ManualForge.Mcp.exe', 'ManualForge.App
     if (-not (Test-Path (Join-Path $stage $required))) { throw "The published folder has no $required." }
 }
 
+# The Explorer menu's handler (#89). Native, so Visual Studio's MSBuild rather than dotnet.
+$msbuild = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * `
+    -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -find 'MSBuild\**\Bin\amd64\MSBuild.exe' | Select-Object -First 1
+if (-not $msbuild) { throw 'Visual Studio with the C++ x64 tools is needed to build ManualForge.ExplorerMenu.dll.' }
+$menuProject = Join-Path $repo 'src\ManualForge.ExplorerMenu'
+& $msbuild (Join-Path $menuProject 'ManualForge.ExplorerMenu.vcxproj') -p:Configuration=Release -p:Platform=x64 -nologo -v:q
+if ($LASTEXITCODE -ne 0) { throw 'Building ManualForge.ExplorerMenu failed.' }
+Copy-Item (Join-Path $menuProject 'bin\Release\ManualForge.ExplorerMenu.dll') $stage
+
 # ManualForge's own programs only: everyone else's DLLs are theirs to sign, and most already are.
 if ($SignScript) {
     if (-not (Test-Path $SignScript)) { throw "No signing script at $SignScript." }
@@ -85,6 +100,45 @@ else {
 
 $version = (& (Join-Path $stage 'manualforge.exe') version | Select-Object -First 1) -replace '^manualforge\s+', ''
 if ($version -match '\.dirty$') { Write-Warning "Built from a working tree with uncommitted changes: $version" }
+# The sparse package that puts the handler on the first menu (#89): signed, or not at all.
+if ($SignScript) {
+    Write-Step 'The Explorer menu''s package'
+    $makeappx = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\10.*\x64\makeappx.exe" |
+        Sort-Object { [version] $_.Directory.Parent.Name } | Select-Object -Last 1
+    if (-not $makeappx) { throw 'makeappx.exe was not found; install the Windows SDK.' }
+
+    $layout = Join-Path $out 'explorer-menu'
+    if (Test-Path $layout) { Remove-Item -LiteralPath $layout -Recurse -Force }
+    New-Item -ItemType Directory -Force (Join-Path $layout 'Assets') | Out-Null
+    $packageVersion = ($version -replace '[+-].*$', '') + '.0'
+    (Get-Content (Join-Path $repo 'installer\explorer-menu\AppxManifest.xml') -Raw).Replace('@VERSION@', $packageVersion) |
+        Set-Content (Join-Path $layout 'AppxManifest.xml') -Encoding utf8
+
+    # The logos the manifest names, from the app's icon, in the package and beside the program both.
+    Add-Type -AssemblyName System.Drawing
+    foreach ($size in 44, 50, 150) {
+        $icon = New-Object System.Drawing.Icon (Join-Path $stage 'Assets\AppIcon.ico'), 256, 256
+        $bitmap = New-Object System.Drawing.Bitmap $size, $size
+        $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+        $graphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+        $graphics.DrawImage($icon.ToBitmap(), 0, 0, $size, $size)
+        $graphics.Dispose(); $icon.Dispose()
+        $bitmap.Save((Join-Path $layout "Assets\PackageLogo$size.png"), [System.Drawing.Imaging.ImageFormat]::Png)
+        $bitmap.Dispose()
+    }
+    Copy-Item (Join-Path $layout 'Assets\PackageLogo*.png') (Join-Path $stage 'Assets')
+
+    $msix = Join-Path $stage 'ManualForge.ExplorerMenu.msix'
+    & $makeappx.FullName pack /d $layout /p $msix /nv /o | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'makeappx could not pack the Explorer menu''s package.' }
+    & $SignScript $msix
+    if ((Get-AuthenticodeSignature $msix).Status -ne 'Valid') { throw "$msix is not validly signed." }
+    Write-Host "   ManualForge.ExplorerMenu.msix $packageVersion, signed"
+}
+else {
+    Write-Warning 'No Explorer menu package: Windows registers only a signed one, so this build has Send To alone.'
+}
+
 $files = Get-ChildItem $stage -Recurse -File
 Write-Host ("   {0}: {1} files, {2:N0} MB" -f $version, $files.Count, (($files | Measure-Object Length -Sum).Sum / 1MB))
 

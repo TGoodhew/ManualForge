@@ -94,7 +94,8 @@ Source: "{#StageDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs c
 [Icons]
 Name: "{userprograms}\{#AppName}"; Filename: "{app}\{#AppExe}"; WorkingDir: "{app}"; AppUserModelID: "TGoodhew.ManualForge"; Comment: "Search your manuals"
 ; Send To > ManualForge library (#89). Explorer passes the whole selection after --add, in one launch; the
-; window copies the files into the library and does the rest. On Windows 11 it is under Show more options.
+; window copies the files into the library and does the rest. On Windows 11 it is under Show more options;
+; the first menu's "Add to ManualForge library" is the Explorer menu's package, registered in [Code].
 Name: "{usersendto}\{#AppName} library"; Filename: "{app}\{#AppExe}"; Parameters: "--add"; WorkingDir: "{app}"; Comment: "Add these manuals to the ManualForge library"
 
 [Registry]
@@ -528,6 +529,55 @@ begin
   end;
 end;
 
+{ ---------------------------------------------------------------- the Explorer menu (#89) }
+
+{ "Add to ManualForge library" on Windows 11's first right-click menu: a sparse package that gives {app} an
+  identity and declares ManualForge.ExplorerMenu.dll as the handler. Registered per user after the files are in
+  place; removed before an upgrade replaces them and when uninstalling. Removing it also ends the process
+  Explorer loaded the handler into, which would otherwise hold the DLL open. A build without the package
+  (unsigned) has Send To alone. Needs Windows 10 2004 or later; before that registering fails, which is logged. }
+const
+  ExplorerMenuPackage = 'SchnauzerGroup.ManualForge';
+
+function PowerShell(const Command: String): Integer;
+begin
+  if not Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+      '-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$ErrorActionPreference = ''Stop''; ' + Command + '"',
+      '', SW_HIDE, ewWaitUntilTerminated, Result) then
+    Result := -1;
+end;
+
+{ A PowerShell string literal. }
+function Literal(const Text: String): String;
+begin
+  Result := Text;
+  StringChangeEx(Result, '''', '''''', True);
+  Result := '''' + Result + '''';
+end;
+
+procedure UnregisterExplorerMenu;
+var
+  Code: Integer;
+begin
+  Code := PowerShell('Get-AppxPackage -Name ' + ExplorerMenuPackage + ' | Remove-AppxPackage');
+  Log(Format('Explorer menu package %s removed, if it was there (exit %d).', [ExplorerMenuPackage, Code]));
+end;
+
+procedure RegisterExplorerMenu;
+var
+  Package: String;
+  Code: Integer;
+begin
+  Package := ExpandConstant('{app}\ManualForge.ExplorerMenu.msix');
+  if not FileExists(Package) then
+  begin
+    Log('This build has no Explorer menu package, so only Send To adds to the library.');
+    Exit;
+  end;
+  Code := PowerShell('Add-AppxPackage -Path ' + Literal(Package) + ' -ExternalLocation ' + Literal(ExpandConstant('{app}')));
+  Log(Format('Explorer menu package registered (exit %d).', [Code]));
+end;
+
 { Says what is running and whose it is, then stops it. False if the user would rather it kept running. }
 function StopRunning(Silent: Boolean; const Why: String): Boolean;
 var
@@ -561,7 +611,9 @@ begin
   if not StopRunning(WizardSilent,
       'Setup stops these to replace the program. The apps that started an MCP server start the new one the ' +
       'next time they need it; if one shows an error for ManualForge, restart that app.') then
-    Result := 'ManualForge is still running, so nothing was changed. Close it and run Setup again.';
+    Result := 'ManualForge is still running, so nothing was changed. Close it and run Setup again.'
+  else
+    UnregisterExplorerMenu;
 end;
 
 { Which build is installed and what it runs on: in the log always, and on the last page when there is one. }
@@ -646,6 +698,8 @@ begin
 
     if WizardIsTaskSelected('path') then
       AddToPath(ExpandConstant('{app}'));
+
+    RegisterExplorerMenu;
   end;
 
   { A silent install has no last page, so the log is the only place this is said. }
@@ -675,6 +729,8 @@ var
 begin
   if CurUninstallStep = usUninstall then
   begin
+    UnregisterExplorerMenu;
+
     { Read before the [Registry] key goes. }
     if not RegQueryStringValue(HKCU, StateKey, 'Library', UninstallLibrary) then UninstallLibrary := '';
     if Flag('SetLibraryVariable') then
