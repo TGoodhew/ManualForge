@@ -531,8 +531,8 @@ end;
 
 { ---------------------------------------------------------------- the Explorer menu (#89) }
 
-{ "Add to ManualForge library" on Windows 11's first right-click menu: a sparse package that gives {app} an
-  identity and declares ManualForge.ExplorerMenu.dll as the handler. Registered per user after the files are in
+{ "Add to ManualForge library" on Windows 11's first right-click menu: a sparse package that gives the install folder
+  an identity and declares ManualForge.ExplorerMenu.dll as the handler. Registered per user after the files are in
   place; removed before an upgrade replaces them and when uninstalling. Removing it also ends the process
   Explorer loaded the handler into, which would otherwise hold the DLL open. A build without the package
   (unsigned) has Send To alone. Needs Windows 10 2004 or later; before that registering fails, which is logged. }
