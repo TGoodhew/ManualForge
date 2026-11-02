@@ -304,14 +304,6 @@
                             Command="{x:Bind Doctor.CancelCommand}"
                             local:Help.Text="Stop the audit or the recovery after the page in flight. What is already done is kept." />
 
-                        <!-- Over a whole library the list runs to several hundred rows, and the
-                             difference between "repair what you suggested" and "repair these three"
-                             should not be three hundred clicks. -->
-                        <StackPanel Grid.Column="4" Orientation="Horizontal" Spacing="4" Margin="16,0,0,0">
-                            <Button Content="All" Command="{x:Bind Doctor.SelectEverythingCommand}" local:Help.Text="Tick every document in the list. Only documents with pages left to recover are listed." />
-                            <Button Content="None" Command="{x:Bind Doctor.SelectNothingCommand}" local:Help.Text="Untick every document." />
-                        </StackPanel>
-
                         <CheckBox
                             Grid.Column="5"
                             Content="Include scanned pages"
@@ -364,11 +356,21 @@
                                     <ColumnDefinition Width="50" />
                                     <ColumnDefinition Width="100" />
                                 </Grid.ColumnDefinitions>
-                                <TextBlock Grid.Column="1" Text="Document" Style="{StaticResource CaptionTextBlockStyle}" />
-                                <TextBlock Grid.Column="2" Text="Why" Style="{StaticResource CaptionTextBlockStyle}" local:Help.Text="Why the document was flagged. Drawn, never text: much of it is drawn rather than typeset, and extracts as nothing. Scanned, OCR gaps: a scan whose earlier OCR missed much of its lettering, usually schematics, tables and figure labels. Figure pages: a few figures carry lettering the text does not hold." />
-                                <TextBlock Grid.Column="3" Text="Flagged" HorizontalAlignment="Right" Style="{StaticResource CaptionTextBlockStyle}" local:Help.Text="Pages whose text misses lettering drawn on them. Those still to recover are listed under the document's name." />
-                                <TextBlock Grid.Column="4" Text="Drawn" HorizontalAlignment="Right" Style="{StaticResource CaptionTextBlockStyle}" local:Help.Text="Of the flagged pages, those drawn as graphics rather than scanned." />
-                                <TextBlock Grid.Column="5" Text="Recovered" HorizontalAlignment="Right" Style="{StaticResource CaptionTextBlockStyle}" local:Help.Text="Flagged pages whose text has been recovered, of all the flagged pages." />
+                                <!-- Over a whole library the list runs to several hundred rows, and the
+                                     difference between "repair what you suggested" and "repair these
+                                     three" should not be three hundred clicks. -->
+                                <CheckBox
+                                    Grid.Column="0"
+                                    MinWidth="0"
+                                    AutomationProperties.Name="Tick every document"
+                                    local:Help.Text="Tick every document in the list, or untick them all. Only documents with pages left to recover are listed."
+                                    IsChecked="{x:Bind Doctor.AllSelected, Mode=TwoWay}"
+                                    IsEnabled="{x:Bind Doctor.CanSelectAll, Mode=OneWay}" />
+                                <TextBlock Grid.Column="1" Text="Document" VerticalAlignment="Center" Style="{StaticResource CaptionTextBlockStyle}" />
+                                <TextBlock Grid.Column="2" Text="Why" VerticalAlignment="Center" Style="{StaticResource CaptionTextBlockStyle}" local:Help.Text="Why the document was flagged. Drawn, never text: much of it is drawn rather than typeset, and extracts as nothing. Scanned, OCR gaps: a scan whose earlier OCR missed much of its lettering, usually schematics, tables and figure labels. Figure pages: a few figures carry lettering the text does not hold." />
+                                <TextBlock Grid.Column="3" Text="Flagged" HorizontalAlignment="Right" VerticalAlignment="Center" Style="{StaticResource CaptionTextBlockStyle}" local:Help.Text="Pages whose text misses lettering drawn on them. Those still to recover are listed under the document's name." />
+                                <TextBlock Grid.Column="4" Text="Drawn" HorizontalAlignment="Right" VerticalAlignment="Center" Style="{StaticResource CaptionTextBlockStyle}" local:Help.Text="Of the flagged pages, those drawn as graphics rather than scanned." />
+                                <TextBlock Grid.Column="5" Text="Recovered" HorizontalAlignment="Right" VerticalAlignment="Center" Style="{StaticResource CaptionTextBlockStyle}" local:Help.Text="Flagged pages whose text has been recovered, of all the flagged pages." />
                             </Grid>
 
                             <ListView

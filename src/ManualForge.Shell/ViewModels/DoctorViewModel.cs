@@ -123,6 +123,7 @@ public sealed partial class DoctorViewModel(IDoctorService service, IUiDispatche
     [NotifyCanExecuteChangedFor(nameof(CancelCommand))]
     [NotifyPropertyChangedFor(nameof(IsBusy))]
     [NotifyPropertyChangedFor(nameof(IsIdle))]
+    [NotifyPropertyChangedFor(nameof(CanSelectAll))]
     [NotifyPropertyChangedFor(nameof(PageProgress))]
     [NotifyPropertyChangedFor(nameof(WorkProgress))]
     [NotifyPropertyChangedFor(nameof(IsWorkIndeterminate))]
@@ -539,20 +540,19 @@ public sealed partial class DoctorViewModel(IDoctorService service, IUiDispatche
     }
 
     /// <summary>
-    /// Ticks every row that still has work outstanding.
-    ///
-    /// <para>
-    /// Parameterless rather than taking a flag, because a XAML CommandParameter arrives as a string
-    /// and binding it to a bool argument fails at run time rather than at build time — which is
-    /// exactly the class of defect the no-logic-in-the-view rule exists to avoid.
-    /// </para>
+    /// The tick box at the head of the list's tick boxes: ticked when every document is, clear when
+    /// none is, and in between otherwise. Ticking it ticks every document and clearing it unticks
+    /// them all. It replaced the All and None buttons, which sat off to one side where they were not
+    /// seen as the way to tick everything.
     /// </summary>
-    [RelayCommand]
-    public void SelectEverything() => SelectAll(true);
+    public bool? AllSelected
+    {
+        get => SelectedCount == 0 ? false : SelectedCount == Documents.Count ? true : null;
+        set => SelectAll(value == true);
+    }
 
-    /// <summary>Unticks every row, for picking a handful out of several hundred.</summary>
-    [RelayCommand]
-    public void SelectNothing() => SelectAll(false);
+    /// <summary>Whether the head tick box can be used: there is something to tick and nothing running.</summary>
+    public bool CanSelectAll => IsIdle && Documents.Count > 0;
 
     /// <summary>Ticks or unticks every row currently shown.</summary>
     public void SelectAll(bool selected)
@@ -575,7 +575,7 @@ public sealed partial class DoctorViewModel(IDoctorService service, IUiDispatche
         RecountSelected();
     }
 
-    /// <summary>Set while All or None ticks rows in bulk, which should not move what Show draws.</summary>
+    /// <summary>Set while the head tick box ticks rows in bulk, which should not move what Show draws.</summary>
     private bool _ticking;
 
     /// <summary>Re-reads the store without narrating it, after something has changed underneath.</summary>
@@ -654,5 +654,13 @@ public sealed partial class DoctorViewModel(IDoctorService service, IUiDispatche
                 : "Tick the documents to recover text from, then press Recover text.";
     }
 
-    private void RecountSelected() => SelectedCount = Documents.Count(d => d.Selected);
+    private void RecountSelected()
+    {
+        SelectedCount = Documents.Count(d => d.Selected);
+
+        // Raised every time, not only when the count changes: one ticked row of one is all, and the
+        // same row of two is not.
+        OnPropertyChanged(nameof(AllSelected));
+        OnPropertyChanged(nameof(CanSelectAll));
+    }
 }

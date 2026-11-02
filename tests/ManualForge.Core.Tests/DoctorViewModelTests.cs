@@ -139,8 +139,8 @@ public sealed class DoctorViewModelTests
         });
         await doctor.RefreshAsync();
 
-        doctor.SelectEverything();
-        doctor.SelectNothing();
+        doctor.AllSelected = true;
+        doctor.AllSelected = false;
         Assert.Null(doctor.SelectedDocument);
 
         doctor.Documents[1].Selected = true;
@@ -429,8 +429,10 @@ public sealed class DoctorViewModelTests
     }
 
     [Fact]
-    public async Task SelectAllTicksEveryDocumentStillToDo()
+    public async Task TheHeadTickBoxTicksEveryDocumentStillToDo()
     {
+        // 1 November 2026: the All button sat off to one side and was not seen as the way to tick
+        // everything; the tick box at the head of the column is where people look for it.
         var service = new FakeDoctor
         {
             Standing = Standing(
@@ -440,17 +442,46 @@ public sealed class DoctorViewModelTests
         };
 
         var doctor = New(service);
+        var raised = new List<string?>();
+        doctor.PropertyChanged += (_, e) => raised.Add(e.PropertyName);
         await doctor.RefreshAsync();
-        Assert.False(doctor.Documents[0].Selected);
 
-        doctor.SelectEverything();
-
+        // One of the two starts ticked, so the head box is in between.
         Assert.Equal(2, doctor.Documents.Count);
+        Assert.False(doctor.Documents[0].Selected);
+        Assert.Null(doctor.AllSelected);
+        Assert.True(doctor.CanSelectAll);
+
+        raised.Clear();
+        doctor.AllSelected = true;
+
         Assert.All(doctor.Documents, row => Assert.True(row.Selected));
         Assert.Equal(2, doctor.SelectedCount);
+        Assert.True(doctor.AllSelected);
+        Assert.Contains(nameof(DoctorViewModel.AllSelected), raised);
 
-        doctor.SelectNothing();
+        doctor.AllSelected = false;
         Assert.Equal(0, doctor.SelectedCount);
+        Assert.False(doctor.AllSelected);
+
+        // Ticking the rows one by one gets there too.
+        doctor.Documents[0].Selected = true;
+        Assert.Null(doctor.AllSelected);
+        doctor.Documents[1].Selected = true;
+        Assert.True(doctor.AllSelected);
+    }
+
+    [Fact]
+    public async Task TheHeadTickBoxIsOffWithNothingToTick()
+    {
+        var doctor = New(new FakeDoctor
+        {
+            Standing = Standing(Finding("done", DocumentVerdict.UnderExtracted, flagged: 75, repaired: 75)),
+        });
+        await doctor.RefreshAsync();
+
+        Assert.False(doctor.AllSelected);
+        Assert.False(doctor.CanSelectAll);
     }
 
     [Fact]
