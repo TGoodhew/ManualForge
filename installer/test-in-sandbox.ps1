@@ -281,6 +281,11 @@ try {
     $variable = (Get-ItemProperty 'HKCU:\Environment' -ErrorAction SilentlyContinue).MANUALFORGE_LIBRARY
     Check 'MANUALFORGE_LIBRARY set' ($variable -eq $library) "$variable"
     Check 'Apps & features entry' (Test-Path $uninstallKey)
+    # The publisher everything is signed as, where Apps & features and a program's properties show it (#93).
+    $listed = (Get-ItemProperty $uninstallKey -ErrorAction SilentlyContinue).Publisher
+    Check '... naming The Schnauzer Group LLC as the publisher (#93)' ($listed -eq 'The Schnauzer Group LLC') "$listed"
+    $company = (Get-Item (Join-Path $app 'ManualForge.App.exe')).VersionInfo.CompanyName
+    Check '... as do the programs'' properties' ($company -eq 'The Schnauzer Group LLC') "$company"
 
     Write-Step 'The command line'
     $version = Invoke-Cli @('version')
