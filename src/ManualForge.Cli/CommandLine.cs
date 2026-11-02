@@ -54,6 +54,8 @@ internal sealed class CommandLine
 
     public string? Positional(int index) => index < _positionals.Count ? _positionals[index] : null;
 
+    public IReadOnlyList<string> Positionals => _positionals;
+
     public int? GetInt(string name) =>
         int.TryParse(Get(name), NumberStyles.Integer, CultureInfo.InvariantCulture, out var value) ? value : null;
 
@@ -132,6 +134,8 @@ internal sealed class CommandLine
               manualforge status <folder>               Show the work queue on disk; changes nothing
               manualforge survey <folder>               Classify a library; changes no PDF
               manualforge run <folder>                  Classify, flatten, OCR and replace, resumably
+              manualforge add <file.pdf>…               Copy PDFs into the library root, then run, audit,
+                                                        repair (scanned pages too) and index just those
               manualforge doctor <folder|file.pdf>      Find pages whose text layer is incomplete (also: audit)
               manualforge repair <folder|file.pdf>      OCR just those pages and keep what they missed
               manualforge index <folder>                Build the full-text index over a library
@@ -226,6 +230,16 @@ internal sealed class CommandLine
               --cpu-threads <n>       Cap the threads ONNX Runtime uses per operator. The default
                                       is every core, which is right for a CPU-only run and rude if
                                       you want to use the machine while it works.
+
+            add options:
+              --library <folder>      The library to add to. Default: MANUALFORGE_LIBRARY, the one the
+                                      installer recorded.
+              --copy-only             Copy into the library and stop; process nothing.
+              --engine, --models, --batch, --cpu-threads, --gpu-concurrency
+                                      Handed on to the run and the repair, as for run.
+              A file the library already holds, byte for byte, here or among the kept originals, is
+              not copied again. A name already taken gets " (2)", " (3)" and so on; nothing in the
+              library is overwritten.
 
             status options:
               --state <path>          State database. Default <root>/_Originals/manualforge.db.

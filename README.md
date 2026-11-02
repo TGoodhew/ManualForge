@@ -180,7 +180,11 @@ It then:
 - installs the .NET 10 Desktop Runtime, the Windows App Runtime 1.8 and the Visual C++
   Redistributable, but only those the PC doesn't already have, or has in a version too old;
 - downloads the GPU libraries you chose, and the OCR models (about 25 MB);
-- adds **ManualForge** to the Start menu.
+- adds **ManualForge** to the Start menu, **Add to ManualForge library** to Explorer's right-click
+  menu for PDFs, and **ManualForge library** to its **Send to** menu (see [Add manuals](#add-manuals)).
+  The right-click entry is a small package, signed by The Schnauzer Group LLC, that Windows needs
+  before it lists an app on Windows 11's first menu; it is registered for you alone, and needs no
+  administrator.
 
 Everything it downloads comes from its publisher and is checked against a SHA-256 before it is used.
 The GPU libraries go into `%LOCALAPPDATA%\ManualForge\gpu`. They are not put on `PATH`, and the
@@ -375,6 +379,35 @@ manualforge index  D:\Manuals     # build or update the search index
   differently from plain CUDA, mostly words the reading was unsure of, some better and some worse.
   `--engine cuda` turns it off. `manualforge gpu` shows which one is in use.
 
+### Add manuals
+
+To add manuals you have downloaded, select them in Explorer, right-click, and choose **Add to
+ManualForge library**. On Windows 10, and under **Show more options** on Windows 11, **Send to ›
+ManualForge library** does the same. From a terminal:
+
+```powershell
+manualforge add "C:\Users\me\Downloads\HP 8563E Service.pdf" "C:\Users\me\Downloads\11721A.pdf"
+```
+
+Each one is copied into the top of the library, and the download is left where it was. Then the same
+work is done on just those files as the sequence above: `run`, `doctor`, `repair --include-scans` and
+`index`. When it finishes, search finds them.
+
+- **Already there:** a manual the library already has, byte for byte, is not copied again. That
+  includes one in a subfolder, and one ManualForge has already made searchable, whose original is in
+  `_Originals`.
+- **A name already taken** by a different manual gets ` (2)`, ` (3)` and so on, as Explorer names a
+  copy. Nothing in the library is ever overwritten.
+- **Which library:** the one the installer recorded (`MANUALFORGE_LIBRARY`). `--library <folder>`
+  chooses another. `--copy-only` copies and stops.
+- **In the app:** either entry opens ManualForge if it isn't running, and shows the **Added** tab. Each
+  manual is copied in at once, and the rest waits until anything already running (a run, an audit, a
+  repair or an index) finishes, so two jobs never share the GPU. Its progress shows where a run's
+  always does, and on the Doctor and Search tabs. If a step is cancelled, the manuals are already in
+  the library: **Retry** carries on with them.
+- **One window:** ManualForge now runs one window at a time. Starting it again, or sending it more
+  manuals, brings the open window forward instead of opening another.
+
 ### One file
 
 ```powershell
@@ -415,6 +448,9 @@ first time, on the library the installer recorded. To open it on another folder 
 & "$env:LOCALAPPDATA\Programs\ManualForge\ManualForge.App.exe" D:\Manuals
 ```
 
+ManualForge runs one window. Starting it again brings that window forward instead, on the folder
+given if there is one, unless the window is busy with a run, an audit, a repair or an index.
+
 A build from source puts the app in `app\ManualForge.App.exe` instead. The bottom of the window says
 which version is running.
 
@@ -430,6 +466,7 @@ The app does the same work with live progress:
   it to show it in its folder or copy its path
 - in the Problems tab, Trim forgets manuals you have deleted: from the work queue, the audit and the
   search index at once, as the three `--trim-missing` options below do
+- in the Added tab, follow manuals sent to the library from Explorer (see [Add manuals](#add-manuals))
 
 Cancel keeps every page already recognised, so running again carries on. Hover over any control to
 see what it does.
@@ -446,6 +483,9 @@ Once connected (see [Connect Claude and other apps](#connect-claude-and-other-ap
 
 ManualForge also works alongside [GPIB-MCP](https://github.com/TGoodhew/GPIB-MCP), whose
 `manual_search` is better when the instrument model is known. Each works without the other.
+
+When Claude downloads a manual for you, ManualForge tells it to add it with `manualforge add` (see
+[Add manuals](#add-manuals)), so it is copied in, made searchable and indexed in one step.
 
 #### Citations you can click
 
@@ -529,7 +569,8 @@ The uninstaller:
 - stops ManualForge if it is running, and says which app started each MCP server;
 - takes ManualForge out of every AI app it was added to, and puts back any entry it replaced. An app's
   settings that nothing else has changed since go back exactly as they were;
-- removes the GPU libraries ManualForge downloaded, the program, and the Start menu entry. It also
+- removes the GPU libraries ManualForge downloaded, the program, the Start menu entry, and the
+  right-click and Send to entries. It also
   removes the `PATH` entry and the `MANUALFORGE_LIBRARY` variable, if it was the one that set them;
 - asks whether to remove the models, logs and what ManualForge learned about your GPU
   (`%LOCALAPPDATA%\ManualForge`);
@@ -586,7 +627,9 @@ For working on ManualForge, or installing it without the installer.
 - The [Visual C++ Redistributable](https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist)
   14.40 or later, which ONNX Runtime needs
 - For the GPU, which is optional but about ten times faster: an NVIDIA card and a current driver
-- To build the installer: [Inno Setup 6](https://jrsoftware.org/isinfo.php) (`winget install JRSoftware.InnoSetup`)
+- To build the installer: [Inno Setup 6](https://jrsoftware.org/isinfo.php) (`winget install JRSoftware.InnoSetup`),
+  and Visual Studio 2026 with **Desktop development with C++** and a Windows 11 SDK, for the
+  Explorer menu's handler (`src\ManualForge.ExplorerMenu`) and its package (`makeappx`)
 
 ### 1. Build
 
@@ -594,11 +637,23 @@ For working on ManualForge, or installing it without the installer.
 git clone https://github.com/TGoodhew/ManualForge.git
 cd ManualForge
 dotnet build
-dotnet test        # optional: about 700 tests, under a minute, no GPU or network needed
+dotnet test        # optional: about 760 tests, under a minute, no GPU or network needed
 ```
 
 To build the installer, run `./tools/build-installer.ps1`. It publishes the program into one folder,
 pins the runtimes it chains in, and writes `artifacts\installer\package\ManualForge-Setup-<version>.exe`.
+
+- **Signing:** `-SignScript <path>`, or `MANUALFORGE_SIGN_SCRIPT`, names a script that signs and
+  timestamps the files it is given, and fails if it can't. With it, the build signs ManualForge's own
+  programs, the Explorer menu's package, Setup and the uninstaller. The release builds use Artifact
+  Signing, as The Schnauzer Group LLC.
+- **An unsigned build** works, with one difference. Windows registers only a package whose signature
+  it trusts, so an unsigned build has no **Add to ManualForge library** on the first right-click menu,
+  only **Send to › ManualForge library**. The package's `Publisher`, in
+  `installer\explorer-menu\AppxManifest.xml`, must be exactly the subject of the certificate that
+  signs it.
+- **The Explorer menu's handler** can be tried without registering anything:
+  `dotnet run tools/probe-explorer-menu.cs -- <folder with the DLL and the app> [file.pdf]`.
 `./tools/invoke-sandbox-test.ps1` then installs, checks and uninstalls it in Windows Sandbox, and closes
 the sandbox afterwards. `./tools/fresh-install-test.ps1` tests an installer on a PC, end to end.
 
@@ -660,6 +715,10 @@ manualforge gpu        # "Active provider" says TensorRt or Cuda on a GPU; if it
 
 Then connect the AI apps with `manualforge setup mcp` (see
 [Connect Claude and other apps](#connect-claude-and-other-apps)).
+
+A build from source has no Explorer entries; `manualforge add` and `app\ManualForge.App.exe --add <files>`
+do the same job. For Send To, put a shortcut to `app\ManualForge.App.exe --add` in
+`shell:sendto`.
 
 To update, pull the new source and run the three publish commands again. Publishing fails while the
 MCP server is running, so first quit Claude Desktop and any Claude Code session using it, or stop it

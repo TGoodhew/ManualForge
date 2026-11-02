@@ -73,25 +73,32 @@ public sealed class DoctorRunner(ILogger<DoctorRunner>? logger = null)
 {
     private readonly ILogger _logger = (ILogger?)logger ?? NullLogger.Instance;
 
+    /// <param name="paths">
+    /// Only these files of the library, into its findings database: what an add has just put in
+    /// (#89), without hashing every other file to find it unchanged. Null audits the whole library.
+    /// </param>
     public async Task<DoctorReport> RunAsync(
         string root,
         DoctorOptions? options = null,
         string? storePath = null,
         bool force = false,
         IProgress<DoctorProgress>? progress = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        IReadOnlyList<string>? paths = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
         options ??= new DoctorOptions();
 
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
 
-        var files = File.Exists(root)
-            ? [Path.GetFullPath(root)]
-            : Discover(root, options).ToArray();
+        var files = paths is not null
+            ? paths.Select(Path.GetFullPath).Distinct(StringComparer.OrdinalIgnoreCase).ToArray()
+            : File.Exists(root)
+                ? [Path.GetFullPath(root)]
+                : Discover(root, options).ToArray();
 
         using var store = new DoctorStore(storePath ?? DoctorStore.DefaultPathFor(
-            File.Exists(root) ? Path.GetDirectoryName(Path.GetFullPath(root))! : root));
+            paths is null && File.Exists(root) ? Path.GetDirectoryName(Path.GetFullPath(root))! : root));
 
         var detector = new UnderExtractionDetector(options);
 

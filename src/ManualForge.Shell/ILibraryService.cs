@@ -22,11 +22,15 @@ public interface ILibraryService
         IProgress<DocumentClassification>? progress,
         CancellationToken cancellationToken);
 
-    /// <summary>Processes everything the policy marks for work.</summary>
+    /// <summary>
+    /// Processes everything the policy marks for work, or of it only <paramref name="documents"/>
+    /// when they are given.
+    /// </summary>
     Task<IReadOnlyList<FileOutcome>> RunAsync(
         string root,
         ClassificationPolicy policy,
         bool dryRun,
+        IReadOnlyList<string>? documents,
         IProgress<FileOutcome>? files,
         IProgress<PipelinePageProgress>? pages,
         CancellationToken cancellationToken);
@@ -36,6 +40,13 @@ public interface ILibraryService
     /// audit and their pages in the search index. Returns each file forgotten from any of them.
     /// </summary>
     Task<IReadOnlyList<string>> TrimMissingAsync(string root, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Copies files into the library root, leaving out any it already holds (#89). Changes nothing
+    /// else; the run, audit, repair and index are separate steps.
+    /// </summary>
+    Task<IReadOnlyList<AddResult>> AddAsync(
+        string root, IReadOnlyList<string> sources, CancellationToken cancellationToken);
 
     /// <summary>The card, or null when there is nothing to report.</summary>
     GpuMemory? ReadGpu();

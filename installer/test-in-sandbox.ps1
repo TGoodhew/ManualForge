@@ -50,6 +50,8 @@ function Get-Leftovers {
     if ((Get-ItemProperty 'HKCU:\Environment' -ErrorAction SilentlyContinue).MANUALFORGE_LIBRARY) { $found += 'environment MANUALFORGE_LIBRARY' }
     if (((Get-ItemProperty 'HKCU:\Environment' -ErrorAction SilentlyContinue).Path) -like "*$app*") { $found += 'PATH entry' }
     if (Test-Path $shortcut) { $found += "shortcut $shortcut" }
+    if (Test-Path $sendTo) { $found += "Send To entry $sendTo" }
+    if (Get-AppxPackage -Name $menuPackage) { $found += "Explorer menu package $menuPackage" }
     if (Test-Path $uninstallKey) { $found += 'Apps & features entry' }
     return $found
 }
@@ -183,6 +185,8 @@ function Test-LibraryPage([string] $label, [string] $expected, [bool] $saysGpib,
 }
 
 $shortcut = Join-Path ([Environment]::GetFolderPath('Programs')) 'ManualForge.lnk'
+$sendTo = Join-Path ([Environment]::GetFolderPath('SendTo')) 'ManualForge library.lnk'
+$menuPackage = 'SchnauzerGroup.ManualForge'
 $uninstallKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{A6AE7B23-BB07-4BEE-9AD0-0B669785EDE5}_is1'
 
 try {
@@ -246,6 +250,32 @@ try {
         $target = (New-Object -ComObject WScript.Shell).CreateShortcut($shortcut).TargetPath
         Check 'shortcut points at the app' ($target -eq (Join-Path $app 'ManualForge.App.exe')) $target
     }
+    # A signed build (tools\build-installer.ps1 -SignScript) signs Setup, the uninstaller Setup writes,
+    # and ManualForge's own programs; an unsigned one none of them, and these only report that.
+    $publisher = 'CN=The Schnauzer Group LLC, O=The Schnauzer Group LLC, L=Renton, S=Washington, C=US'
+    $setupSignature = Get-AuthenticodeSignature $setup.FullName
+    if ($setupSignature.Status -eq 'Valid') {
+        $signed = @($setup.FullName) + @(Get-ChildItem $app -Filter 'unins*.exe' | ForEach-Object FullName) +
+            @('manualforge.exe', 'ManualForge.App.exe', 'ManualForge.Mcp.exe', 'ManualForge.Core.dll' | ForEach-Object { Join-Path $app $_ })
+        $bad = $signed | Where-Object {
+            $signature = Get-AuthenticodeSignature $_
+            $signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -ne $publisher -or -not $signature.TimeStamperCertificate
+        }
+        Check 'Setup, the uninstaller and the programs are signed by The Schnauzer Group LLC and timestamped' (-not $bad) $(if ($bad) { ($bad | Split-Path -Leaf) -join ', ' } else { "$($signed.Count) files" })
+    }
+    else { Write-Host "Setup is not signed ($($setupSignature.Status)); signatures not checked." }
+
+    # The first right-click menu's entry (#89): a signed build registers its package; an unsigned one has none.
+    if ($setupSignature.Status -eq 'Valid') {
+        $menu = Get-AppxPackage -Name $menuPackage
+        Check 'Explorer menu package registered (#89)' ([bool] $menu) $(if ($menu) { "$($menu.Version), $($menu.SignatureKind)" } else { 'not registered; see install.log' })
+        Check '... with the handler beside the program' (Test-Path (Join-Path $app 'ManualForge.ExplorerMenu.dll'))
+    }
+    Check 'Send To entry (#89)' (Test-Path $sendTo)
+    if (Test-Path $sendTo) {
+        $link = (New-Object -ComObject WScript.Shell).CreateShortcut($sendTo)
+        Check '... which starts the app with --add' ($link.TargetPath -eq (Join-Path $app 'ManualForge.App.exe') -and $link.Arguments -eq '--add') "$($link.TargetPath) $($link.Arguments)"
+    }
     $state = Get-ItemProperty 'HKCU:\Software\ManualForge' -ErrorAction SilentlyContinue
     Check 'library recorded from /LIBRARY=' ($state.Library -eq $library) "$($state.Library)"
     $variable = (Get-ItemProperty 'HKCU:\Environment' -ErrorAction SilentlyContinue).MANUALFORGE_LIBRARY
@@ -281,6 +311,20 @@ try {
     Start-Sleep -Seconds 15
     $window.Refresh()
     Check 'ManualForge.App starts and stays up' (-not $window.HasExited) $(if ($window.HasExited) { "exited with $($window.ExitCode)" } else { "window '$($window.MainWindowTitle)'" })
+    if (-not $window.HasExited -and (Test-Path $sample)) {
+        # What Send To does while the window is open: a second launch hands its files to this one and exits,
+        # and this one copies them into the library (#89). It then starts reading them; it is closed below.
+        $handed = Start-Process (Join-Path $app 'ManualForge.App.exe') -ArgumentList @('--add', "`"$sample`"") -PassThru
+        $exited = $handed.WaitForExit(30000)
+        Check 'a second launch hands its files to the open window and exits (#89)' ($exited -and $handed.ExitCode -eq 0) $(if ($exited) { "exit $($handed.ExitCode)" } else { 'still running after 30 s' })
+        if (-not $exited) { $handed.Kill() }
+        $copied = Join-Path $library 'sample.pdf'
+        for ($i = 0; $i -lt 30 -and -not (Test-Path $copied); $i++) { Start-Sleep -Seconds 1 }
+        Check '... which copies them into the library' (Test-Path $copied)
+        $windows = @(Get-Process ManualForge.App -ErrorAction SilentlyContinue)
+        Check '... and stays the only window' ($windows.Count -eq 1) "$($windows.Count) running"
+        Start-Sleep -Seconds 3
+    }
     if (-not $window.HasExited) {
         Add-Type -AssemblyName System.Windows.Forms, System.Drawing
         $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
@@ -290,8 +334,26 @@ try {
         $window.CloseMainWindow() | Out-Null
         if (-not $window.WaitForExit(10000)) { $window.Kill() }
     }
+    Get-Process ManualForge.App -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+    if (Test-Path $sample) {
+        $again = Invoke-Cli @('add', $sample, '--library', $library, '--copy-only')
+        Check 'manualforge add knows a manual the library already has' ($again.Code -eq 0 -and $again.Output -match 'already\s+sample\.pdf') "exit $($again.Code)"
+    }
     Get-WinEvent -FilterHashtable @{ LogName = 'Application'; Level = 2; StartTime = $testStarted } -ErrorAction SilentlyContinue |
         Select-Object -First 10 | Format-List TimeCreated, ProviderName, Message | Out-String | Write-Host
+
+    if ($setupSignature.Status -eq 'Valid') {
+        # An upgrade with the package registered: Setup removes it before replacing the files, and registers
+        # the new one after (#89). Installing the same build again goes the same way.
+        Write-Step 'Installing again over itself'
+        $again = Start-Process $setup.FullName -Wait -PassThru -ArgumentList @(
+            '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/TASKS=mcp',
+            "/LIBRARY=`"$library`"", "/LOG=`"$results\install-again.log`"")
+        Check 'installing again exits 0' ($again.ExitCode -eq 0) "code $($again.ExitCode)"
+        Check '... and leaves the Explorer menu package registered' ([bool] (Get-AppxPackage -Name $menuPackage))
+        $menuLog = Select-String -Path "$results\install-again.log" -Pattern 'Explorer menu package' | ForEach-Object { $_.Line -replace '^.*?Explorer', 'Explorer' }
+        Write-Host ($menuLog -join "`n")
+    }
 
     Write-Step 'The library page on an upgrade'
     Set-GpibMcp $null

@@ -58,7 +58,7 @@ public sealed class DoctorViewModelTests
             Task.FromResult(Standing);
 
         public Task<DoctorStanding> AuditAsync(
-            string root, DoctorOptions options, IProgress<DoctorProgress>? progress,
+            string root, DoctorOptions options, IReadOnlyList<string>? paths, IProgress<DoctorProgress>? progress,
             CancellationToken cancellationToken)
         {
             progress?.Report(new DoctorProgress(@"C:\Manuals\a.pdf", 1, 2, 1, 4));

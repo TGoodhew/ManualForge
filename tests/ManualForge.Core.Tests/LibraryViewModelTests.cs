@@ -28,6 +28,11 @@ internal sealed class FakeLibraryService : ILibraryService
 
     public bool DryRunUsed { get; private set; }
 
+    public IReadOnlyList<string>? DocumentsUsed { get; private set; }
+
+    /// <summary>What AddAsync answers; by default every file added under its own name.</summary>
+    public Func<string, IReadOnlyList<string>, IReadOnlyList<AddResult>>? OnAdd { get; set; }
+
     public int TrimCalls { get; private set; }
 
     public Task<IReadOnlyList<FileRecord>> SurveyAsync(
@@ -43,12 +48,13 @@ internal sealed class FakeLibraryService : ILibraryService
     }
 
     public async Task<IReadOnlyList<FileOutcome>> RunAsync(
-        string root, ClassificationPolicy policy, bool dryRun,
+        string root, ClassificationPolicy policy, bool dryRun, IReadOnlyList<string>? documents,
         IProgress<FileOutcome>? files, IProgress<PipelinePageProgress>? pages,
         CancellationToken cancellationToken)
     {
         PolicyUsed = policy;
         DryRunUsed = dryRun;
+        DocumentsUsed = documents;
 
         if (RunThrows is not null)
             throw RunThrows;
@@ -72,6 +78,11 @@ internal sealed class FakeLibraryService : ILibraryService
         TrimCalls++;
         return Task.FromResult<IReadOnlyList<string>>(["gone.pdf"]);
     }
+
+    public Task<IReadOnlyList<AddResult>> AddAsync(
+        string root, IReadOnlyList<string> sources, CancellationToken cancellationToken) =>
+        Task.FromResult(OnAdd?.Invoke(root, sources)
+                        ?? sources.Select(s => new AddResult(s, AddKind.Added, Path.Combine(root, Path.GetFileName(s)))).ToArray());
 
     public GpuMemory? ReadGpu() => Gpu;
 }

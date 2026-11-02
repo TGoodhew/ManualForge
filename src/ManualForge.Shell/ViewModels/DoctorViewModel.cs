@@ -314,10 +314,41 @@ public sealed partial class DoctorViewModel(IDoctorService service, IUiDispatche
 
     /// <summary>Audits the folder. Changes nothing except the findings database.</summary>
     [RelayCommand(CanExecute = nameof(CanAct))]
-    public async Task AuditAsync()
+    public Task AuditAsync() => AuditCoreAsync(paths: null);
+
+    /// <summary>
+    /// Audits these files, then recovers the text on every page the audit flags in them, scanned
+    /// pages included, whatever the tab's own tick box says: what the files added to the library go
+    /// through after the run (#89). True when both finished; false when either was cancelled or
+    /// failed, or something else was already running.
+    /// </summary>
+    public async Task<bool> AuditAndRepairAsync(IReadOnlyList<string> paths)
+    {
+        ArgumentNullException.ThrowIfNull(paths);
+        if (!CanAct || paths.Count == 0)
+            return CanAct;
+
+        var standing = await AuditCoreAsync(paths).ConfigureAwait(true);
+        if (standing is null)
+            return false;
+
+        var wanted = new HashSet<string>(paths.Select(Path.GetFullPath), StringComparer.OrdinalIgnoreCase);
+        var flagged = standing.Findings
+            .Where(f => f.OutstandingPages > 0 && wanted.Contains(Path.GetFullPath(f.Path)))
+            .ToArray();
+        if (flagged.Length == 0)
+            return true;
+
+        return await RepairCoreAsync(
+                flagged.Select(f => f.Path).ToArray(), flagged.Sum(f => f.OutstandingPages), includeScannedPages: true)
+            .ConfigureAwait(true);
+    }
+
+    /// <summary>The audit, of the whole folder or of these files; what it found, or null if it did not finish.</summary>
+    private async Task<DoctorStanding?> AuditCoreAsync(IReadOnlyList<string>? paths)
     {
         if (string.IsNullOrWhiteSpace(Folder))
-            return;
+            return null;
 
         _cancellation = new CancellationTokenSource();
         State = DoctorState.Auditing;
@@ -335,11 +366,12 @@ public sealed partial class DoctorViewModel(IDoctorService service, IUiDispatche
         try
         {
             var standing = await _service
-                .AuditAsync(Folder, new DoctorOptions(), progress, _cancellation.Token)
+                .AuditAsync(Folder, new DoctorOptions(), paths, progress, _cancellation.Token)
                 .ConfigureAwait(true);
 
             HasAudit = true;
             Show(standing);
+            return standing;
         }
         catch (OperationCanceledException)
         {
@@ -357,6 +389,8 @@ public sealed partial class DoctorViewModel(IDoctorService service, IUiDispatche
             _cancellation?.Dispose();
             _cancellation = null;
         }
+
+        return null;
     }
 
     /// <summary>
@@ -373,11 +407,19 @@ public sealed partial class DoctorViewModel(IDoctorService service, IUiDispatche
         if (chosen.Length == 0)
             return;
 
+        await RepairCoreAsync(
+                chosen.Select(d => d.Path).ToArray(), chosen.Sum(d => d.OutstandingPages), IncludeScannedPages)
+            .ConfigureAwait(true);
+    }
+
+    /// <summary>The repair of these documents; true when it finished.</summary>
+    private async Task<bool> RepairCoreAsync(IReadOnlyList<string> paths, int pages, bool includeScannedPages)
+    {
         _cancellation = new CancellationTokenSource();
         State = DoctorState.Repairing;
         Recovered.Clear();
         PagesDone = 0;
-        PagesTotal = chosen.Sum(d => d.OutstandingPages);
+        PagesTotal = pages;
         Status = $"Recovering text from {PagesTotal:N0} page(s). Loading the OCR models...";
 
         var progress = new DispatchedProgress<RepairProgress>(_dispatcher, p =>
@@ -403,9 +445,9 @@ public sealed partial class DoctorViewModel(IDoctorService service, IUiDispatche
         {
             var report = await _service
                 .RepairAsync(
-                    Folder,
-                    chosen.Select(d => d.Path).ToArray(),
-                    new RepairOptions { IncludeScannedPages = IncludeScannedPages },
+                    Folder!,
+                    paths,
+                    new RepairOptions { IncludeScannedPages = includeScannedPages },
                     progress,
                     _cancellation.Token)
                 .ConfigureAwait(true);
@@ -422,6 +464,8 @@ public sealed partial class DoctorViewModel(IDoctorService service, IUiDispatche
                 Status += $" {report.DocumentsStale:N0} document(s) changed since the audit and were " +
                           "skipped; audit them again.";
             }
+
+            return true;
         }
         catch (OperationCanceledException)
         {
@@ -441,6 +485,8 @@ public sealed partial class DoctorViewModel(IDoctorService service, IUiDispatche
             _cancellation?.Dispose();
             _cancellation = null;
         }
+
+        return false;
     }
 
     /// <summary>

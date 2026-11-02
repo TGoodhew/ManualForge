@@ -118,8 +118,17 @@ public sealed partial class SearchViewModel(ISearchService service, IUiDispatche
     }
 
     [RelayCommand(CanExecute = nameof(CanBuild))]
-    private async Task BuildIndexAsync()
+    private Task BuildIndexAsync() => IndexAsync();
+
+    /// <summary>
+    /// Builds or updates the index; true when it finished. Public for the files added to the library,
+    /// whose last step it is (#89). False also when the tab was already busy.
+    /// </summary>
+    public async Task<bool> IndexAsync()
     {
+        if (!CanBuild)
+            return false;
+
         IsBusy = true;
         _cancellation = new CancellationTokenSource();
 
@@ -139,6 +148,7 @@ public sealed partial class SearchViewModel(ISearchService service, IUiDispatche
                 (report.DocumentsWithoutText > 0
                     ? $". {report.DocumentsWithoutText:N0} have no text layer to index yet."
                     : ".");
+            return true;
         }
         catch (OperationCanceledException)
         {
@@ -154,6 +164,8 @@ public sealed partial class SearchViewModel(ISearchService service, IUiDispatche
             _cancellation = null;
             IsBusy = false;
         }
+
+        return false;
     }
 
     [RelayCommand]

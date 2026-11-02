@@ -131,7 +131,7 @@
         </Grid>
 
         <!-- The summary before committing, then what happened -->
-        <TabView Grid.Row="3" IsAddTabButtonVisible="False" CanDragTabs="False" CanReorderTabs="False">
+        <TabView x:Name="Tabs" Grid.Row="3" IsAddTabButtonVisible="False" CanDragTabs="False" CanReorderTabs="False">
 
             <TabViewItem Header="Classes" IsClosable="False" local:Help.Text="What the survey found: the library's files by class, how many are done, and what a run will do to the rest.">
                 <Grid RowSpacing="8" Padding="0,8,0,0">
@@ -556,6 +556,54 @@
                                         Opacity="0.6"
                                         TextTrimming="CharacterEllipsis" />
                                 </StackPanel>
+                            </DataTemplate>
+                        </ListView.ItemTemplate>
+                    </ListView>
+                </Grid>
+            </TabViewItem>
+
+            <TabViewItem x:Name="AddedTab" Header="Added" IsClosable="False" local:Help.Text="Manuals sent to the library from Explorer: each is copied in, made searchable, checked for lettering its text misses and indexed.">
+                <Grid RowSpacing="8" Padding="0,8,0,0">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <Grid Grid.Row="0" ColumnSpacing="8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="{x:Bind Adds.Status, Mode=OneWay}" TextWrapping="Wrap" VerticalAlignment="Center" />
+                        <Button
+                            Grid.Column="1"
+                            Content="Retry"
+                            Command="{x:Bind Adds.RetryCommand}"
+                            local:Help.Text="Carry on with the manuals whose work was stopped. They are already in the library." />
+                        <Button
+                            Grid.Column="2"
+                            Content="Clear finished"
+                            Command="{x:Bind Adds.ClearFinishedCommand}"
+                            local:Help.Text="Take the manuals that are done, or were not added, off this list. Nothing in the library changes." />
+                    </Grid>
+
+                    <TextBlock Grid.Row="1" Text="{x:Bind Adds.Activity, Mode=OneWay}" TextWrapping="Wrap" Style="{StaticResource CaptionTextBlockStyle}" Opacity="0.7" />
+
+                    <ListView x:Name="AddedList" Grid.Row="2" AutomationProperties.Name="Added manuals" ItemsSource="{x:Bind Adds.Items, Mode=OneWay}" SelectionMode="None">
+                        <ListView.ItemTemplate>
+                            <DataTemplate x:DataType="vm:AddItem">
+                                <Grid ColumnSpacing="12" MinHeight="40" Padding="0,4">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="2*" />
+                                        <ColumnDefinition Width="100" />
+                                        <ColumnDefinition Width="3*" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="{x:Bind Name}" local:Help.Text="{x:Bind Source}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                                    <TextBlock Grid.Column="1" Text="{x:Bind StageText, Mode=OneWay}" VerticalAlignment="Center" />
+                                    <TextBlock Grid.Column="2" Text="{x:Bind Detail, Mode=OneWay}" TextWrapping="Wrap" VerticalAlignment="Center" />
+                                </Grid>
                             </DataTemplate>
                         </ListView.ItemTemplate>
                     </ListView>

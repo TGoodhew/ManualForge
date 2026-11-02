@@ -54,6 +54,7 @@ try
         "survey" => SurveyCommand.Run(arguments, loggerFactory, cancellation.Token),
         "status" => StatusCommand.Run(arguments),
         "run" => await RunCommand.RunAsync(arguments, loggerFactory, logPath, cancellation.Token),
+        "add" => await AddCommand.RunAsync(arguments, loggerFactory, logPath, cancellation.Token),
         "index" => await IndexCommand.RunAsync(arguments, loggerFactory, cancellation.Token),
         "doctor" or "audit" => await DoctorCommand.RunAsync(arguments, loggerFactory, cancellation.Token),
         "repair" => await RepairCommand.RunAsync(arguments, loggerFactory, cancellation.Token),

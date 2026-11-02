@@ -139,7 +139,10 @@ public sealed partial class LibraryViewModel(
         new(Summary.ToDictionary(r => r.TextClass, r => r.Action));
 
     [RelayCommand(CanExecute = nameof(CanStart))]
-    private async Task SurveyAsync()
+    private Task SurveyAsync() => SurveyCoreAsync();
+
+    /// <summary>Surveys the folder; true when it finished, false when it was cancelled or failed.</summary>
+    private async Task<bool> SurveyCoreAsync()
     {
         var folder = Folder!;
         State = ShellState.Surveying;
@@ -162,6 +165,7 @@ public sealed partial class LibraryViewModel(
                 .ConfigureAwait(true);
 
             ApplySurvey(records);
+            return true;
         }
         catch (OperationCanceledException)
         {
@@ -175,6 +179,8 @@ public sealed partial class LibraryViewModel(
         {
             Finish();
         }
+
+        return false;
     }
 
     private void ApplySurvey(IReadOnlyList<FileRecord> records)
@@ -253,11 +259,27 @@ public sealed partial class LibraryViewModel(
     private string? _missingProblem;
 
     [RelayCommand(CanExecute = nameof(CanStart))]
-    private async Task RunAsync()
+    private Task RunAsync() => RunCoreAsync(documents: null, DryRun);
+
+    /// <summary>
+    /// Surveys the folder, then runs on just these files of it, for real whatever Dry run says: what
+    /// the files added to the library go through first (#89). The outcomes, or null when the survey
+    /// or the run was cancelled or failed, or something else was already running.
+    /// </summary>
+    public async Task<IReadOnlyList<FileOutcome>?> ProcessAsync(IReadOnlyList<string> documents)
+    {
+        ArgumentNullException.ThrowIfNull(documents);
+        if (!CanStart || !await SurveyCoreAsync().ConfigureAwait(true))
+            return null;
+
+        return await RunCoreAsync(documents, dryRun: false).ConfigureAwait(true);
+    }
+
+    private async Task<IReadOnlyList<FileOutcome>?> RunCoreAsync(IReadOnlyList<string>? documents, bool dryRun)
     {
         var folder = Folder!;
         State = ShellState.Running;
-        Status = DryRun ? "Dry run: nothing will be replaced." : "Processing...";
+        Status = dryRun ? "Dry run: nothing will be replaced." : "Processing...";
         Results.Clear();
 
         _cancellation = new CancellationTokenSource();
@@ -275,7 +297,7 @@ public sealed partial class LibraryViewModel(
         try
         {
             var outcomes = await _service
-                .RunAsync(folder, CurrentPolicy(), DryRun, files, pages, _cancellation.Token)
+                .RunAsync(folder, CurrentPolicy(), dryRun, documents, files, pages, _cancellation.Token)
                 .ConfigureAwait(true);
 
             // Progress is advisory; the returned list is authoritative.
@@ -289,6 +311,7 @@ public sealed partial class LibraryViewModel(
 
             Status = $"Finished. {Results.Count(r => r.Status == FileStatus.Completed):N0} completed, " +
                      $"{RunErrorCount:N0} problem(s).";
+            return outcomes;
         }
         catch (OperationCanceledException)
         {
@@ -306,6 +329,8 @@ public sealed partial class LibraryViewModel(
         {
             Finish();
         }
+
+        return null;
     }
 
     private void OnFileFinished(FileOutcome outcome)
