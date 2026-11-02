@@ -248,6 +248,20 @@ try {
         $target = (New-Object -ComObject WScript.Shell).CreateShortcut($shortcut).TargetPath
         Check 'shortcut points at the app' ($target -eq (Join-Path $app 'ManualForge.App.exe')) $target
     }
+    # A signed build (tools\build-installer.ps1 -SignScript) signs Setup, the uninstaller Setup writes,
+    # and ManualForge's own programs; an unsigned one none of them, and these only report that.
+    $publisher = 'CN=The Schnauzer Group LLC, O=The Schnauzer Group LLC, L=Renton, S=Washington, C=US'
+    $setupSignature = Get-AuthenticodeSignature $setup.FullName
+    if ($setupSignature.Status -eq 'Valid') {
+        $signed = @($setup.FullName) + @(Get-ChildItem $app -Filter 'unins*.exe' | ForEach-Object FullName) +
+            @('manualforge.exe', 'ManualForge.App.exe', 'ManualForge.Mcp.exe', 'ManualForge.Core.dll' | ForEach-Object { Join-Path $app $_ })
+        $bad = $signed | Where-Object {
+            $signature = Get-AuthenticodeSignature $_
+            $signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -ne $publisher -or -not $signature.TimeStamperCertificate
+        }
+        Check 'Setup, the uninstaller and the programs are signed by The Schnauzer Group LLC and timestamped' (-not $bad) $(if ($bad) { ($bad | Split-Path -Leaf) -join ', ' } else { "$($signed.Count) files" })
+    }
+    else { Write-Host "Setup is not signed ($($setupSignature.Status)); signatures not checked." }
     Check 'Send To entry (#89)' (Test-Path $sendTo)
     if (Test-Path $sendTo) {
         $link = (New-Object -ComObject WScript.Shell).CreateShortcut($sendTo)
