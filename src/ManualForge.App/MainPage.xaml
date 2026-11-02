@@ -308,7 +308,7 @@
                              difference between "repair what you suggested" and "repair these three"
                              should not be three hundred clicks. -->
                         <StackPanel Grid.Column="4" Orientation="Horizontal" Spacing="4" Margin="16,0,0,0">
-                            <Button Content="All" Command="{x:Bind Doctor.SelectEverythingCommand}" local:Help.Text="Tick every document that still has pages to recover. Documents with nothing left to do stay unticked." />
+                            <Button Content="All" Command="{x:Bind Doctor.SelectEverythingCommand}" local:Help.Text="Tick every document in the list. Only documents with pages left to recover are listed." />
                             <Button Content="None" Command="{x:Bind Doctor.SelectNothingCommand}" local:Help.Text="Untick every document." />
                         </StackPanel>
 
@@ -366,7 +366,7 @@
                                 </Grid.ColumnDefinitions>
                                 <TextBlock Grid.Column="1" Text="Document" Style="{StaticResource CaptionTextBlockStyle}" />
                                 <TextBlock Grid.Column="2" Text="Why" Style="{StaticResource CaptionTextBlockStyle}" local:Help.Text="Why the document was flagged. Drawn, never text: much of it is drawn rather than typeset, and extracts as nothing. Scanned, OCR gaps: a scan whose earlier OCR missed much of its lettering, usually schematics, tables and figure labels. Figure pages: a few figures carry lettering the text does not hold." />
-                                <TextBlock Grid.Column="3" Text="Flagged" HorizontalAlignment="Right" Style="{StaticResource CaptionTextBlockStyle}" local:Help.Text="Pages whose text misses lettering drawn on them. Their numbers are listed under the document's name." />
+                                <TextBlock Grid.Column="3" Text="Flagged" HorizontalAlignment="Right" Style="{StaticResource CaptionTextBlockStyle}" local:Help.Text="Pages whose text misses lettering drawn on them. Those still to recover are listed under the document's name." />
                                 <TextBlock Grid.Column="4" Text="Drawn" HorizontalAlignment="Right" Style="{StaticResource CaptionTextBlockStyle}" local:Help.Text="Of the flagged pages, those drawn as graphics rather than scanned." />
                                 <TextBlock Grid.Column="5" Text="Recovered" HorizontalAlignment="Right" Style="{StaticResource CaptionTextBlockStyle}" local:Help.Text="Flagged pages whose text has been recovered, of all the flagged pages." />
                             </Grid>
@@ -399,11 +399,15 @@
 
                                             <StackPanel Grid.Column="1" VerticalAlignment="Center">
                                                 <TextBlock Text="{x:Bind Title}" local:Help.Text="{x:Bind local:FileActions.Hint(Path)}" TextTrimming="CharacterEllipsis" />
+                                                <!-- One line: the caption style wraps, which ignores the
+                                                     trimming and ran a long list to a dozen lines. -->
                                                 <TextBlock
                                                     Text="{x:Bind PageRanges}"
                                                     Style="{StaticResource CaptionTextBlockStyle}"
                                                     Opacity="0.6"
-                                                    TextTrimming="CharacterEllipsis" />
+                                                    TextWrapping="NoWrap"
+                                                    TextTrimming="CharacterEllipsis"
+                                                    local:Help.Text="{x:Bind PageRanges}" />
                                             </StackPanel>
 
                                             <TextBlock Grid.Column="2" Text="{x:Bind Kind}" TextWrapping="Wrap" VerticalAlignment="Center" Opacity="0.8" />

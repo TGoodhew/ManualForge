@@ -172,8 +172,10 @@ public sealed class DoctorViewModelTests
     }
 
     [Fact]
-    public async Task ADocumentAlreadyRecoveredIsNotTicked()
+    public async Task ADocumentAlreadyRecoveredIsNotListed()
     {
+        // 1 November 2026: a library with every page recovered still listed all 611 documents, which
+        // read as 611 jobs waiting. The headline counts them; the list is what is left to do.
         var service = new FakeDoctor
         {
             Standing = Standing(
@@ -183,9 +185,29 @@ public sealed class DoctorViewModelTests
         var doctor = New(service);
         await doctor.RefreshAsync();
 
-        Assert.False(Assert.Single(doctor.Documents).Selected);
+        Assert.Empty(doctor.Documents);
         Assert.Equal(0, doctor.SelectedCount);
         Assert.False(doctor.RepairCommand.CanExecute(null));
+        Assert.Contains("75 recovered, 0 outstanding", doctor.Headline, StringComparison.Ordinal);
+        Assert.StartsWith("Nothing to do here", doctor.Status, StringComparison.Ordinal);
+        Assert.Contains("No document has pages left to recover", doctor.ExplainHint, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ADocumentPartlyRecoveredIsStillListed()
+    {
+        var service = new FakeDoctor
+        {
+            Standing = Standing(
+                Finding("partly", DocumentVerdict.UnderExtracted, flagged: 75, repaired: 70)),
+        };
+
+        var doctor = New(service);
+        await doctor.RefreshAsync();
+
+        var row = Assert.Single(doctor.Documents);
+        Assert.Equal(5, row.OutstandingPages);
+        Assert.True(row.Selected);
     }
 
     [Fact]
@@ -304,24 +326,32 @@ public sealed class DoctorViewModelTests
     }
 
     [Fact]
-    public async Task TheListRefreshesAfterARepairWithoutLosingTheRows()
+    public async Task TheListRefreshesAfterARepairWithoutLosingTheRowsStillToDo()
     {
         var service = new FakeDoctor
         {
-            Standing = Standing(Finding("a", DocumentVerdict.UnderExtracted, flagged: 75)),
+            Standing = Standing(
+                Finding("a", DocumentVerdict.UnderExtracted, flagged: 75),
+                Finding("b", DocumentVerdict.UnderExtracted, flagged: 75)),
         };
 
         var doctor = New(service);
         await doctor.RefreshAsync();
-        var row = Assert.Single(doctor.Documents);
+        var a = doctor.Documents[0];
+        doctor.SelectedDocument = doctor.Documents[1];
 
-        service.Standing = Standing(Finding("a", DocumentVerdict.UnderExtracted, flagged: 75, repaired: 75));
+        // Stopped part-way through a, after finishing b.
+        service.Standing = Standing(
+            Finding("a", DocumentVerdict.UnderExtracted, flagged: 75, repaired: 40),
+            Finding("b", DocumentVerdict.UnderExtracted, flagged: 75, repaired: 75));
         await doctor.RepairAsync();
 
-        Assert.Same(row, Assert.Single(doctor.Documents));
-        Assert.Equal("75/75", row.Progress);
-        Assert.True(row.IsRepaired);
-        Assert.False(row.Selected);
+        Assert.Same(a, Assert.Single(doctor.Documents));
+        Assert.Equal("40/75", a.Progress);
+        Assert.True(a.Selected);
+
+        // b is finished, so it leaves the list, and Show no longer points at it.
+        Assert.Null(doctor.SelectedDocument);
     }
 
     [Fact]
@@ -399,23 +429,25 @@ public sealed class DoctorViewModelTests
     }
 
     [Fact]
-    public async Task SelectAllSkipsWhatIsAlreadyDone()
+    public async Task SelectAllTicksEveryDocumentStillToDo()
     {
         var service = new FakeDoctor
         {
             Standing = Standing(
                 Finding("outstanding", DocumentVerdict.ScannedGaps, flagged: 136, drawn: 0),
+                Finding("drawn", DocumentVerdict.UnderExtracted, flagged: 75, repaired: 10),
                 Finding("done", DocumentVerdict.UnderExtracted, flagged: 75, repaired: 75)),
         };
 
         var doctor = New(service);
         await doctor.RefreshAsync();
+        Assert.False(doctor.Documents[0].Selected);
 
         doctor.SelectEverything();
 
-        Assert.True(doctor.Documents[0].Selected);
-        Assert.False(doctor.Documents[1].Selected);
-        Assert.Equal(1, doctor.SelectedCount);
+        Assert.Equal(2, doctor.Documents.Count);
+        Assert.All(doctor.Documents, row => Assert.True(row.Selected));
+        Assert.Equal(2, doctor.SelectedCount);
 
         doctor.SelectNothing();
         Assert.Equal(0, doctor.SelectedCount);

@@ -18,7 +18,7 @@ public sealed record DoctorFinding(
     int RecoverableCharacters,
     int SuggestedDpi,
     DocumentVerdict Verdict,
-    string FlaggedPageRanges)
+    string OutstandingPageRanges)
 {
     public int OutstandingPages => Math.Max(0, FlaggedPages - RepairedPages);
 
@@ -211,10 +211,21 @@ public sealed class DoctorService(
                 d.RecoverableCharacters,
                 d.SuggestedDpi,
                 d.Verdict,
-                PageRanges.Format(
-                    store.Findings(d.Path, PageVerdict.UnderExtracted).Select(f => f.PageNumber))))
+                PageRanges.Format(OutstandingPageNumbers(store, d))))
             .ToArray();
 
         return new DoctorStanding(store.Summary(), findings);
+    }
+
+    /// <summary>The flagged pages of a document that have no recovered text yet.</summary>
+    private static IEnumerable<int> OutstandingPageNumbers(DoctorStore store, AuditedDocument document)
+    {
+        if (document.OutstandingPages == 0)
+            return [];
+
+        var repaired = store.RepairedPageNumbers(document.Path, document.ContentHash);
+        return store.Findings(document.Path, PageVerdict.UnderExtracted)
+            .Select(f => f.PageNumber)
+            .Where(page => !repaired.Contains(page));
     }
 }

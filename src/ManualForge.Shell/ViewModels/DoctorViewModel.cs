@@ -49,7 +49,8 @@ public sealed partial class DoctorRow(DoctorFinding finding) : ObservableObject
 
     public int RecoverableCharacters => Finding.RecoverableCharacters;
 
-    public string PageRanges => Finding.FlaggedPageRanges;
+    /// <summary>The pages still waiting for their text to be recovered, such as "14,16,21-26".</summary>
+    public string PageRanges => Finding.OutstandingPageRanges;
 
     public string Kind => Finding.Verdict switch
     {
@@ -134,6 +135,7 @@ public sealed partial class DoctorViewModel(IDoctorService service, IUiDispatche
     private string? _headline;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ExplainHint))]
     private bool _hasAudit;
 
     /// <summary>
@@ -188,7 +190,7 @@ public sealed partial class DoctorViewModel(IDoctorService service, IUiDispatche
     [NotifyPropertyChangedFor(nameof(ExplainHint))]
     private DoctorRow? _selectedDocument;
 
-    /// <summary>A newly chosen document starts at the first page the audit flagged in it.</summary>
+    /// <summary>A newly chosen document starts at the first of its pages still to recover.</summary>
     partial void OnSelectedDocumentChanged(DoctorRow? value)
     {
         Diagnostic = null;
@@ -205,12 +207,14 @@ public sealed partial class DoctorViewModel(IDoctorService service, IUiDispatche
     }
 
     /// <summary>What the empty picture panel says, so it is clear what Show needs and what it draws.</summary>
-    public string ExplainHint => SelectedDocument is null
-        ? "Click or tick a document in the list to look at the pages the audit flagged in it. Show draws the page: "
-          + "grey is text already in the document's text layer, black is everything else drawn on it, and red boxes "
-          + "mark lettering the text layer is missing."
-        : $"Show draws page {ExplainPage:N0} of {SelectedDocument.Title}. Its flagged pages are listed under "
-          + "its name.";
+    public string ExplainHint => SelectedDocument is not null
+        ? $"Show draws page {ExplainPage:N0} of {SelectedDocument.Title}. The pages still to recover are listed "
+          + "under its name."
+        : HasAudit && Documents.Count == 0
+            ? "No document has pages left to recover, so there is nothing here to look at."
+            : "Click or tick a document in the list to look at the pages still to recover in it. Show draws the page: "
+              + "grey is text already in the document's text layer, black is everything else drawn on it, and red boxes "
+              + "mark lettering the text layer is missing.";
 
     /// <summary>
     /// The page whose diagnostic picture to show. A number rather than a picker, because what
@@ -595,8 +599,11 @@ public sealed partial class DoctorViewModel(IDoctorService service, IUiDispatche
     {
         var previous = Documents.ToDictionary(d => d.Path, StringComparer.OrdinalIgnoreCase);
 
+        // Only what is still to do. A document whose flagged pages have all been recovered has
+        // nothing left to tick, and listing several hundred of them looked like several hundred jobs
+        // waiting. The headline still counts them.
         Documents.Clear();
-        foreach (var finding in standing.Findings)
+        foreach (var finding in standing.Findings.Where(f => f.OutstandingPages > 0))
         {
             if (previous.TryGetValue(finding.Path, out var row))
             {
@@ -621,7 +628,11 @@ public sealed partial class DoctorViewModel(IDoctorService service, IUiDispatche
             Documents.Add(added);
         }
 
+        if (SelectedDocument is not null && !Documents.Contains(SelectedDocument))
+            SelectedDocument = null;
+
         RecountSelected();
+        OnPropertyChanged(nameof(ExplainHint));
 
         var summary = standing.Summary;
         Headline = summary.DocumentsAudited == 0
