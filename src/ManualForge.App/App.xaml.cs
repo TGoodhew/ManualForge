@@ -131,9 +131,15 @@ public partial class App : Application
         Program.OnRedirected(args => DispatcherQueue.TryEnqueue(() =>
         {
             BringForward();
-            var files = LaunchArguments.Parse(Program.ArgumentsOf(args)).Add;
-            if (files.Count > 0)
-                _ = Adds.AddAsync(files);
+            var later = LaunchArguments.Parse(Program.ArgumentsOf(args));
+
+            // A folder given to a later launch, as the README says, unless the window is busy with another.
+            if (StartFolder.Choose(later.Start, null, null) is { } other
+                && Library.IsIdle && Doctor.IsIdle && Search.IsIdle && !Adds.IsWorking)
+                Library.Folder = other;
+
+            if (later.Add.Count > 0)
+                _ = Adds.AddAsync(later.Add);
         }));
     }
 

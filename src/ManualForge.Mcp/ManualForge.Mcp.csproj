@@ -19,4 +19,10 @@
     <ProjectReference Include="..\ManualForge.Core\ManualForge.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- What the server tells the client is worth testing directly: it is the whole of how Claude
+         learns to use this library. -->
+    <InternalsVisibleTo Include="ManualForge.Core.Tests" />
+  </ItemGroup>
+
 </Project>

@@ -448,6 +448,9 @@ first time, on the library the installer recorded. To open it on another folder 
 & "$env:LOCALAPPDATA\Programs\ManualForge\ManualForge.App.exe" D:\Manuals
 ```
 
+ManualForge runs one window. Starting it again brings that window forward instead, on the folder
+given if there is one, unless the window is busy with a run, an audit, a repair or an index.
+
 A build from source puts the app in `app\ManualForge.App.exe` instead. The bottom of the window says
 which version is running.
 
@@ -480,6 +483,9 @@ Once connected (see [Connect Claude and other apps](#connect-claude-and-other-ap
 
 ManualForge also works alongside [GPIB-MCP](https://github.com/TGoodhew/GPIB-MCP), whose
 `manual_search` is better when the instrument model is known. Each works without the other.
+
+When Claude downloads a manual for you, ManualForge tells it to add it with `manualforge add` (see
+[Add manuals](#add-manuals)), so it is copied in, made searchable and indexed in one step.
 
 #### Citations you can click
 
@@ -621,7 +627,9 @@ For working on ManualForge, or installing it without the installer.
 - The [Visual C++ Redistributable](https://learn.microsoft.com/cpp/windows/latest-supported-vc-redist)
   14.40 or later, which ONNX Runtime needs
 - For the GPU, which is optional but about ten times faster: an NVIDIA card and a current driver
-- To build the installer: [Inno Setup 6](https://jrsoftware.org/isinfo.php) (`winget install JRSoftware.InnoSetup`)
+- To build the installer: [Inno Setup 6](https://jrsoftware.org/isinfo.php) (`winget install JRSoftware.InnoSetup`),
+  and Visual Studio 2026 with **Desktop development with C++** and a Windows 11 SDK, for the
+  Explorer menu's handler (`src\ManualForge.ExplorerMenu`) and its package (`makeappx`)
 
 ### 1. Build
 
@@ -629,11 +637,23 @@ For working on ManualForge, or installing it without the installer.
 git clone https://github.com/TGoodhew/ManualForge.git
 cd ManualForge
 dotnet build
-dotnet test        # optional: about 700 tests, under a minute, no GPU or network needed
+dotnet test        # optional: about 760 tests, under a minute, no GPU or network needed
 ```
 
 To build the installer, run `./tools/build-installer.ps1`. It publishes the program into one folder,
 pins the runtimes it chains in, and writes `artifacts\installer\package\ManualForge-Setup-<version>.exe`.
+
+- **Signing:** `-SignScript <path>`, or `MANUALFORGE_SIGN_SCRIPT`, names a script that signs and
+  timestamps the files it is given, and fails if it can't. With it, the build signs ManualForge's own
+  programs, the Explorer menu's package, Setup and the uninstaller. The release builds use Artifact
+  Signing, as The Schnauzer Group LLC.
+- **An unsigned build** works, with one difference. Windows registers only a package whose signature
+  it trusts, so an unsigned build has no **Add to ManualForge library** on the first right-click menu,
+  only **Send to › ManualForge library**. The package's `Publisher`, in
+  `installer\explorer-menu\AppxManifest.xml`, must be exactly the subject of the certificate that
+  signs it.
+- **The Explorer menu's handler** can be tried without registering anything:
+  `dotnet run tools/probe-explorer-menu.cs -- <folder with the DLL and the app> [file.pdf]`.
 `./tools/invoke-sandbox-test.ps1` then installs, checks and uninstalls it in Windows Sandbox, and closes
 the sandbox afterwards. `./tools/fresh-install-test.ps1` tests an installer on a PC, end to end.
 
@@ -695,6 +715,10 @@ manualforge gpu        # "Active provider" says TensorRt or Cuda on a GPU; if it
 
 Then connect the AI apps with `manualforge setup mcp` (see
 [Connect Claude and other apps](#connect-claude-and-other-apps)).
+
+A build from source has no Explorer entries; `manualforge add` and `app\ManualForge.App.exe --add <files>`
+do the same job. For Send To, put a shortcut to `app\ManualForge.App.exe --add` in
+`shell:sendto`.
 
 To update, pull the new source and run the three publish commands again. Publishing fails while the
 MCP server is running, so first quit Claude Desktop and any Claude Code session using it, or stop it

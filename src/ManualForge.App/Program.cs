@@ -68,8 +68,8 @@ public static class Program
     }
 
     /// <summary>
-    /// The arguments of a handed-over launch. An unpackaged app's launch arguments are its whole
-    /// command line, program name and all, as one string.
+    /// The arguments of a handed-over launch. An unpackaged app's launch arguments come as one string,
+    /// which can start with the program's own name; that is left out.
     /// </summary>
     public static IReadOnlyList<string> ArgumentsOf(AppActivationArguments args)
     {
@@ -89,7 +89,11 @@ public static class Program
             var arguments = new string[count];
             for (var i = 0; i < count; i++)
                 arguments[i] = Marshal.PtrToStringUni(Marshal.ReadIntPtr(argv, i * IntPtr.Size))!;
-            return arguments;
+
+            // The program's own name first, when it is there, is not an argument.
+            return arguments.Length > 0 && arguments[0].EndsWith(".exe", StringComparison.OrdinalIgnoreCase)
+                ? arguments[1..]
+                : arguments;
         }
         finally
         {

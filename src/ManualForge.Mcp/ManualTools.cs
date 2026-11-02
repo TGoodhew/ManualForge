@@ -314,6 +314,19 @@ public sealed class ManualTools(ManualLibraryContext library, PageLinks links)
         "see a cited page (e.g. 'show me that page' or 'open it here'), open its link in that pane " +
         "yourself. Keep the markdown link in the citation either way, since not every app has one.";
 
+    /// <summary>
+    /// How to add a manual the user has downloaded (#89). Claude sessions had been copying files into
+    /// the library and chaining run, doctor, repair and index by hand; `add` is those in one step,
+    /// and it knows a manual the library already holds. The command line is beside this server.
+    /// </summary>
+    internal static string AddingAdvice(string libraryRoot, string commandLine) =>
+        $"To add manuals the user has downloaded to this library ({libraryRoot}), run " +
+        $"\"{commandLine}\" add \"<file.pdf>\" [more files]. It copies them into the library, leaves " +
+        "out any it already holds, and makes them searchable: OCR, the audit, recovering missed text " +
+        "and the index, in one step. Don't copy files into the library or chain run, doctor, repair " +
+        "and index by hand. The user can also right-click PDFs in Explorer and choose Add to " +
+        "ManualForge library.";
+
     [McpServerTool(Name = "library_status")]
     [Description(
         "Report what the manual library holds, how current the search index is, which files are in " +

@@ -257,6 +257,17 @@ public sealed class ManualToolsTests : IDisposable
             StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void TheServerTellsClaudeToAddDownloadedManualsWithAdd()
+    {
+        // Claude sessions had copied manuals in and chained four commands by hand (#89).
+        var advice = ManualTools.AddingAdvice(@"D:\Manuals", @"C:\Programs\ManualForge\manualforge.exe");
+
+        Assert.Contains(@"""C:\Programs\ManualForge\manualforge.exe"" add ""<file.pdf>""", advice);
+        Assert.Contains(@"(D:\Manuals)", advice);
+        Assert.Contains("Don't copy files into the library", advice);
+    }
+
     public void Dispose()
     {
         Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
