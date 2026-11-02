@@ -51,6 +51,12 @@ WizardStyle=modern
 ; (PrepareToInstall, below). This catches anything else holding the program's files. The clients
 ; start the new server the next time they need it.
 CloseApplications=yes
+#ifdef Sign
+; tools\build-installer.ps1 -SignScript defines Sign and the manualforge sign tool; the uninstaller Setup
+; writes on the user's PC is signed here too, when it is built.
+SignTool=manualforge
+SignedUninstaller=yes
+#endif
 RestartApplications=no
 ChangesEnvironment=yes
 ; Has Windows refresh its icons when setup and the uninstaller finish. The program keeps one path
@@ -87,6 +93,9 @@ Source: "{#StageDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs c
 
 [Icons]
 Name: "{userprograms}\{#AppName}"; Filename: "{app}\{#AppExe}"; WorkingDir: "{app}"; AppUserModelID: "TGoodhew.ManualForge"; Comment: "Search your manuals"
+; Send To > ManualForge library (#89). Explorer passes the whole selection after --add, in one launch; the
+; window copies the files into the library and does the rest. On Windows 11 it is under Show more options.
+Name: "{usersendto}\{#AppName} library"; Filename: "{app}\{#AppExe}"; Parameters: "--add"; WorkingDir: "{app}"; Comment: "Add these manuals to the ManualForge library"
 
 [Registry]
 Root: HKCU; Subkey: "Software\ManualForge"; Flags: uninsdeletekey

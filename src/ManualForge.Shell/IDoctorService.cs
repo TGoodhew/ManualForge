@@ -57,10 +57,14 @@ public interface IDoctorService
     /// </summary>
     Task<DoctorStanding> ReadAsync(string root, CancellationToken cancellationToken);
 
-    /// <summary>Audits the library, changing nothing but the findings database.</summary>
+    /// <summary>
+    /// Audits the library, or of it only <paramref name="paths"/> when they are given, changing nothing
+    /// but the findings database.
+    /// </summary>
     Task<DoctorStanding> AuditAsync(
         string root,
         DoctorOptions options,
+        IReadOnlyList<string>? paths,
         IProgress<DoctorProgress>? progress,
         CancellationToken cancellationToken);
 
@@ -120,11 +124,12 @@ public sealed class DoctorService(
     public async Task<DoctorStanding> AuditAsync(
         string root,
         DoctorOptions options,
+        IReadOnlyList<string>? paths,
         IProgress<DoctorProgress>? progress,
         CancellationToken cancellationToken)
     {
         await new DoctorRunner(_loggerFactory.CreateLogger<DoctorRunner>())
-            .RunAsync(root, options, storePath: null, force: false, progress, cancellationToken)
+            .RunAsync(root, options, storePath: null, force: false, progress, cancellationToken, paths)
             .ConfigureAwait(false);
 
         return Read(root);

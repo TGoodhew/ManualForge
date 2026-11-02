@@ -102,11 +102,12 @@ public sealed class LibraryService(
         string root,
         ClassificationPolicy policy,
         bool dryRun,
+        IReadOnlyList<string>? documents,
         IProgress<FileOutcome>? files,
         IProgress<PipelinePageProgress>? pages,
         CancellationToken cancellationToken)
     {
-        var libraryOptions = OptionsFor(root, policy, dryRun);
+        var libraryOptions = OptionsFor(root, policy, dryRun, documents);
         var engine = await EngineAsync(cancellationToken).ConfigureAwait(false);
 
         var rasteriser = new PageRasteriser(new RasterOptions { Dpi = _options.Dpi });
@@ -143,11 +144,20 @@ public sealed class LibraryService(
         return outcomes;
     }
 
-    private LibraryOptions OptionsFor(string root, ClassificationPolicy policy, bool dryRun) => new()
+    public Task<IReadOnlyList<AddResult>> AddAsync(
+        string root, IReadOnlyList<string> sources, CancellationToken cancellationToken) =>
+        Task.Run(
+            () => new LibraryAdder(_loggerFactory.CreateLogger<LibraryAdder>())
+                .Add(OptionsFor(root, new ClassificationPolicy(), dryRun: false), sources, cancellationToken),
+            cancellationToken);
+
+    private static LibraryOptions OptionsFor(
+        string root, ClassificationPolicy policy, bool dryRun, IReadOnlyList<string>? documents = null) => new()
     {
         Root = root,
         Policy = policy,
         DryRun = dryRun,
+        Documents = documents?.Select(Path.GetFullPath).ToArray() ?? [],
     };
 
     private async Task<PaddleOcrEngine> EngineAsync(CancellationToken cancellationToken)

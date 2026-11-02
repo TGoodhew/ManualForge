@@ -306,7 +306,10 @@ internal static class RunCommand
             return 0;
 
         var outstanding = LibraryProcessor.OpenStore(options);
-        var pending = outstanding.Outstanding().Count;
+        // Only those --documents names, when it names any: the run does no others, and counting the
+        // whole library's said "Processing 40 file(s)" for an add of two (#89).
+        var pending = outstanding.Outstanding().Count(r =>
+            options.Documents.Count == 0 || options.Documents.Contains(r.Path, StringComparer.OrdinalIgnoreCase));
         outstanding.Dispose();
 
         if (pending == 0)

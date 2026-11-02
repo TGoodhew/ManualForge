@@ -24,6 +24,28 @@ public static class StartFolder
 }
 
 /// <summary>
+/// The app's command line: <c>[folder] [--add file…]</c>. Everything after <c>--add</c> is a file to
+/// add to the library (#89), which is how Explorer's Send To passes the selection; what comes before
+/// it is what <see cref="StartFolder.Choose"/> looks at. Kept apart, because a folder sent to the
+/// library would otherwise be opened as the library.
+/// </summary>
+public sealed record LaunchArguments(IReadOnlyList<string> Start, IReadOnlyList<string> Add)
+{
+    public const string AddSwitch = "--add";
+
+    public static LaunchArguments Parse(IEnumerable<string> arguments)
+    {
+        ArgumentNullException.ThrowIfNull(arguments);
+
+        var all = arguments.ToArray();
+        var at = Array.FindIndex(all, a => string.Equals(a, AddSwitch, StringComparison.OrdinalIgnoreCase));
+        return at < 0
+            ? new LaunchArguments(all, [])
+            : new LaunchArguments(all[..at], all[(at + 1)..].Where(a => !string.IsNullOrWhiteSpace(a)).ToArray());
+    }
+}
+
+/// <summary>
 /// What the app remembers between runs, in <c>%LOCALAPPDATA%\ManualForge\app.json</c>: for now only
 /// the folder it was closed on. Unreadable or missing settings are no settings.
 /// </summary>

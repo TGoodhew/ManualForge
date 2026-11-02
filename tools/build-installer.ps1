@@ -16,18 +16,27 @@
        download that doesn't match.
     3. Compiles installer\ManualForge.iss with Inno Setup 6 into artifacts\installer\package.
 
+    With -SignScript, ManualForge's own programs are signed after publishing (step 1), and Inno Setup
+    signs the Setup program and the uninstaller it builds (step 3), all with that script. It is given
+    the files to sign, and must sign and timestamp them and fail if it cannot. The signing account and
+    its tools live outside this repository, so the script's path is given here, or in
+    MANUALFORGE_SIGN_SCRIPT, never written into it. Without one the build is unsigned, and says so.
+    Other publishers' DLLs are left as they are.
+
     Nothing NVIDIA publishes is in the package: the installer runs `manualforge setup gpu`, which
     fetches it from NVIDIA (docs/measurements/installer-gpu-libraries.md).
 
 .EXAMPLE
     ./tools/build-installer.ps1
     ./tools/build-installer.ps1 -SkipCompile    # publish and pin only, without Inno Setup
+    ./tools/build-installer.ps1 -SignScript C:\signing\Sign-Files.ps1
 #>
 [CmdletBinding()]
 param(
     [string] $Iscc = (@("${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe", "$env:ProgramFiles\Inno Setup 6\ISCC.exe",
                         "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe") | Where-Object { Test-Path $_ } | Select-Object -First 1),
-    [switch] $SkipCompile
+    [switch] $SkipCompile,
+    [string] $SignScript = $env:MANUALFORGE_SIGN_SCRIPT
 )
 
 $ErrorActionPreference = 'Stop'
@@ -57,6 +66,21 @@ if ($LASTEXITCODE -ne 0) { throw 'Publishing ManualForge.App failed.' }
 Get-ChildItem $stage -Recurse -Filter *.pdb | Remove-Item -Force
 foreach ($required in 'manualforge.exe', 'ManualForge.Mcp.exe', 'ManualForge.App.exe', 'ManualForge.App.pri', 'Assets\AppIcon.ico') {
     if (-not (Test-Path (Join-Path $stage $required))) { throw "The published folder has no $required." }
+}
+
+# ManualForge's own programs only: everyone else's DLLs are theirs to sign, and most already are.
+if ($SignScript) {
+    if (-not (Test-Path $SignScript)) { throw "No signing script at $SignScript." }
+    Write-Step 'Signing ManualForge''s own programs'
+    $own = Get-ChildItem $stage -File | Where-Object { $_.Name -match '^(manualforge\.exe|ManualForge\..+\.(exe|dll))$' } |
+        Where-Object { (Get-AuthenticodeSignature $_.FullName).Status -ne 'Valid' } | ForEach-Object FullName
+    & $SignScript @own
+    $unsigned = $own | Where-Object { (Get-AuthenticodeSignature $_).Status -ne 'Valid' }
+    if ($unsigned) { throw "Still not validly signed: $($unsigned -join ', ')" }
+    Write-Host ("   {0} file(s), signed by {1}" -f $own.Count, (Get-AuthenticodeSignature $own[0]).SignerCertificate.Subject)
+}
+else {
+    Write-Warning 'Not signed: no -SignScript and no MANUALFORGE_SIGN_SCRIPT.'
 }
 
 $version = (& (Join-Path $stage 'manualforge.exe') version | Select-Object -First 1) -replace '^manualforge\s+', ''
@@ -158,12 +182,23 @@ $defines = @{
     GpuCorePins       = $gpuCorePins
     TensorRtPins      = $tensorRtPins
 }
-$arguments = @($defines.GetEnumerator() | ForEach-Object { "/D$($_.Key)=$($_.Value)" }) + (Join-Path $repo 'installer\ManualForge.iss')
+$arguments = @($defines.GetEnumerator() | ForEach-Object { "/D$($_.Key)=$($_.Value)" })
+if ($SignScript) {
+    # Inno Setup runs this for Setup and for the uninstaller it builds into it; $f is the file, $q a quote.
+    $shell = (Get-Process -Id $PID).Path
+    $arguments += '/DSign', "/Smanualforge=`$q$shell`$q -NoProfile -ExecutionPolicy Bypass -File `$q$((Resolve-Path $SignScript).Path)`$q `$f"
+}
+$arguments += Join-Path $repo 'installer\ManualForge.iss'
 & $Iscc /Q @arguments
 if ($LASTEXITCODE -ne 0) { throw 'Inno Setup failed.' }
 
 $package = Get-ChildItem $packageDir -Filter 'ManualForge-Setup-*.exe' | Sort-Object LastWriteTime -Descending | Select-Object -First 1
 Write-Host ("   {0}: {1:N0} MB" -f $package.Name, ($package.Length / 1MB))
+if ($SignScript) {
+    $signature = Get-AuthenticodeSignature $package.FullName
+    if ($signature.Status -ne 'Valid') { throw "$($package.Name) is not validly signed ($($signature.Status))." }
+    Write-Host "   signed by $($signature.SignerCertificate.Subject), timestamped by $($signature.TimeStamperCertificate.Subject)"
+}
 
 # A clean Windows to try it in, with Windows Sandbox enabled; the sandbox is given no GPU (vGPU off), so
 # this tests the CPU path, the runtimes, the Start menu entry and uninstalling, and it is thrown away

@@ -51,6 +51,9 @@ public sealed partial class MainPage : Page
 
             await ShareFolderAsync();
         };
+        // Manuals sent from Explorer: show them, on the tab that says what is happening to them.
+        Adds.Arrived += (_, _) => Tabs.SelectedItem = AddedTab;
+
         Unloaded += (_, _) => _gpuTimer.Stop();
     }
 
@@ -74,6 +77,8 @@ public sealed partial class MainPage : Page
     public SearchViewModel Search => App.Search;
 
     public DoctorViewModel Doctor => App.Doctor;
+
+    public AddQueueViewModel Adds => App.Adds;
 
     /// <summary>
     /// Puts the doctor's diagnostic picture on screen. The bytes come from the view model; a

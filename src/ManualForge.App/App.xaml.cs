@@ -24,6 +24,9 @@ public partial class App : Application
 
     public static DoctorViewModel Doctor { get; private set; } = null!;
 
+    /// <summary>Files added from Explorer or a later launch, and the work on them (#89).</summary>
+    public static AddQueueViewModel Adds { get; private set; } = null!;
+
     private static RunLog? _log;
     private static LibraryService? _service;
 
@@ -85,13 +88,15 @@ public partial class App : Application
         Library = new LibraryViewModel(_service, dispatcher: dispatcher);
         Search = new SearchViewModel(new SearchService(_log.Factory), dispatcher);
         Doctor = new DoctorViewModel(new DoctorService(_log.Factory), dispatcher);
+        Adds = new AddQueueViewModel(_service, Library, Doctor, Search, LibraryToAddTo);
 
         // A folder given on the command line, so the application can be started on one and so this
         // window can be driven by something other than a person with a mouse; else the folder it was
         // last closed on; else the library the installer recorded.
+        var launch = LaunchArguments.Parse(Environment.GetCommandLineArgs().Skip(1));
         var settings = AppSettings.Load(AppSettings.DefaultPath);
         var folder = StartFolder.Choose(
-            Environment.GetCommandLineArgs().Skip(1),
+            launch.Start,
             settings.LastFolder,
             Environment.GetEnvironmentVariable("MANUALFORGE_LIBRARY"));
         if (folder is not null)
@@ -117,7 +122,58 @@ public partial class App : Application
         };
 
         Window.Activate();
+
+        if (launch.Add.Count > 0)
+            _ = Adds.AddAsync(launch.Add);
+
+        // Later launches hand their command line here and exit (Program). Each arrives on a
+        // background thread, so it is taken to the window's.
+        Program.OnRedirected(args => DispatcherQueue.TryEnqueue(() =>
+        {
+            BringForward();
+            var files = LaunchArguments.Parse(Program.ArgumentsOf(args)).Add;
+            if (files.Count > 0)
+                _ = Adds.AddAsync(files);
+        }));
     }
+
+    /// <summary>
+    /// The library the installer recorded, read from where it keeps it rather than from this process's
+    /// copy of the environment, which is as old as the process; else the folder the window is on.
+    /// </summary>
+    private static string? LibraryToAddTo()
+    {
+        foreach (var recorded in new[]
+                 {
+                     Environment.GetEnvironmentVariable("MANUALFORGE_LIBRARY", EnvironmentVariableTarget.User),
+                     Environment.GetEnvironmentVariable("MANUALFORGE_LIBRARY"),
+                 })
+        {
+            if (!string.IsNullOrWhiteSpace(recorded) && Directory.Exists(recorded))
+                return recorded;
+        }
+
+        return Library.Folder;
+    }
+
+    /// <summary>Restores the window if it was minimised and brings it to the front.</summary>
+    private static void BringForward()
+    {
+        if (Window.AppWindow.Presenter is Microsoft.UI.Windowing.OverlappedPresenter
+            {
+                State: Microsoft.UI.Windowing.OverlappedPresenterState.Minimized,
+            } presenter)
+        {
+            presenter.Restore();
+        }
+
+        Window.Activate();
+        SetForegroundWindow(WindowHandle);
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    [return: System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.Bool)]
+    private static extern bool SetForegroundWindow(nint window);
 }
 
 /// <summary>Posts back onto the window's queue, which is first-in-first-out.</summary>

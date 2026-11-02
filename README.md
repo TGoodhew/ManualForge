@@ -180,7 +180,8 @@ It then:
 - installs the .NET 10 Desktop Runtime, the Windows App Runtime 1.8 and the Visual C++
   Redistributable, but only those the PC doesn't already have, or has in a version too old;
 - downloads the GPU libraries you chose, and the OCR models (about 25 MB);
-- adds **ManualForge** to the Start menu.
+- adds **ManualForge** to the Start menu, and **ManualForge library** to Explorer's **Send to** menu
+  (see [Add manuals](#add-manuals)).
 
 Everything it downloads comes from its publisher and is checked against a SHA-256 before it is used.
 The GPU libraries go into `%LOCALAPPDATA%\ManualForge\gpu`. They are not put on `PATH`, and the
@@ -375,6 +376,34 @@ manualforge index  D:\Manuals     # build or update the search index
   differently from plain CUDA, mostly words the reading was unsure of, some better and some worse.
   `--engine cuda` turns it off. `manualforge gpu` shows which one is in use.
 
+### Add manuals
+
+To add manuals you have downloaded, select them in Explorer, right-click, and choose **Send to ›
+ManualForge library**. On Windows 11, Send to is under **Show more options**. From a terminal:
+
+```powershell
+manualforge add "C:\Users\me\Downloads\HP 8563E Service.pdf" "C:\Users\me\Downloads\11721A.pdf"
+```
+
+Each one is copied into the top of the library, and the download is left where it was. Then the same
+work is done on just those files as the sequence above: `run`, `doctor`, `repair --include-scans` and
+`index`. When it finishes, search finds them.
+
+- **Already there:** a manual the library already has, byte for byte, is not copied again. That
+  includes one in a subfolder, and one ManualForge has already made searchable, whose original is in
+  `_Originals`.
+- **A name already taken** by a different manual gets ` (2)`, ` (3)` and so on, as Explorer names a
+  copy. Nothing in the library is ever overwritten.
+- **Which library:** the one the installer recorded (`MANUALFORGE_LIBRARY`). `--library <folder>`
+  chooses another. `--copy-only` copies and stops.
+- **In the app:** Send to opens ManualForge if it isn't running, and shows the **Added** tab. Each
+  manual is copied in at once, and the rest waits until anything already running (a run, an audit, a
+  repair or an index) finishes, so two jobs never share the GPU. Its progress shows where a run's
+  always does, and on the Doctor and Search tabs. If a step is cancelled, the manuals are already in
+  the library: **Retry** carries on with them.
+- **One window:** ManualForge now runs one window at a time. Starting it again, or sending it more
+  manuals, brings the open window forward instead of opening another.
+
 ### One file
 
 ```powershell
@@ -430,6 +459,7 @@ The app does the same work with live progress:
   it to show it in its folder or copy its path
 - in the Problems tab, Trim forgets manuals you have deleted: from the work queue, the audit and the
   search index at once, as the three `--trim-missing` options below do
+- in the Added tab, follow manuals sent to the library from Explorer (see [Add manuals](#add-manuals))
 
 Cancel keeps every page already recognised, so running again carries on. Hover over any control to
 see what it does.
@@ -529,7 +559,8 @@ The uninstaller:
 - stops ManualForge if it is running, and says which app started each MCP server;
 - takes ManualForge out of every AI app it was added to, and puts back any entry it replaced. An app's
   settings that nothing else has changed since go back exactly as they were;
-- removes the GPU libraries ManualForge downloaded, the program, and the Start menu entry. It also
+- removes the GPU libraries ManualForge downloaded, the program, the Start menu entry and the Send to
+  entry. It also
   removes the `PATH` entry and the `MANUALFORGE_LIBRARY` variable, if it was the one that set them;
 - asks whether to remove the models, logs and what ManualForge learned about your GPU
   (`%LOCALAPPDATA%\ManualForge`);
