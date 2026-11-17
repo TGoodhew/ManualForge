@@ -138,6 +138,11 @@ public sealed class PartlyScannedTests : IDisposable
         Assert.Equal(TextClass.PartlyScanned, outcome.TextClass);
         Assert.Equal([3, 4, 5, 6], engine.PagesSeen.Order());
 
+        // Four read now, two left alone, none taken from an earlier attempt: the run's speed is
+        // reported over the four.
+        Assert.Equal(4, outcome.PagesRecognised);
+        Assert.Equal(2, outcome.PagesLeftAlone);
+
         // The scans can now be searched, and the typeset pages read exactly as they did.
         for (var page = 3; page <= 6; page++)
             Assert.Contains("HEWLETT", TextOfPage(path, page), StringComparison.Ordinal);

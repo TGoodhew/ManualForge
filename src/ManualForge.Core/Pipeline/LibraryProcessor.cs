@@ -120,6 +120,12 @@ public sealed record FileOutcome(
     /// measured over (#63): a page that was already cached costs no recognition.
     /// </summary>
     public int PagesRecognised { get; init; }
+
+    /// <summary>
+    /// Pages deliberately not read: the typeset pages of a partly scanned file, which keep the text
+    /// they came with. Neither recognised in this run nor taken from an earlier one.
+    /// </summary>
+    public int PagesLeftAlone { get; init; }
 }
 
 /// <summary>
@@ -791,6 +797,10 @@ public sealed class LibraryProcessor(
             // counted against what the cache held when the run began.
             var recognised = Math.Max(0, report.Pages.Count - (cachedBeforeRun ?? report.ResumedPages));
 
+            // The typeset pages of a partly scanned file, which were never meant to be read: neither
+            // recognised now nor taken from an earlier attempt.
+            var leftAlone = scansOnly.Count > 0 ? Math.Max(0, report.SourcePageCount - scansOnly.Count) : 0;
+
             // Step 4: verify before anything is replaced. Opens cleanly, same page count, and a
             // text layer that is actually there.
             var verifications = _builder!.Verify(outputPath, report.SourcePageCount);
@@ -806,12 +816,12 @@ public sealed class LibraryProcessor(
                 {
                     return NothingToRecognise(store, record, readAgain, stopwatch, flattened,
                         $"Its {scansOnly.Count} scanned page(s) hold no lettering the recogniser could read, " +
-                        "so it is left as it was.") with { PagesRecognised = recognised };
+                        "so it is left as it was.") with { PagesRecognised = recognised, PagesLeftAlone = leftAlone };
                 }
 
                 return Failed(store, record, "The output carried no text layer.", stopwatch,
                     words: report.TotalWordsWritten, deviation: worstDeviation, flattened: flattened)
-                    with { PagesRecognised = recognised };
+                    with { PagesRecognised = recognised, PagesLeftAlone = leftAlone };
             }
 
             // Adding a text layer must change nothing else about the document. Compare the output's
@@ -831,7 +841,7 @@ public sealed class LibraryProcessor(
                     + string.Join(" ", structuralChanges.Take(3));
                 return Failed(store, record, detail, stopwatch,
                     words: report.TotalWordsWritten, deviation: worstDeviation, flattened: flattened)
-                    with { PagesRecognised = recognised };
+                    with { PagesRecognised = recognised, PagesLeftAlone = leftAlone };
             }
 
             // Pages left without text for a reason in the page itself (#21). The document is still
@@ -859,7 +869,7 @@ public sealed class LibraryProcessor(
                     _logger.LogWarning("{Path}: {Detail}", path, kept);
                     return Outcome(record, FileStatus.Completed, 0, worstDeviation, flattened, stopwatch.Elapsed,
                         kept, signatureInvalidated: false, pagesWithoutText: gapPages)
-                        with { PagesRecognised = recognised };
+                        with { PagesRecognised = recognised, PagesLeftAlone = leftAlone };
                 }
             }
 
@@ -879,14 +889,14 @@ public sealed class LibraryProcessor(
                 _logger.LogInformation("Dry run: {Path} would gain {Words} words{Renamed}", path, report.TotalWordsWritten,
                     destination == path ? "" : $" and become {Path.GetFileName(destination)}");
                 return Outcome(record, FileStatus.Classified, report.TotalWordsWritten, worstDeviation, flattened, stopwatch.Elapsed, null)
-                    with { RenamedTo = destination == path ? null : destination, PagesRecognised = recognised };
+                    with { RenamedTo = destination == path ? null : destination, PagesRecognised = recognised, PagesLeftAlone = leftAlone };
             }
 
             if (readAgain)
             {
                 return ReplaceEarlierCopy(store, options, record, outputPath, destination, report.TotalWordsWritten,
                     worstDeviation, flattened, stopwatch, signatureInvalidated, gapNote, gapPages)
-                    with { PagesRecognised = recognised };
+                    with { PagesRecognised = recognised, PagesLeftAlone = leftAlone };
             }
 
             // Step 5: move the original aside, then put the new file in its place. Both are moves
@@ -931,7 +941,7 @@ public sealed class LibraryProcessor(
 
             return Outcome(record, FileStatus.Completed, report.TotalWordsWritten, worstDeviation, flattened,
                 stopwatch.Elapsed, gapNote, signatureInvalidated, gapPages)
-                with { RenamedTo = destination == path ? null : destination, PagesRecognised = recognised };
+                with { RenamedTo = destination == path ? null : destination, PagesRecognised = recognised, PagesLeftAlone = leftAlone };
         }
         catch (OperationCanceledException)
         {

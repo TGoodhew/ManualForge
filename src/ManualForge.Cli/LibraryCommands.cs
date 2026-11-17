@@ -342,7 +342,7 @@ internal static class RunCommand
             // recognising ahead, a file's own elapsed time is only what assembly took - a fraction
             // of a second for a manual whose pages were already recognised - and printing that
             // reads as though the whole document took it.
-            donePages += outcome.PageCount;
+            donePages += outcome.PageCount - outcome.PagesLeftAlone;
             var rate = runWatch.Elapsed.TotalMinutes > 0 ? donePages / runWatch.Elapsed.TotalMinutes : 0;
 
             Console.WriteLine(succeeded
@@ -369,7 +369,12 @@ internal static class RunCommand
         // The speed is over the pages this run recognised. Pages reused from an earlier attempt cost no
         // recognition, and counting them once made a re-read served from the cache report 9,870 pages
         // a minute, which became the card's speed (#63).
-        var completedPages = outcomes.Where(o => o.Status == FileStatus.Completed).Sum(o => (long)o.PageCount);
+        //
+        // The typeset pages of a partly scanned file were neither, and are said so rather than
+        // passed off as reused.
+        var completed = outcomes.Where(o => o.Status == FileStatus.Completed).ToArray();
+        var leftAlone = completed.Sum(o => (long)o.PagesLeftAlone);
+        var completedPages = completed.Sum(o => (long)o.PageCount) - leftAlone;
         var recognised = outcomes.Sum(o => (long)o.PagesRecognised);
         var minutes = runWatch.Elapsed.TotalMinutes;
         if (completedPages > 0 && minutes > 0)
@@ -379,7 +384,8 @@ internal static class RunCommand
                 (recognised == 0 ? "; all from earlier attempts, so no speed was measured"
                     : recognised >= completedPages ? $", {recognised / minutes:F1} pages/min"
                     : $"; {recognised:N0} recognised now, at {recognised / minutes:F1} pages/min, " +
-                      $"the rest from earlier attempts"));
+                      $"the rest from earlier attempts") +
+                (leftAlone > 0 ? $"; {leftAlone:N0} typeset page(s) left with their own text" : ""));
         }
 
         // Too few pages and the rate is mostly model loading; it would make every estimate wrong.
