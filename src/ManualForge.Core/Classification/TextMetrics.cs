@@ -38,6 +38,12 @@ public sealed record PageTextMetrics(
     /// </summary>
     public bool HasTextLayer => GlyphCount > 0;
 
+    /// <summary>
+    /// The page is a scan with no text layer of its own (<see cref="ScannedPages"/>), whatever the
+    /// rest of the document carries.
+    /// </summary>
+    public bool IsScanWithoutText { get; init; }
+
     public static PageTextMetrics Empty(int pageNumber) => new(pageNumber, 0, 0, 0, 0, 0);
 }
 

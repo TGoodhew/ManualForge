@@ -165,7 +165,11 @@ public sealed class LibraryProcessor(
 
         if (options.RetrySkipped)
         {
-            var reset = store.ResetSkipped();
+            // Only the named files, when files are named: reconsidering one file should not
+            // reclassify the whole library and queue whatever a newer classifier now picks out.
+            var reset = options.Documents.Count == 0
+                ? store.ResetSkipped()
+                : store.ResetSkipped(options.Documents);
             _logger.LogInformation("Reconsidering {Count} previously skipped file(s)", reset);
         }
 
@@ -479,10 +483,14 @@ public sealed class LibraryProcessor(
     /// result and needs no recognition at all; a strip-and-redo is recognised from a copy with the
     /// old text removed, which is not the image the original renders; an owner-password file is
     /// recognised from a flattened rebuild.
+    ///
+    /// Nor a partly scanned file: the pipeline recognises every page of what it is given, and only
+    /// the scans of such a file are to be read. It takes the serial path, which reads just those.
     /// </summary>
     private static bool CanRecogniseAhead(FileRecord record)
-        => (record.Action == ClassAction.Ocr
-            || (record.Action == ClassAction.ReadAgain && record.OriginalPath is not null))
+        => record.TextClass != TextClass.PartlyScanned
+           && (record.Action == ClassAction.Ocr
+               || (record.Action == ClassAction.ReadAgain && record.OriginalPath is not null))
            && record.PageCount > 0
            && record.Blocker is ModificationBlocker.None or ModificationBlocker.Signature;
 
@@ -722,7 +730,27 @@ public sealed class LibraryProcessor(
             //
             // Checked here, on whatever is about to be recognised, so it covers a stripped
             // document whose strip silently left a page alone as well as a misclassification.
-            var pagesWithText = TextLayerProbe.PagesWithHiddenText(source);
+            //
+            // A document that is partly typeset and partly scanned has only its scans recognised,
+            // and a scan in the sense meant here draws no hidden text at all, so the check is made
+            // page by page as they are chosen. The typeset pages may carry whatever they like:
+            // nothing is written onto them.
+            IReadOnlyList<int> scansOnly = [];
+            if (record.TextClass == TextClass.PartlyScanned)
+            {
+                scansOnly = ScannedPages.In(source);
+                if (scansOnly.Count == 0)
+                {
+                    return NothingToRecognise(store, record, readAgain, stopwatch, flattened,
+                        "None of its pages is a scan without a text layer after all, so there is nothing to recognise.");
+                }
+
+                _logger.LogInformation(
+                    "{Path} is partly scanned: recognising {Scans} of its {Pages} pages, leaving the rest as they are",
+                    path, scansOnly.Count, record.PageCount);
+            }
+
+            var pagesWithText = scansOnly.Count > 0 ? [] : TextLayerProbe.PagesWithHiddenText(source);
             if (pagesWithText.Count > 0)
             {
                 var detail =
@@ -744,7 +772,7 @@ public sealed class LibraryProcessor(
                 outputPath,
                 // Keyed on the library path, not on `source`, which for a flattened or stripped
                 // document is a temporary file with a new name on every attempt.
-                new BuildOptions { Overwrite = true, CacheKey = path, SourceIdentity = sourceIdentity },
+                new BuildOptions { Overwrite = true, CacheKey = path, SourceIdentity = sourceIdentity, Pages = scansOnly },
                 progress: null,
                 cancellationToken).GetAwaiter().GetResult();
 
@@ -771,6 +799,16 @@ public sealed class LibraryProcessor(
 
             if (totalLetters == 0)
             {
+                // Scans in an otherwise typeset document are often a photograph or a drawing with
+                // no lettering in it. Finding none is an answer, not a failure: the file is left as
+                // it was.
+                if (scansOnly.Count > 0)
+                {
+                    return NothingToRecognise(store, record, readAgain, stopwatch, flattened,
+                        $"Its {scansOnly.Count} scanned page(s) hold no lettering the recogniser could read, " +
+                        "so it is left as it was.") with { PagesRecognised = recognised };
+                }
+
                 return Failed(store, record, "The output carried no text layer.", stopwatch,
                     words: report.TotalWordsWritten, deviation: worstDeviation, flattened: flattened)
                     with { PagesRecognised = recognised };
@@ -965,6 +1003,29 @@ public sealed class LibraryProcessor(
         return Outcome(record, FileStatus.Completed, words, worstDeviation, flattened, stopwatch.Elapsed, gapNote,
             signatureInvalidated, gapPages)
             with { RenamedTo = destination == path ? null : destination };
+    }
+
+    /// <summary>
+    /// Leaves a partly scanned file as it is because it turned out to have nothing to recognise.
+    /// A new file is skipped with the reason; one being read again goes back to finished, since the
+    /// copy in the library is still the one made from it.
+    /// </summary>
+    private FileOutcome NothingToRecognise(
+        JobStore store, FileRecord record, bool readAgain, Stopwatch stopwatch, bool flattened, string reason)
+    {
+        var path = record.Path;
+        _pageCache.Clear(path);
+        _logger.LogInformation("{Path}: {Reason}", path, reason);
+
+        if (readAgain)
+        {
+            store.SetAction(path, ClassAction.Ocr);
+            store.SetStatus(path, FileStatus.Completed, reason);
+            return Outcome(record, FileStatus.Completed, 0, 0, flattened, stopwatch.Elapsed, reason);
+        }
+
+        store.SetStatus(path, FileStatus.Skipped, reason);
+        return Outcome(record, FileStatus.Skipped, 0, 0, flattened, stopwatch.Elapsed, reason);
     }
 
     /// <summary>Which of these pages of a file draw any text, visible or not.</summary>
