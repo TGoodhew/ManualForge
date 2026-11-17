@@ -73,6 +73,7 @@ public sealed partial class ClassSummaryRow(TextClass textClass, int files, long
         TextClass.ProbablyGood => "Clean enough to be doubtful about, not bad enough to condemn.",
         TextClass.GoodText => "Text is there and clean. Leave it alone.",
         TextClass.Unreadable => "The file could not be read at all.",
+        TextClass.PartlyScanned => "Typeset pages and scanned ones. OCR reads only the scans.",
         _ => string.Empty,
     };
 

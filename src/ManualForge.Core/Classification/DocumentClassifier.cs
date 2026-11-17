@@ -31,6 +31,16 @@ public enum TextClass
 
     /// <summary>The file could not be read at all.</summary>
     Unreadable,
+
+    /// <summary>
+    /// Clean text on some pages, scans with no text layer on others: typically an old scan
+    /// reissued with a typeset cover and notice in front of it. Only the scanned pages are
+    /// recognised; the typeset ones are left exactly as they are.
+    ///
+    /// Last in the list, not beside <see cref="ImageOnly"/>, so that the numbers of the classes
+    /// before it stay as they were.
+    /// </summary>
+    PartlyScanned,
 }
 
 /// <summary>What to do with a class of file.</summary>
@@ -111,7 +121,8 @@ public sealed record DocumentClassification(
     IReadOnlyList<PageTextMetrics> Pages,
     string? Error = null)
 {
-    public bool HasExistingText => Class is TextClass.SuspectText or TextClass.ProbablyGood or TextClass.GoodText;
+    public bool HasExistingText => Class is TextClass.SuspectText or TextClass.ProbablyGood or TextClass.GoodText
+        or TextClass.PartlyScanned;
 }
 
 /// <summary>
@@ -161,7 +172,10 @@ public sealed class DocumentClassifier(ClassifierOptions? options = null)
                     // Letters, not words: this counts the glyphs the page draws whatever they
                     // decode to, which is how a text layer we cannot read is told apart from no
                     // text layer at all.
-                    metrics.Add(TextMetricsCalculator.Measure(pageNumber, words, page.Letters.Count));
+                    metrics.Add(TextMetricsCalculator.Measure(pageNumber, words, page.Letters.Count) with
+                    {
+                        IsScanWithoutText = ScannedPages.IsScanWithoutText(page),
+                    });
                 }
                 catch (Exception)
                 {
@@ -203,6 +217,20 @@ public sealed class DocumentClassifier(ClassifierOptions? options = null)
         var commonShare = wordLike == 0 ? 0 : commonWords / (double)wordLike;
 
         var (textClass, rationale) = Decide(alphanumericPerPage, glyphsPerPage, plausibleRatio, commonShare);
+
+        // A text layer worth keeping is judged on the pages that have one. An average over the
+        // sample says nothing about the pages that have none: one dense notice page can carry a
+        // sample of seven bare scans over the image-only threshold, and the scans were then never
+        // recognised. Those pages are recognised on their own and the typeset ones left alone.
+        // Garbled or unreadable text is not promoted: what to do with those is its own decision.
+        var scanned = metrics.Count(m => m.IsScanWithoutText);
+        if (scanned > 0 && textClass is TextClass.GoodText or TextClass.ProbablyGood)
+        {
+            textClass = TextClass.PartlyScanned;
+            rationale =
+                $"{scanned} of {metrics.Count} sampled pages are scans with no text layer, while the others carry " +
+                $"text ({rationale.TrimEnd('.')}). The scanned pages are recognised and the rest left as they are.";
+        }
 
         return new DocumentClassification(
             path, pageCount, metrics.Count,
@@ -307,6 +335,9 @@ public sealed class ClassificationPolicy
             [TextClass.ProbablyGood] = ClassAction.Skip,
             [TextClass.GoodText] = ClassAction.Skip,
             [TextClass.Unreadable] = ClassAction.Skip,
+
+            // Also nothing to lose: only pages with no text layer are recognised.
+            [TextClass.PartlyScanned] = ClassAction.Ocr,
         };
 
         if (actions is null)

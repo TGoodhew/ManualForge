@@ -365,13 +365,24 @@ public sealed class JobStore : IDisposable
     /// way to revisit a skipped file is to delete the state database, which throws away the history
     /// of everything else as well.
     /// </summary>
-    public int ResetSkipped()
+    public int ResetSkipped() => Reset(null);
+
+    /// <summary>The same, for the named files only.</summary>
+    public int ResetSkipped(IEnumerable<string> paths)
+    {
+        ArgumentNullException.ThrowIfNull(paths);
+        return paths.Select(Path.GetFullPath).Distinct(StringComparer.OrdinalIgnoreCase).Sum(p => Reset(p));
+    }
+
+    private int Reset(string? path)
     {
         using var command = _connection.CreateCommand();
         command.CommandText =
             "UPDATE files SET status = 'Discovered', page_count = 0, error = NULL, updated_utc = $u " +
-            "WHERE status = 'Skipped'";
+            "WHERE status = 'Skipped'" + (path is null ? "" : " AND path = $p");
         command.Parameters.AddWithValue("$u", Now());
+        if (path is not null)
+            command.Parameters.AddWithValue("$p", path);
         return command.ExecuteNonQuery();
     }
 

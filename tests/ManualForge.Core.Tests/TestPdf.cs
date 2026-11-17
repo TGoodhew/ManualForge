@@ -218,6 +218,52 @@ internal static class TestPdf
         return path;
     }
 
+    /// <summary>
+    /// An old scan reissued with typeset pages in front of it, the way Agilent reissued HP's
+    /// manuals: <paramref name="typesetPages"/> pages of printed prose and no image, then
+    /// <paramref name="scannedPages"/> pages that are each one image covering the whole page and no
+    /// text at all. <paramref name="hiddenTypeset"/> makes the typeset text invisible, as it would
+    /// be if the front pages were themselves an OCR'd scan.
+    /// </summary>
+    public static string PartlyScanned(string path, int typesetPages = 2, int scannedPages = 4, bool hiddenTypeset = false)
+    {
+        using (var document = NewDocument(path, typesetPages + scannedPages, rotation: 0, out var directory))
+        {
+            var imagePath = Path.Combine(directory, "full-page-scan.png");
+            if (!File.Exists(imagePath))
+                File.WriteAllBytes(imagePath, GreyscalePng(85, 110));
+
+            for (var i = typesetPages; i < document.PageCount; i++)
+            {
+                using var gfx = XGraphics.FromPdfPage(document.Pages[i]);
+                using var image = XImage.FromFile(imagePath);
+                gfx.DrawImage(image, 0, 0, WidthPt, HeightPt);
+            }
+
+            document.Save(path);
+        }
+
+        using var toEdit = PdfSharp.Pdf.IO.PdfReader.Open(path, PdfSharp.Pdf.IO.PdfDocumentOpenMode.Modify);
+        const string line = "This documentation supports a product that previously shipped under the Hewlett Packard name";
+        for (var i = 0; i < typesetPages; i++)
+        {
+            var page = toEdit.Pages[i];
+            AddTestFont(page);
+
+            var content = new StringBuilder($"BT /TestF1 10 Tf {(hiddenTypeset ? "3 Tr " : "")}72 720 Td ");
+            for (var row = 0; row < 20; row++)
+                content.Append(CultureInfo.InvariantCulture, $"({line}) Tj 0 -14 Td ");
+            content.Append("ET\n");
+            page.Contents.AppendContent().CreateStream(Encoding.ASCII.GetBytes(content.ToString()));
+        }
+
+        var temporary = path + ".tmp";
+        toEdit.Save(temporary);
+        toEdit.Dispose();
+        File.Move(temporary, path, overwrite: true);
+        return path;
+    }
+
     /// <summary>Helvetica, as an indirect font object the page's resources call /TestF1.</summary>
     public static PdfDictionary AddTestFont(PdfPage page)
     {
