@@ -56,6 +56,9 @@ public sealed class McpRegistrations
     public McpChange Register(McpClient client, McpServerEntry entry)
     {
         ArgumentNullException.ThrowIfNull(client);
+        if (_entries.FirstOrDefault(e => e.Client == client.Id) is { } recorded)
+            FollowMove(client, recorded);
+
         var previous = client.Snapshot();
         var change = client.Register(entry);
         if (change.Changed && _entries.All(e => e.Client != client.Id))
@@ -77,14 +80,78 @@ public sealed class McpRegistrations
             if (recorded is null)
                 continue;
 
-            var change = recorded.Previous is null ? client.Unregister() : client.Restore(recorded.Previous);
-            removals.Add(new McpRemoval(client, change, recorded.Previous is not null));
+            var (now, undone) = FollowMove(client, recorded);
+            if (now is null || undone is { Changed: false, Note: not null })
+            {
+                // The entry was only in the file the client no longer reads, and is out of it now; or it
+                // couldn't be taken out of there, and the record stays as it was.
+                removals.Add(new McpRemoval(client, undone ?? new McpChange(false, null), recorded.Previous is not null));
+                continue;
+            }
+
+            var change = now.Previous is null ? client.Unregister() : client.Restore(now.Previous);
+            if (undone is { Changed: true } && !change.Changed && change.Note is null)
+                change = undone;
+            removals.Add(new McpRemoval(client, change, now.Previous is not null));
             if (change.Changed || change.Note is null)
-                _entries.Remove(recorded);
+                _entries.Remove(now);
         }
 
         Save();
         return removals;
+    }
+
+    /// <summary>
+    /// An earlier install registered with a client whose settings have since moved (#98: current Store
+    /// builds of Claude Desktop keep them in <c>Claude-Data</c>, and no longer read the old file). The entry is
+    /// taken out of the old file, as removing ManualForge would have done. When the client took its settings
+    /// with it, ManualForge's entry is in the new file too, so the record follows it there, still holding the
+    /// entry from before ManualForge; otherwise the record is forgotten and the next registration starts
+    /// afresh. Returns the record as it now stands, null when forgotten, and what was done to the old file.
+    /// When the old file can't be changed, everything is left as it was, so nothing is lost.
+    /// </summary>
+    private (McpRegistration? Now, McpChange? Undone) FollowMove(McpClient client, McpRegistration recorded)
+    {
+        if (string.IsNullOrEmpty(recorded.Location) || SameLocation(recorded.Location, client.Location)
+            || client.At(recorded.Location) is not { } old)
+        {
+            return (recorded, null);
+        }
+
+        var there = old.Snapshot();
+        var carried = there is not null && string.Equals(there, client.Snapshot(), StringComparison.Ordinal);
+
+        McpChange? undone = null;
+        if (there is not null)
+        {
+            undone = recorded.Previous is null ? old.Unregister() : old.Restore(recorded.Previous);
+            if (!undone.Changed && undone.Note is not null)
+                return (recorded, undone);
+        }
+
+        _entries.Remove(recorded);
+        var now = carried ? recorded with { Location = client.Location } : null;
+        if (now is not null)
+            _entries.Add(now);
+        Save();
+        return (now, undone);
+    }
+
+    private static bool SameLocation(string a, string b)
+    {
+        static string Normalise(string location)
+        {
+            try
+            {
+                return Path.GetFullPath(location).TrimEnd('\\');
+            }
+            catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+            {
+                return location;   // not a path: "claude mcp (user scope)"
+            }
+        }
+
+        return string.Equals(Normalise(a), Normalise(b), StringComparison.OrdinalIgnoreCase);
     }
 
     private void Save()

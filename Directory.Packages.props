@@ -39,6 +39,8 @@
     <!-- Reads how much of the process's GPU memory Windows has moved out to system RAM, which is how
          a run tuning its pages in flight sees that it has gone too far (#31). -->
     <PackageVersion Include="System.Diagnostics.PerformanceCounter" Version="10.0.12" />
+    <!-- setup mcp reads the folder a running Claude Desktop uses, from its command line, through WMI (#98). -->
+    <PackageVersion Include="System.Management" Version="10.0.12" />
     <!-- Logging. The JSON formatter is in Serilog itself, so writing JSON lines needs no
          formatting package on top of these three. -->
     <PackageVersion Include="Serilog" Version="4.4.0" />
