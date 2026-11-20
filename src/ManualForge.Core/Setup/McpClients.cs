@@ -18,16 +18,55 @@ public sealed record McpEnvironment(
     Func<string, bool> OnPath,
     Func<string, IReadOnlyList<string>, (int ExitCode, string Output)> Run)
 {
-    public static McpEnvironment FromProcess() => new(
-        Variable("USERPROFILE", Environment.SpecialFolder.UserProfile),
-        Variable("APPDATA", Environment.SpecialFolder.ApplicationData),
-        Variable("LOCALAPPDATA", Environment.SpecialFolder.LocalApplicationData),
-        Variable("ProgramFiles", Environment.SpecialFolder.ProgramFiles),
-        IsOnPath,
-        RunProcess);
+    /// <summary>An environment variable, or null when it isn't set.</summary>
+    public Func<string, string?> Variable { get; init; } = _ => null;
 
-    private static string Variable(string name, Environment.SpecialFolder fallback) =>
+    /// <summary>
+    /// The claude.exe processes running now, with their command lines, so Claude Desktop's own
+    /// <c>--user-data-dir</c> can say where its settings are (#98). Empty when none, or when they can't be read.
+    /// </summary>
+    public Func<IReadOnlyList<RunningProcess>> RunningClaude { get; init; } = () => [];
+
+    public static McpEnvironment FromProcess() => new(
+        Folder("USERPROFILE", Environment.SpecialFolder.UserProfile),
+        Folder("APPDATA", Environment.SpecialFolder.ApplicationData),
+        Folder("LOCALAPPDATA", Environment.SpecialFolder.LocalApplicationData),
+        Folder("ProgramFiles", Environment.SpecialFolder.ProgramFiles),
+        IsOnPath,
+        RunProcess)
+    {
+        Variable = name => Environment.GetEnvironmentVariable(name) is { Length: > 0 } value ? value : null,
+        RunningClaude = FindRunningClaude,
+    };
+
+    private static string Folder(string name, Environment.SpecialFolder fallback) =>
         Environment.GetEnvironmentVariable(name) is { Length: > 0 } value ? value : Environment.GetFolderPath(fallback);
+
+    private static List<RunningProcess> FindRunningClaude()
+    {
+        var found = new List<RunningProcess>();
+        try
+        {
+            using var searcher = new System.Management.ManagementObjectSearcher(
+                "SELECT ExecutablePath, CommandLine FROM Win32_Process WHERE Name = 'claude.exe'");
+            using var results = searcher.Get();
+            foreach (var process in results)
+            {
+                using (process)
+                {
+                    if (process["ExecutablePath"] is string path && process["CommandLine"] is string commandLine)
+                        found.Add(new RunningProcess(path, commandLine));
+                }
+            }
+        }
+        catch (Exception ex) when (ex is System.Management.ManagementException or System.Runtime.InteropServices.COMException
+                                       or UnauthorizedAccessException)
+        {
+            // No WMI, or not allowed to ask: what is on disk decides instead.
+        }
+
+        return found;
+    }
 
     private static bool IsOnPath(string command) =>
         (Environment.GetEnvironmentVariable("PATH") ?? "")
@@ -46,6 +85,9 @@ public sealed record McpEnvironment(
         return (process.ExitCode, output);
     }
 }
+
+/// <summary>A process that is running: its program and its whole command line.</summary>
+public sealed record RunningProcess(string ExecutablePath, string CommandLine);
 
 /// <summary>What every client is told: run this program, with the library here.</summary>
 public sealed record McpServerEntry(string Command, string Library)
@@ -105,6 +147,12 @@ public abstract class McpClient(string id, string displayName)
 
     /// <summary>What to tell the user afterwards, when the client reads its settings only at start.</summary>
     public virtual string? RestartNote => null;
+
+    /// <summary>
+    /// This client's settings at another location: where an earlier install registered it, when the client
+    /// has since moved them (Claude Desktop, #98). Null for a client whose settings don't move.
+    /// </summary>
+    public virtual McpClient? At(string location) => null;
 
     /// <summary>
     /// Copies a settings file aside the first time ManualForge changes it: beside it, named for ManualForge,
@@ -358,6 +406,20 @@ public class JsonMcpClient(
 
         return false;
     }
+}
+
+/// <summary>
+/// Claude Desktop, whose <c>claude_desktop_config.json</c> is in its settings folder. It reads the file only
+/// when it starts, and rewrites it while it runs, so a change needs a full quit from the tray.
+/// </summary>
+public sealed class ClaudeDesktopClient(string id, string displayName, string settingsDir, Func<bool> installed)
+    : JsonMcpClient(id, displayName, Path.Combine(settingsDir, ConfigName), installed, "mcpServers", typed: false,
+        "Quit Claude Desktop from its tray icon and start it again to pick it up.")
+{
+    public const string ConfigName = "claude_desktop_config.json";
+
+    public override McpClient At(string location) =>
+        new ClaudeDesktopClient(Id, DisplayName, Path.GetDirectoryName(location)!, () => File.Exists(location));
 }
 
 /// <summary>
@@ -631,20 +693,17 @@ public static class McpClients
         ArgumentNullException.ThrowIfNull(environment);
         var home = environment.UserProfile;
 
-        // The Microsoft Store build keeps its settings in its package's virtualised AppData, not %APPDATA%.
-        var store = Directory.Exists(Path.Combine(environment.LocalAppData, "Packages"))
-            ? Directory.GetDirectories(Path.Combine(environment.LocalAppData, "Packages"), "Claude_*").FirstOrDefault()
-            : null;
+        // The Microsoft Store build doesn't use %APPDATA%: see ClaudeDesktopStore.
+        var store = ClaudeDesktopStore.TryFind(environment, out var storeSettings);
 
         return
         [
-            new JsonMcpClient("claude-desktop-store", "Claude Desktop (Microsoft Store)",
-                Path.Combine(store ?? Path.Combine(environment.LocalAppData, "Packages", "Claude_"), "LocalCache", "Roaming", "Claude", "claude_desktop_config.json"),
-                () => store is not null, "mcpServers", typed: false, "Quit Claude Desktop and start it again to pick it up."),
-            new JsonMcpClient("claude-desktop", "Claude Desktop",
-                Path.Combine(environment.AppData, "Claude", "claude_desktop_config.json"),
-                () => Directory.Exists(Path.Combine(environment.AppData, "Claude")), "mcpServers", typed: false,
-                "Quit Claude Desktop and start it again to pick it up."),
+            new ClaudeDesktopClient("claude-desktop-store", "Claude Desktop (Microsoft Store)",
+                storeSettings ?? Path.Combine(environment.LocalAppData, "Packages", "Claude_", "LocalCache", "Roaming", "Claude"),
+                () => store),
+            new ClaudeDesktopClient("claude-desktop", "Claude Desktop",
+                Path.Combine(environment.AppData, "Claude"),
+                () => Directory.Exists(Path.Combine(environment.AppData, "Claude"))),
             new ClaudeCodeClient(environment),
             new JsonMcpClient("vscode", "VS Code",
                 Path.Combine(environment.AppData, "Code", "User", "mcp.json"),

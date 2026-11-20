@@ -161,8 +161,11 @@ function Find-McpReferences {
         "$env:USERPROFILE\.gemini", "$env:USERPROFILE\.codex", "$env:USERPROFILE\.continue",
         "$env:USERPROFILE\.lmstudio", "$env:USERPROFILE\.mcp.json", "$env:LOCALAPPDATA\Microsoft\VisualStudio"
     )
-    $places += Get-ChildItem "$env:LOCALAPPDATA\Packages" -Directory -Filter 'Claude*' -ErrorAction SilentlyContinue |
-        ForEach-Object { Join-Path $_.FullName 'LocalCache\Roaming\Claude' }
+    $places += Get-StorePackages | ForEach-Object { Join-Path $_.FullName 'LocalCache\Roaming\Claude' }
+    # Current Store builds keep their settings in Claude-Data (#98). Only the config there: the rest of the
+    # folder is the app's browser profile.
+    $places += Get-ChildItem "$env:LOCALAPPDATA\Claude-Data" -Directory -ErrorAction SilentlyContinue |
+        ForEach-Object { Join-Path $_.FullName 'claude_desktop_config.json' }
     $files = foreach ($place in $places) {
         if (Test-Path $place -PathType Leaf) { Get-Item $place }
         elseif (Test-Path $place) {
@@ -174,9 +177,35 @@ function Find-McpReferences {
         ForEach-Object { $_.FullName })
 }
 
+# The Store build of Claude Desktop's package folders, under either of its two identities.
+function Get-StorePackages {
+    Get-ChildItem "$env:LOCALAPPDATA\Packages" -Directory -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -match '^(AnthropicPBC\.)?Claude_[^_]+$' }
+}
+
+# Where the Store build of Claude Desktop keeps its settings, found as ClaudeDesktopStore finds it (#98):
+# the running app's --user-data-dir, then CLAUDE_USER_DATA_DIR, then Claude-Data\<family> when it exists or
+# the old folder's marker says the data moved, else the package's old LocalCache folder. Null without it.
+function Get-StoreSettingsDir {
+    $packages = @(Get-StorePackages)
+    foreach ($process in @(Get-CimInstance Win32_Process -Filter "Name='claude.exe'" -ErrorAction SilentlyContinue)) {
+        if ($process.ExecutablePath -notmatch '\\WindowsApps\\(AnthropicPBC\.)?Claude_') { continue }
+        if ($process.CommandLine -match '--user-data-dir=(?:"([^"]+)"|(\S+))') {
+            return $(if ($Matches[1]) { $Matches[1] } else { $Matches[2] }).TrimEnd('\')
+        }
+    }
+    if (-not $packages) { return $null }
+    if ($env:CLAUDE_USER_DATA_DIR) { return $env:CLAUDE_USER_DATA_DIR.Trim().Trim('"') }
+    $family = $packages[0].Name
+    $moved = Join-Path "$env:LOCALAPPDATA\Claude-Data" $family.ToLowerInvariant()
+    $old = Join-Path $packages[0].FullName 'LocalCache\Roaming\Claude'
+    if ((Test-Path $moved) -or (Get-ChildItem $old -Force -Filter '.user-data-left.*' -ErrorAction SilentlyContinue)) { return $moved }
+    return $old
+}
+
 # Every settings file `manualforge setup mcp` can write, as McpClients knows them.
 function Get-McpConfigFiles {
-    $store = Get-ChildItem "$env:LOCALAPPDATA\Packages" -Directory -Filter 'Claude_*' -ErrorAction SilentlyContinue | Select-Object -First 1
+    $store = Get-StoreSettingsDir
     $files = [ordered]@{
         'claude-desktop'  = "$env:APPDATA\Claude\claude_desktop_config.json"
         'claude-code'     = "$env:USERPROFILE\.claude.json"
@@ -190,7 +219,7 @@ function Get-McpConfigFiles {
         'lmstudio'        = "$env:USERPROFILE\.lmstudio\mcp.json"
         'continue'        = "$env:USERPROFILE\.continue\mcpServers\manualforge.yaml"
     }
-    if ($store) { $files['claude-desktop-store'] = Join-Path $store.FullName 'LocalCache\Roaming\Claude\claude_desktop_config.json' }
+    if ($store) { $files['claude-desktop-store'] = Join-Path $store 'claude_desktop_config.json' }
     return $files
 }
 
@@ -471,7 +500,7 @@ try {
     foreach ($candidate in @("$env:LOCALAPPDATA\AnthropicClaude", "$env:LOCALAPPDATA\Programs\Microsoft VS Code", "$env:ProgramFiles\Microsoft VS Code")) {
         if (Test-Path $candidate) { $appsPresent += $candidate }
     }
-    $appsPresent += Get-ChildItem "$env:LOCALAPPDATA\Packages" -Directory -Filter 'Claude*' -ErrorAction SilentlyContinue | ForEach-Object FullName
+    $appsPresent += Get-StorePackages | ForEach-Object FullName
     Save-Text 'ai-apps-before.txt' (@('AI apps found:') + $appsPresent + @('', 'Files naming ManualForge.Mcp:') + $mcpBefore)
 
     $existing = Get-Leftovers

@@ -247,8 +247,31 @@ claude mcp add manualforge --scope user --env MANUALFORGE_LIBRARY="D:\Manuals" -
 ```
 
 The config file is at `%APPDATA%\Claude\claude_desktop_config.json`, unless Claude Desktop came from
-the Microsoft Store. Then it is at
-`%LOCALAPPDATA%\Packages\Claude_<id>\LocalCache\Roaming\Claude\claude_desktop_config.json`.
+the Microsoft Store:
+
+| Store build | Config file |
+|-------------|-------------|
+| Current | `%LOCALAPPDATA%\Claude-Data\<package>\claude_desktop_config.json` |
+| Older, not yet updated | `%LOCALAPPDATA%\Packages\<package>\LocalCache\Roaming\Claude\claude_desktop_config.json` |
+
+`<package>` is the Store package's family name: `Claude_pzs8sxrjxfjjc` (lower case under `Claude-Data`) or
+`AnthropicPBC.Claude_fnn82j28hfe8t`. When a Store build updates, it moves its data to `Claude-Data` and
+stops reading the old file, though the file stays where it was. Setting `CLAUDE_USER_DATA_DIR` overrides
+the folder. Anthropic doesn't document any of this
+([anthropics/claude-code#26073](https://github.com/anthropics/claude-code/issues/26073), #98).
+
+`manualforge setup mcp` finds the right file itself. If an earlier version registered ManualForge in the
+old file, setting up again moves the entry. To find the folder by hand, look at the running Claude
+Desktop's `--user-data-dir`:
+
+```powershell
+(Get-CimInstance Win32_Process -Filter "Name='claude.exe'").CommandLine |
+    Select-String -Pattern '--user-data-dir=(?:"([^"]+)"|(\S+))' | Select-Object -First 1 |
+    ForEach-Object { $g = $_.Matches[0].Groups; if ($g[1].Success) { $g[1].Value } else { $g[2].Value } }
+```
+
+Claude Desktop rewrites the file while it runs, so quit it from its tray icon before editing, and start it
+again afterwards.
 
 ### Updating
 
